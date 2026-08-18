@@ -1,0 +1,71 @@
+# orknux-extension
+
+Extending [orknux-server](https://github.com/michjak-szymanski/orknux-server):
+the library you write a plugin against, and the tool that turns it into the one
+file the server takes.
+
+```
+plugin/              @orknux/plugin — the library and the orknux-plugin CLI
+examples/teammates/  a plugin that builds, in the style the server's template uses
+```
+
+A plugin is JavaScript loaded into an installation to give workflows functions
+the platform does not ship: one ES module, one default export extending
+`OrknuxPlugin`, evaluated in a sandbox with no network, no filesystem and no
+module resolution. What it declares becomes functions every workspace can call.
+
+[plugin/README.md](plugin/README.md) is how to write one. This file is how to
+work on the library itself.
+
+## Working here
+
+There is no Node on the development machine. Everything goes through the compose
+`dev` service:
+
+```
+docker compose run --rm dev npm install      # also builds the CLI, via prepare
+docker compose run --rm dev npm test
+docker compose run --rm dev npm run typecheck
+docker compose run --rm dev npm run example  # builds examples/teammates
+```
+
+`npm install` builds the library on its way through, because the example and the
+tests run the CLI by the name npm links it under — and npm will not link a bin
+whose file is not there yet.
+
+## What the tests are for
+
+`plugin/test/bundle.test.js` is the one that matters. It bundles a plugin the
+way the CLI does and then loads the result, which is the only thing that proves
+the promise this library makes: that importing `@orknux/plugin` does not break
+the check the server does.
+
+The server checks the default export **by prototype** — `exported.prototype
+instanceof globalThis.OrknuxPlugin`. A library that bundled its own copy of that
+class would pass every type and fail that check. So `plugin/src/contract.ts`
+exports a *binding* to the global rather than a class, and the fallback beneath
+it — for tests and for `check`, where nothing has defined the globals — is a
+copy of the server's own contract with its wording intact.
+
+**That copy has to track the server.** It lives in `PluginRunner.CONTRACT` in
+orknux-server, along with the loader's own checks; `plugin/src/validate.ts` is
+the same again for `PluginDeclarations.validated`, and `plugin/src/limits.ts`
+holds the numbers both sides enforce. When one of them changes there, it changes
+here, and the tests are written in the server's wording so a rewording shows up
+as a failure rather than as drift.
+
+## Publishing
+
+`plugin/` is the published package; the root is a private workspace root and is
+not. `prepare` builds, `files` ships `dist/` and `types/`, and the version in
+`plugin/package.json` is the one that goes out.
+
+```
+docker compose run --rm dev sh -c "cd plugin && npm publish --access public"
+```
+
+## Licence
+
+Apache-2.0 — see [LICENSE](LICENSE). The server is AGPL-3.0 and this is not,
+deliberately: a few lines of this library end up inlined in every plugin anybody
+builds, and what their plugin is licensed under should be their decision.

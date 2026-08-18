@@ -1,0 +1,15 @@
+{
+  "name": "@orknux/example-teammates",
+  "private": true,
+  "version": "0.0.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "orknux-plugin build src/plugin.ts -o dist/teammates.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@orknux/plugin": "*",
+    "typescript": "^5.9.0"
+  }
+}

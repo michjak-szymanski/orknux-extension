@@ -1,0 +1,58 @@
+{
+  "name": "@orknux/plugin",
+  "version": "0.1.0",
+  "description": "Write plugins for orknux-server in TypeScript, and know before uploading that the server will take them.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "orknux",
+    "plugin",
+    "workflow",
+    "sdk"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/michjak-szymanski/orknux-extension.git",
+    "directory": "plugin"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./tooling": {
+      "types": "./dist/tooling.d.ts",
+      "default": "./dist/tooling.js"
+    },
+    "./globals": {
+      "types": "./types/globals.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "orknux-plugin": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "src",
+    "types",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test test/*.test.js",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "esbuild": "^0.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0"
+  }
+}
