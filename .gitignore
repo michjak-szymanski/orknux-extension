@@ -1,3 +1,6 @@
 node_modules/
 dist/
 *.tsbuildinfo
+
+# IntelliJ generates these per machine; nothing here needs them checked in.
+.idea/
