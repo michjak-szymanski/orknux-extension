@@ -1,5 +1,11 @@
 # @orknux/plugin
 
+[![npm](https://img.shields.io/npm/v/@orknux/plugin?label=npm)](https://www.npmjs.com/package/@orknux/plugin)
+[![CI](https://github.com/michjak-szymanski/orknux-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/michjak-szymanski/orknux-extension/actions/workflows/ci.yml)
+[![plugin API](https://img.shields.io/badge/plugin%20API-1-blue)](https://github.com/michjak-szymanski/orknux-extension/blob/main/plugin/src/limits.ts)
+[![Node](https://img.shields.io/badge/node-%E2%89%A5%2020-brightgreen)](https://github.com/michjak-szymanski/orknux-extension/blob/main/plugin/package.json)
+[![Licence](https://img.shields.io/badge/licence-Apache--2.0-blue)](https://github.com/michjak-szymanski/orknux-extension/blob/main/LICENSE)
+
 Writing plugins for [orknux-server](https://github.com/michjak-szymanski/orknux-server)
 in TypeScript, and knowing before you upload one that the server will take it.
 

@@ -79,3 +79,7 @@ the build rather than the server.
 The version in `plugin/package.json` is the one published. The plugin API version
 it targets is `API_VERSION` in `src/limits.ts`, and the two are unrelated on
 purpose: this package can go out several times against one plugin API.
+
+When `API_VERSION` moves, the `plugin API` badge in both READMEs moves with it.
+It is a static badge — there is nothing to read it off — so it is the one number
+here that can drift without a test noticing.

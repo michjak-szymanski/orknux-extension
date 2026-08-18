@@ -1,5 +1,11 @@
 # orknux-extension
 
+[![CI](https://github.com/michjak-szymanski/orknux-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/michjak-szymanski/orknux-extension/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@orknux/plugin?label=npm)](https://www.npmjs.com/package/@orknux/plugin)
+[![plugin API](https://img.shields.io/badge/plugin%20API-1-blue)](plugin/src/limits.ts)
+[![Node](https://img.shields.io/badge/node-%E2%89%A5%2020-brightgreen)](package.json)
+[![Licence](https://img.shields.io/badge/licence-Apache--2.0-blue)](LICENSE)
+
 Extending [orknux-server](https://github.com/michjak-szymanski/orknux-server):
 the library you write a plugin against, and the tool that turns it into the one
 file the server takes.

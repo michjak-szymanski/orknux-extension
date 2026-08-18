@@ -1,0 +1,49 @@
+name: CI
+
+# Every push and every pull request is built and tested. Publishing is a
+# deliberate act — `npm publish` from a checkout — so nothing here reaches the
+# registry.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+# A second push to the same branch makes the first one's result irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # What the compose service runs, so a green run here means the same
+          # thing it means on a development machine.
+          node-version: '22'
+          cache: npm
+
+      # `prepare` builds the library on the way through, which is what links the
+      # orknux-plugin bin — the example and the tests call it by that name.
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # The suite says the code behaves; this says the toolchain does. It builds
+      # a real plugin with the CLI and lets the CLI decide whether the server
+      # would take it — so a change that quietly stops producing a loadable
+      # bundle fails here rather than on somebody's installation.
+      - name: Build the example
+        run: npm run example
