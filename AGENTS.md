@@ -76,9 +76,11 @@ the build rather than the server.
 
 ## Releasing
 
-The version in `plugin/package.json` is the one published. The plugin API version
-it targets is `API_VERSION` in `src/limits.ts`, and the two are unrelated on
-purpose: this package can go out several times against one plugin API.
+The version in `plugin/package.json` is the one published, and a `v*` tag is what
+publishes it — CI checks that the two agree and refuses the tag if they do not.
+The plugin API version this package targets is `API_VERSION` in `src/limits.ts`,
+and it is unrelated to both on purpose: this package can go out several times
+against one plugin API.
 
 When `API_VERSION` moves, the `plugin API` badge in both READMEs moves with it.
 It is a static badge — there is nothing to read it off — so it is the one number

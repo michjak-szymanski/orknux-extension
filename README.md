@@ -63,8 +63,25 @@ as a failure rather than as drift.
 ## Publishing
 
 `plugin/` is the published package; the root is a private workspace root and is
-not. `prepare` builds, `files` ships `dist/` and `types/`, and the version in
-`plugin/package.json` is the one that goes out.
+not. `prepare` builds, `files` ships `dist/`, `src/` and `types/`, and the
+version in `plugin/package.json` is the one that goes out.
+
+A tag publishes it, and nothing else does:
+
+```
+# plugin/package.json first, then
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+CI refuses a tag whose number does not match `plugin/package.json` — a `v0.2.0`
+tag over a `0.1.0` package would publish `0.1.0` again and say nothing — and
+publishes only after the same commit has typechecked, passed the suite and built
+the example.
+
+It authenticates with an npm automation token in the repository's `NPM_TOKEN`
+secret, so the first release needs two things done by hand: the `@orknux` scope
+has to exist on npm, and the token has to be there. Publishing from a checkout
+still works when it has to:
 
 ```
 docker compose run --rm dev sh -c "cd plugin && npm publish --access public"
