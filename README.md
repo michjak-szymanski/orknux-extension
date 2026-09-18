@@ -12,6 +12,7 @@ file the server takes.
 
 ```
 plugin/              @orknux/plugin — the library and the orknux-plugin CLI
+plugins/             the production plugins: github, slack, teams
 examples/teammates/  a plugin that builds, in the style the server's template uses
 ```
 
@@ -22,6 +23,32 @@ module resolution. What it declares becomes functions every workspace can call.
 
 [plugin/README.md](plugin/README.md) is how to write one. This file is how to
 work on the library itself.
+
+## The plugins
+
+This repository is now the canonical home of the production plugins — they used
+to live in the orknux-server repository. The admin Plugins page loads a plugin
+straight from a raw URL, so each one below can be handed to it as it stands:
+
+**[github](plugins/github/github.js)** verifies that a webhook delivery really
+came from GitHub, by its HMAC signature, and turns GitHub's pull request, review
+comment and push payloads into one flat answer a condition can read.
+
+    https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/github/github.js
+
+**[slack](plugins/slack/slack.js)** answers what a Slack payload alone cannot —
+whether a message is the first reply in its thread, what a permalink points at,
+who a user id is — by asking the server to read Slack through a connection the
+workspace pointed it at.
+
+    https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/slack/slack.js
+
+**[teams](plugins/teams/teams.js)** receives a Microsoft Teams outgoing webhook:
+it verifies the HMAC signature Teams sends with every request, reads the sender
+and the text off an activity, and builds the Graph request bodies and addresses
+a reply is sent with.
+
+    https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/teams/teams.js
 
 ## Working here
 
