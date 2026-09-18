@@ -24,10 +24,11 @@
  * API and is available to any plugin granted the capability; a function that
  * only forwarded its arguments to it would be a name to look up in exchange for
  * nothing. What is here is what the call does not answer on its own - plus the
- * three lookups below, whose wrapping IS the point: an agent has no code and
- * calls functions by name, so `readMessage`, `whoIs` and `mention` exist to be
- * granted to agents as tools. Their descriptions are written for the model
- * that reads them.
+ * three lookups below, whose wrapping IS the point: `readMessage`, `whoIs` and
+ * `mention` exist to be handed to agents, and `tools()` is where that happens.
+ * Each is declared once as a function - workflows call those - and fronted for
+ * agents by an `OrknuxFunctionTool`, so there is one implementation and two
+ * surfaces. Their descriptions are written for the model that reads them.
  *
  * ## Why the connection is an argument and not just a setting
  *
@@ -75,6 +76,22 @@ export default class Slack extends OrknuxPlugin {
 
   capabilities() {
     return ['SLACK_READ_THREAD', 'SLACK_READ_MESSAGE', 'SLACK_READ_USER', 'SLACK_MENTION'];
+  }
+
+  /*
+   * The agents' surface: the three lookups, fronted. A proxy rather than a
+   * copy, so the params, return type and implementation - and any edit made
+   * to the function on the server - stay the function's own.
+   *
+   * `isFirstReply` is deliberately not here. It is a workflow's gate, written
+   * to be a condition; a model reading a thread has better ways to ask.
+   */
+  tools() {
+    return [
+      new OrknuxFunctionTool({ function: 'readMessage' }),
+      new OrknuxFunctionTool({ function: 'whoIs' }),
+      new OrknuxFunctionTool({ function: 'mention' }),
+    ];
   }
 
   functions() {
