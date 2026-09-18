@@ -1,10 +1,13 @@
 /**
- * The contract as the sandbox presents it: two globals, no imports.
+ * The contract as the sandbox presents it: the globals, no imports.
  *
  * This is the other way to write a plugin, and the one the server's own template
  * uses. Nothing is imported, so nothing has to be bundled — the file compiles to
  * itself, and what the editor checks it against is declared here rather than
- * pulled in.
+ * pulled in. The declarations mirror the template the server serves from
+ * `/api/plugins/template`, which is filled in from what that build actually
+ * enforces; these are the same names and fields, pinned to the server this
+ * package tracks.
  *
  *     /// <reference types="@orknux/plugin/globals" />
  *
@@ -17,13 +20,299 @@
  * takes. Everything else wants `import { definePlugin, fn } from '@orknux/plugin'`,
  * which is the same contract with the parameter types carried into `run`.
  *
- * Do not load both in one file. They describe the same two classes, and an
- * import shadows the global of the same name, which reads as a puzzle rather
- * than as the choice it is.
+ * Do not load both in one file. They describe the same classes, and an import
+ * shadows the global of the same name, which reads as a puzzle rather than as
+ * the choice it is.
  */
 
 /** The shape of a value crossing between a workflow and a plugin. */
 type OrknuxValueType = 'string' | 'number' | 'boolean' | 'map' | 'array';
+
+/** What a plugin may ask for. Exactly this list, and nothing else. */
+type OrknuxPermission = 'CONSOLE' | 'INTL' | 'TEXT_ENCODING' | 'PERFORMANCE' | 'TEMPORAL';
+
+/** What a plugin may ask the server to do for it. Exactly this list, and nothing else. */
+type OrknuxCapability =
+  | 'SLACK_READ_THREAD'
+  | 'SLACK_POST_MESSAGE'
+  | 'SLACK_ADD_REACTION'
+  | 'SLACK_READ_MESSAGE'
+  | 'SLACK_READ_USER'
+  | 'SLACK_MENTION'
+  | 'NETWORK_REQUEST';
+
+/** The kinds of connection a workspace can hold. */
+type ConnectionType = 'SLACK' | 'SMTP' | 'HTTP';
+
+/**
+ * A connection the workspace configured, handed to a plugin as a handle.
+ *
+ * An id and a type and nothing else. A plugin cannot open a socket — the
+ * sandbox has no network and no permission can ask for one — so what crosses is
+ * a name for a connection the server will use on the plugin's behalf, never the
+ * connection itself and never its credential.
+ *
+ * The type parameter is what makes `SlackConnection` mean something: it appears
+ * as a member, so a Jira connection is not assignable where a Slack one is
+ * wanted and the mistake is caught where it is written rather than at the first
+ * call.
+ */
+declare class OrknuxConnection<T extends ConnectionType> {
+  readonly id: number;
+  readonly type: T;
+}
+
+/** A Slack connection, which is what the Slack helpers take. */
+type SlackConnection = OrknuxConnection<'SLACK'>;
+
+/** One message in a Slack thread, as much of it as anything here needs. */
+interface SlackThreadMessage {
+  /** Slack's timestamp, which is also the message's id. */
+  ts: string;
+  /** Who wrote it, or the bot that did. Null where Slack said neither. */
+  user: string | null;
+  text: string;
+  /** Whether this is the message the thread hangs under rather than a reply. */
+  parent: boolean;
+}
+
+/** A thread that was read, or why it could not be. */
+type SlackThread =
+  | {
+      messages: SlackThreadMessage[];
+      /**
+       * Slack's own count of the replies under the parent.
+       *
+       * Not `messages.length - 1`: a page holds what was asked for and the
+       * count is of the whole thread. It is the number a filter wants —
+       * `replies === 1` is the first reply.
+       */
+      replies: number;
+      error?: undefined;
+    }
+  | {
+      /**
+       * Why not, in Slack's own words where they were Slack's:
+       * `not_in_channel`, `thread_not_found`, and the rest.
+       *
+       * A refusal rather than a thrown error, so a plugin can say something
+       * useful about it. Check for it before reading `messages`.
+       */
+      error: string;
+      messages?: undefined;
+      replies?: undefined;
+    };
+
+/** A message that was posted — its channel and its own `ts` — or why not. */
+type SlackPost =
+  | { channel: string; ts: string | null; error?: undefined }
+  | { error: string; channel?: undefined; ts?: undefined };
+
+/** Whether a reaction went on. Already-reacted counts as ok. */
+type SlackReaction = { ok: true; error?: undefined } | { error: string; ok?: undefined };
+
+/** The one message a permalink points at, or why it could not be read. */
+type SlackLinkedMessage =
+  | {
+      channel: string;
+      ts: string;
+      user: string | null;
+      text: string;
+      threadTs: string | null;
+      error?: undefined;
+    }
+  | { error: string; text?: undefined };
+
+/** Who a user id belongs to, or why that could not be said. */
+type SlackUserInfo =
+  | {
+      id: string;
+      name: string;
+      realName: string | null;
+      displayName: string | null;
+      bot: boolean;
+      error?: undefined;
+    }
+  | { error: string; id?: undefined };
+
+/** The notation Slack renders as a mention, ready to put in a message. */
+type SlackMention =
+  | { mention: string; id: string; label: string; error?: undefined }
+  | { error: string; mention?: undefined };
+
+/**
+ * What came back, or why nothing did.
+ *
+ * A refusal is data rather than a thrown error, so a plugin can say something
+ * useful about it — and so a condition that could not be decided does not
+ * quietly decide. `json` sits beside `body` where the reply parsed as JSON;
+ * `body` is always the text that arrived.
+ */
+type OrknuxResponse =
+  | {
+      status: number;
+      headers: Record<string, string>;
+      body: string;
+      json?: unknown;
+      error?: undefined;
+    }
+  | {
+      error: string;
+      status?: undefined;
+      headers?: undefined;
+      body?: undefined;
+      json?: undefined;
+    };
+
+/**
+ * What the server will do on a plugin's behalf.
+ *
+ * A plugin has no network and no way to ask for one, so the calls that have to
+ * reach outside are made by the server, under a capability the plugin declares
+ * and a person accepts, and what crosses is data.
+ *
+ * Every call but `log` needs its capability. Without it the call answers
+ * `{ error }` saying so, rather than reaching anything.
+ */
+declare const orknux: {
+  slack: {
+    /**
+     * The messages in one Slack thread, oldest first.
+     *
+     * Needs the `SLACK_READ_THREAD` capability.
+     *
+     * @param connection which Slack to read through. A workspace with two Slack
+     *   connections has two Slacks, and a reply that arrived on one has to be
+     *   read through that one — so pass the connection the trigger says its
+     *   event came in on rather than assuming.
+     * @param channel the channel's id, as the trigger gives it.
+     * @param threadTs the parent's timestamp — Slack's `thread_ts`, which every
+     *   reply in the thread carries.
+     * @param limit how many to fetch; the count comes back whatever this is.
+     *   Capped by the server.
+     */
+    thread(
+      connection: SlackConnection,
+      channel: string,
+      threadTs: string,
+      limit?: number,
+    ): SlackThread;
+
+    /**
+     * Post a message through a connection the plugin was given.
+     *
+     * Needs the `SLACK_POST_MESSAGE` capability.
+     *
+     * @param connection which Slack to post through.
+     * @param channel the channel id, or a `#name`/`@handle` it resolves.
+     * @param text what to say.
+     * @param threadTs when set, the message joins that thread. The answer's
+     *   `ts` is the new message's own timestamp, which `react` hangs on and a
+     *   reply threads onto.
+     */
+    post(
+      connection: SlackConnection,
+      channel: string,
+      text: string,
+      threadTs?: string,
+    ): SlackPost;
+
+    /**
+     * Add an emoji reaction to a message.
+     *
+     * Needs the `SLACK_ADD_REACTION` capability.
+     *
+     * @param ts the message's own `ts` — `post` returns one, and every thread
+     *   message carries one.
+     * @param emoji the short name, with or without the colons.
+     */
+    react(connection: SlackConnection, channel: string, ts: string, emoji: string): SlackReaction;
+
+    /**
+     * The one message a Slack permalink points at.
+     *
+     * Needs the `SLACK_READ_MESSAGE` capability.
+     *
+     * @param link the message's permalink — what a message pasted into another
+     *   message travels as.
+     */
+    message(connection: SlackConnection, link: string): SlackLinkedMessage;
+
+    /**
+     * Who a Slack user id is.
+     *
+     * Needs the `SLACK_READ_USER` capability.
+     *
+     * @param userId the id, bare or as the `<@U…>` notation a message carries
+     *   it in.
+     */
+    user(connection: SlackConnection, userId: string): SlackUserInfo;
+
+    /**
+     * The notation that pings somebody, from their name.
+     *
+     * Needs the `SLACK_MENTION` capability.
+     *
+     * @param name a display name, username, email, id, or a user group's
+     *   handle — with or without the `@`. The answer's `mention` goes into
+     *   `post`'s text as it is.
+     */
+    mention(connection: SlackConnection, name: string): SlackMention;
+  };
+
+  http: {
+    /**
+     * One HTTP request, made by the server on this plugin's behalf.
+     *
+     * Needs the `NETWORK_REQUEST` capability, which is the widest thing a
+     * plugin can ask for and the one an administrator will think hardest
+     * about: it reaches anything the server can. Ask for it only if the plugin
+     * is about an outside service, and say in the plugin's description which
+     * one.
+     *
+     * Where a request may get to is the installation's proxy rules, which this
+     * cannot see and cannot argue with. The body comes back as text; there are
+     * no bytes here, because there is nowhere in the sandbox to put them. An
+     * object body goes out as JSON with the content-type set — the header is
+     * the half people forget — and a string body is passed through untouched.
+     *
+     * @param what the url on its own, or the whole request.
+     */
+    request(
+      what:
+        | string
+        | {
+            url: string;
+            method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD';
+            headers?: Record<string, string>;
+            body?: string | Record<string, unknown> | readonly unknown[];
+          },
+    ): OrknuxResponse;
+
+    /** The same, for the request nearly everybody wants. */
+    get(url: string, headers?: Record<string, string>): OrknuxResponse;
+
+    /** And the other one. An object body goes as JSON, with the header set. */
+    post(
+      url: string,
+      body?: string | Record<string, unknown> | readonly unknown[],
+      headers?: Record<string, string>,
+    ): OrknuxResponse;
+  };
+
+  /**
+   * Not a capability, and never needed granting — nothing is reached by it.
+   * The line crosses as text and the server decides where it goes; a level
+   * below the installation's threshold is dropped where it was written, so
+   * tracing can stay in.
+   */
+  log: {
+    debug(...parts: unknown[]): void;
+    info(...parts: unknown[]): void;
+    warn(...parts: unknown[]): void;
+    error(...parts: unknown[]): void;
+  };
+};
 
 /** A function's declaration, checked as it is constructed. */
 interface OrknuxFunctionDeclared {
@@ -39,6 +328,48 @@ interface OrknuxFunctionDeclared {
   run: (...args: never[]) => unknown;
 }
 
+/** What a parameter may be: exactly what a workspace variable can hold. */
+type OrknuxParameterType = 'string' | 'number' | 'boolean' | 'connection';
+
+/** A parameter's declaration — one thing the plugin has to be told, per workspace. */
+interface OrknuxParameterDeclared {
+  /** An identifier: letters, digits and underscores. */
+  name: string;
+  /** Optional; shown under it on the form somebody fills in. */
+  description?: string;
+  type: OrknuxParameterType;
+  /**
+   * Whether the plugin can work without it. Defaults to true, because a
+   * parameter nobody needs is one nobody should be asked for.
+   *
+   * A workspace that has not answered a required one is marked as such in its
+   * plugin list and against the parameter itself.
+   */
+  required?: boolean;
+  /**
+   * Whether this is asking for something that should not be typed into a form.
+   * Defaults to false.
+   *
+   * Saying true refuses a typed-in value: the only way to answer it is to
+   * point at one of the workspace's variables, which is where this
+   * installation keeps things it encrypts.
+   */
+  secret?: boolean;
+  /**
+   * Which kind of connection, and required when `type` is `'connection'`.
+   *
+   * It narrows the picker to the connections the plugin can actually use: a
+   * Slack plugin handed a Jira connection has been handed a credential it
+   * cannot read and fails at the first call, which is a worse answer than a
+   * list that never offered it.
+   *
+   * What arrives in `settings` is then an `OrknuxConnection<T>` — an id and a
+   * type, never the connection's credential. The sandbox has no network; the
+   * server makes the call.
+   */
+  connectionType?: ConnectionType;
+}
+
 /**
  * What a plugin extends. Defined by the sandbox before this file is evaluated,
  * which is why it is declared rather than imported.
@@ -52,6 +383,49 @@ declare abstract class OrknuxPlugin {
 
   /** What this plugin offers. Defaults to none. */
   functions(): OrknuxFunction[];
+
+  /** What this plugin has to be told before it can work. Defaults to none. */
+  parameters(): OrknuxParameter[];
+
+  /**
+   * Which JavaScript this plugin needs. Defaults to none.
+   *
+   * A plugin embeds its libraries rather than importing them, and a bundle
+   * written for a browser or for Node often expects language features this
+   * sandbox does not switch on. Say which, and whoever loads the plugin is
+   * shown the list and has to accept it. Nothing is relaxed that was not
+   * accepted, and nothing is relaxed for any other plugin.
+   *
+   * Loading is done with none of them granted, because that is the run that
+   * finds out which you want — so the top level of your bundle has to evaluate
+   * without them. Ask for what `run` needs, not for what loading needs.
+   */
+  permissions(): OrknuxPermission[];
+
+  /**
+   * What this plugin asks the server to do on its behalf. Defaults to none.
+   *
+   * Separate from `permissions()`, which only ever turns on a language
+   * builtin. These reach outside — so they are declared apart, granted apart,
+   * and shown apart to whoever accepts the plugin.
+   */
+  capabilities(): OrknuxCapability[];
+
+  /**
+   * What a workspace set those parameters to, keyed by name.
+   *
+   * Frozen, and put there by the server for the length of one call. A
+   * parameter nothing usable is set for is absent rather than null, so
+   * `this.settings.token === undefined` is the question to ask.
+   *
+   * This is the whole of what a plugin knows about the workspace it is running
+   * for. Nothing reaches a plugin that a workspace did not point at, which is
+   * what makes the parameter list a readable answer to "what can this thing
+   * get at?".
+   */
+  readonly settings: Readonly<
+    Record<string, string | number | boolean | OrknuxConnection<ConnectionType> | undefined>
+  >;
 }
 
 /** What each declared function is wrapped in. */
@@ -63,4 +437,16 @@ declare class OrknuxFunction {
   readonly params: { name: string; type: OrknuxValueType }[];
   readonly returnType: OrknuxValueType;
   readonly run: (...args: never[]) => unknown;
+}
+
+/** What each declared parameter is wrapped in. */
+declare class OrknuxParameter {
+  constructor(declaration: OrknuxParameterDeclared);
+
+  readonly name: string;
+  readonly description: string | null;
+  readonly type: OrknuxParameterType;
+  readonly required: boolean;
+  readonly secret: boolean;
+  readonly connectionType: ConnectionType | null;
 }

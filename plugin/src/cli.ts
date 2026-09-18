@@ -15,8 +15,8 @@ import type { Problem } from './validate.js';
  * would take it.
  *
  * Three commands, and the middle one is the point: `check` asks a built bundle
- * the three questions the upload asks, and applies the rules the upload applies,
- * so the answer arrives while the file is still open rather than after a round
+ * the questions the upload asks, and applies the rules the upload applies, so
+ * the answer arrives while the file is still open rather than after a round
  * trip through an administrator.
  *
  * Arguments are parsed by hand. A plugin toolchain that pulled in a parser would
@@ -132,6 +132,34 @@ async function report(file: string): Promise<number> {
     if (declared.description !== null && declared.description !== undefined) {
       process.stdout.write(`      ${declared.description}\n`);
     }
+  }
+
+  /*
+   * The rest of what an administrator is shown: what each workspace will be
+   * asked to answer, and what loading means agreeing to. Printed even when it
+   * is only going to be read once, because "this asks for nothing" is exactly
+   * as much worth knowing before an upload as after one.
+   */
+  if (inspected.parameters.length > 0) {
+    process.stdout.write('\n  It has to be told:\n');
+    for (const parameter of inspected.parameters) {
+      const kind =
+        parameter.connectionType === null || parameter.connectionType === undefined
+          ? parameter.type.toLowerCase()
+          : `${parameter.type.toLowerCase()} to ${parameter.connectionType}`;
+      const marks = [
+        parameter.required === false ? 'optional' : undefined,
+        parameter.secret === true ? 'secret' : undefined,
+      ].filter((mark) => mark !== undefined);
+      process.stdout.write(
+        `    ${parameter.name}: ${kind}${marks.length > 0 ? ` — ${marks.join(', ')}` : ''}\n`,
+      );
+    }
+  }
+
+  const agreed = [...inspected.permissions, ...inspected.capabilities];
+  if (agreed.length > 0) {
+    process.stdout.write(`\n  Loading it means accepting: ${agreed.join(', ')}\n`);
   }
 
   if (problems.length > 0) {

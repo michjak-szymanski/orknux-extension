@@ -44,7 +44,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.ambient.json",
     "test": "npm run build && node --test test/*.test.js",
     "prepare": "npm run build"
   },

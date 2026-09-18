@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { API_VERSION, definePlugin, fn, OrknuxFunction, OrknuxPlugin } from '../dist/index.js';
+import {
+  API_VERSION,
+  definePlugin,
+  fn,
+  orknux,
+  OrknuxFunction,
+  OrknuxParameter,
+  OrknuxPlugin,
+  param,
+} from '../dist/index.js';
 
 /**
  * What `definePlugin` returns has to be a class extending the sandbox's own
@@ -64,4 +73,75 @@ test('an absent description is null and absent parameters are none', () => {
 
   assert.equal(declared.description, null);
   assert.deepEqual(declared.params, []);
+});
+
+test('what a defined plugin was told to declare is what it answers', () => {
+  const Defined = definePlugin({
+    id: 'slackish',
+    parameters: [param({ name: 'slack', type: 'connection', connectionType: 'SLACK' })],
+    permissions: ['TEXT_ENCODING'],
+    capabilities: ['SLACK_READ_THREAD'],
+  });
+  const plugin = new Defined();
+
+  assert.deepEqual(plugin.permissions(), ['TEXT_ENCODING']);
+  assert.deepEqual(plugin.capabilities(), ['SLACK_READ_THREAD']);
+  assert.equal(plugin.parameters().length, 1);
+  assert.equal(plugin.parameters()[0].name, 'slack');
+});
+
+test('declaring nothing is answering none, as the base class does', () => {
+  const Defined = definePlugin({ id: 'quiet' });
+  const plugin = new Defined();
+
+  assert.deepEqual(plugin.parameters(), []);
+  assert.deepEqual(plugin.permissions(), []);
+  assert.deepEqual(plugin.capabilities(), []);
+});
+
+test('declaring one parameter twice is refused where it is written', () => {
+  const token = () => param({ name: 'token', type: 'string' });
+  assert.throws(
+    () => definePlugin({ id: 'twice', parameters: [token(), token()] }),
+    /declares the parameter token more than once/,
+  );
+});
+
+test('a parameter fills its defaults in the way the sandbox does', () => {
+  const declared = new OrknuxParameter({ name: 'teamDomain', type: 'string' });
+
+  assert.equal(declared.description, null);
+  assert.equal(declared.required, true);
+  assert.equal(declared.secret, false);
+  assert.equal(declared.connectionType, null);
+});
+
+test('a connection that does not say which kind is refused as it is constructed', () => {
+  assert.throws(
+    () => new OrknuxParameter({ name: 'slack', type: 'connection' }),
+    /slack is a connection, so it needs a connectionType/,
+  );
+});
+
+test('a connection kind on something that is not a connection is refused too', () => {
+  assert.throws(
+    () => new OrknuxParameter({ name: 'token', type: 'string', connectionType: 'SLACK' }),
+    /token names a connectionType but is not a connection/,
+  );
+});
+
+test('outside the sandbox the settings are there, empty, and frozen', () => {
+  const Defined = definePlugin({ id: 'quiet' });
+  const plugin = new Defined();
+
+  assert.deepEqual(plugin.settings, {});
+  assert.ok(Object.isFrozen(plugin.settings));
+});
+
+test('an ungranted helper answers a sentence as data, never a throw', () => {
+  const read = orknux.slack.thread({ id: 1, type: 'SLACK' }, 'C123', '1.2');
+  assert.equal(read.error, 'this plugin was not granted SLACK_READ_THREAD');
+
+  const answered = orknux.http.get('https://example.com');
+  assert.equal(answered.error, 'this plugin was not granted NETWORK_REQUEST');
 });

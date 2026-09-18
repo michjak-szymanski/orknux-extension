@@ -1,9 +1,13 @@
-import { OrknuxFunction, OrknuxPlugin } from './contract.js';
+import { OrknuxFunction, OrknuxParameter, OrknuxPlugin } from './contract.js';
 import { API_VERSION, PLUGIN_ID } from './limits.js';
 import type {
+  OrknuxCapability,
   OrknuxFunctionDeclaration,
   OrknuxFunctionInstance,
   OrknuxParam,
+  OrknuxParameterDeclaration,
+  OrknuxParameterInstance,
+  OrknuxPermission,
   OrknuxPluginConstructor,
   OrknuxValueType,
 } from './types.js';
@@ -23,6 +27,19 @@ export function fn<
   return new OrknuxFunction<Params, Returns>(declaration);
 }
 
+/**
+ * Declares one parameter — something the plugin has to be told, once per
+ * workspace, arriving as `this.settings`.
+ *
+ * Sugar over `new OrknuxParameter(...)`, for symmetry with `fn`. There is no
+ * inference to buy here; what it buys is the same checking at the line that
+ * declares it — a connection that does not say which kind fails where it is
+ * written, not on the way into an upload.
+ */
+export function param(declaration: OrknuxParameterDeclaration): OrknuxParameterInstance {
+  return new OrknuxParameter(declaration);
+}
+
 /** A plugin, described rather than written out as a class. */
 export interface OrknuxPluginSpec {
   /**
@@ -38,6 +55,28 @@ export interface OrknuxPluginSpec {
 
   /** What it offers. A plugin may have none and still be worth loading. */
   functions?: readonly OrknuxFunctionInstance[];
+
+  /**
+   * What it has to be told before it can work. Each workspace answers these
+   * once, and what they come to arrives as `this.settings` — which is why a
+   * `run` that reads settings is written as a method or a `function`, never an
+   * arrow: the sandbox calls it with the plugin as `this`.
+   */
+  parameters?: readonly OrknuxParameterInstance[];
+
+  /**
+   * Which JavaScript it needs beyond what every plugin gets. Whoever loads the
+   * plugin is shown this list and has to accept it; leave it out if you need
+   * nothing, which is the common case.
+   */
+  permissions?: readonly OrknuxPermission[];
+
+  /**
+   * What it asks the server to do on its behalf — the calls behind `orknux`.
+   * Shown and accepted apart from the permissions, because a capability reaches
+   * outside the sandbox where a permission does not.
+   */
+  capabilities?: readonly OrknuxCapability[];
 }
 
 /**
@@ -67,11 +106,15 @@ export function definePlugin(spec: OrknuxPluginSpec): OrknuxPluginConstructor {
 
   const apiVersion = spec.apiVersion ?? API_VERSION;
   const declared = spec.functions === undefined ? [] : [...spec.functions];
+  const wanted = spec.parameters === undefined ? [] : [...spec.parameters];
+  const asked = spec.permissions === undefined ? [] : [...spec.permissions];
+  const askedOf = spec.capabilities === undefined ? [] : [...spec.capabilities];
 
   /*
    * Checked here rather than left to the upload: a plugin that declares one name
    * twice is refused by the server as a whole, and the sentence it answers with
-   * is easier to act on when it arrives while the file is still open.
+   * is easier to act on when it arrives while the file is still open. The
+   * parameters are held to the same rule for the same reason.
    */
   const seen = new Set<string>();
   for (const declaration of declared) {
@@ -79,6 +122,14 @@ export function definePlugin(spec: OrknuxPluginSpec): OrknuxPluginConstructor {
       throw new Error(`${id} declares ${declaration.name} more than once`);
     }
     seen.add(declaration.name);
+  }
+
+  const named = new Set<string>();
+  for (const parameter of wanted) {
+    if (named.has(parameter.name)) {
+      throw new Error(`${id} declares the parameter ${parameter.name} more than once`);
+    }
+    named.add(parameter.name);
   }
 
   return class extends OrknuxPlugin {
@@ -90,9 +141,21 @@ export function definePlugin(spec: OrknuxPluginSpec): OrknuxPluginConstructor {
       return apiVersion;
     }
 
-    /* A copy, so nothing the server is handed can be edited from under it. */
+    /* Copies, so nothing the server is handed can be edited from under it. */
     override functions(): OrknuxFunctionInstance[] {
       return declared.slice();
+    }
+
+    override parameters(): OrknuxParameterInstance[] {
+      return wanted.slice();
+    }
+
+    override permissions(): OrknuxPermission[] {
+      return asked.slice();
+    }
+
+    override capabilities(): OrknuxCapability[] {
+      return askedOf.slice();
     }
   };
 }

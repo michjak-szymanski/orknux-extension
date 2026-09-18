@@ -38,6 +38,19 @@ test('a plugin written against this package survives being bundled', async () =>
       returnType: 'string',
     },
   ]);
+  /* The rest of the declaration survives the trip too, defaults filled in. */
+  assert.deepEqual(inspected.parameters, [
+    {
+      name: 'shoutier',
+      description: 'Whether to add emphasis.',
+      type: 'boolean',
+      required: false,
+      secret: false,
+      connectionType: null,
+    },
+  ]);
+  assert.deepEqual(inspected.permissions, ['INTL']);
+  assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
   assert.deepEqual(validate(inspected), []);
   assert.ok(inspected.withinSizeLimit);
 });
@@ -59,6 +72,10 @@ test('a plugin written against the ambient globals loads too', async () => {
   assert.deepEqual(inspected.functions, [
     { name: 'answer', description: null, params: [], returnType: 'number' },
   ]);
+  /* Everything it did not declare defaults to none, as the base class answers. */
+  assert.deepEqual(inspected.parameters, []);
+  assert.deepEqual(inspected.permissions, []);
+  assert.deepEqual(inspected.capabilities, []);
 });
 
 test('something merely shaped like a plugin is refused', async () => {

@@ -1,0 +1,18 @@
+{
+  // Typechecks the ambient contract: types/globals.d.ts is included as a
+  // global declaration file — no `types` entry, no node — and the fixture
+  // beside it is a plugin written the way the server's template is written.
+  // `npm run typecheck` runs this after the library's own check.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": [],
+
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["types/globals.d.ts", "test/fixtures/ambient-globals.ts"]
+}

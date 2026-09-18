@@ -82,10 +82,15 @@ copy of the server's own contract with its wording intact.
 
 **That copy has to track the server.** It lives in `PluginRunner.CONTRACT` in
 orknux-server, along with the loader's own checks; `plugin/src/validate.ts` is
-the same again for `PluginDeclarations.validated`, and `plugin/src/limits.ts`
-holds the numbers both sides enforce. When one of them changes there, it changes
-here, and the tests are written in the server's wording so a rewording shows up
-as a failure rather than as drift.
+the same again for `PluginDeclarations.validated` and `validatedParameters`;
+`plugin/src/limits.ts` holds the numbers both sides enforce and the two
+vocabularies — `PluginPermission` and `PluginCapability` — a plugin declares
+against; and the `orknux` helper types in `plugin/src/types.ts` and
+`plugin/types/globals.d.ts` follow `HostHelpers` and the server's own template.
+When one of them changes there, it changes here, and the tests are written in
+the server's wording so a rewording shows up as a failure rather than as drift —
+including `plugin/test/plugins.test.js`, which holds the three production
+plugins in `plugins/` to the same answer the upload would give.
 
 ## Publishing
 

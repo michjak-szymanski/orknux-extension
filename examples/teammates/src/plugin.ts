@@ -1,12 +1,12 @@
-import { definePlugin, fn } from '@orknux/plugin';
+import { definePlugin, fn, param } from '@orknux/plugin';
 
 /**
  * The plugin from the server's own template, written against this package.
  *
- * It answers the three questions an upload asks — what it calls itself, which
- * plugin API it was written against, and what it offers — and it is built with
- * `npm run example`, which bundles it and then asks it those same three questions
- * before anything is uploaded.
+ * It answers the questions an upload asks — what it calls itself, which plugin
+ * API it was written against, what it offers, and what it has to be told — and
+ * it is built with `npm run example`, which bundles it and then asks it those
+ * same questions before anything is uploaded.
  *
  * The parameter types are declared once. `run` is typed from them, so `email` is
  * a `string` here without being annotated, and changing the declaration to
@@ -15,6 +15,20 @@ import { definePlugin, fn } from '@orknux/plugin';
  */
 export default definePlugin({
   id: 'teammates',
+
+  /*
+   * What each workspace answers once, arriving as `this.settings` — which is
+   * why `isTeammate` below is written as a method rather than an arrow: the
+   * sandbox calls `run` with the plugin as `this`, and an arrow written here
+   * would close over nothing.
+   */
+  parameters: [
+    param({
+      name: 'teamDomain',
+      description: 'The mail domain this workspace treats as its own.',
+      type: 'string',
+    }),
+  ],
 
   functions: [
     fn({
@@ -25,11 +39,19 @@ export default definePlugin({
 
       /*
        * Nothing in here can reach out. The sandbox denies host access, IO,
-       * threads and the network, so a function works with what it was passed —
-       * looking a user up in the directory is a capability the server has still
-       * to hand over.
+       * threads and the network, so a function works with what it was passed
+       * and what the workspace answered — anything further is a capability the
+       * plugin would have to declare and somebody would have to accept.
        */
-      run: (email) => email.length > 0 && email.endsWith('@example.com'),
+      run(email) {
+        const domain = this.settings.teamDomain;
+        if (typeof domain !== 'string' || domain.length === 0) {
+          // Required, so a workspace that has not set it is already marked as
+          // needing to. Answering no is the safe reading of not knowing.
+          return false;
+        }
+        return email.length > 0 && email.endsWith(`@${domain}`);
+      },
     }),
 
     fn({

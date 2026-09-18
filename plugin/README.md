@@ -18,9 +18,10 @@ npx orknux-plugin init my-plugin
 
 One file, evaluated as a single ES module in a sandbox with no network, no
 filesystem and no module resolution. It exports one class by default, that class
-extends `OrknuxPlugin`, and the server asks it three questions when it is loaded:
-what it calls itself, which plugin API it was written against, and what functions
-it offers.
+extends `OrknuxPlugin`, and the server questions it when it is loaded: what it
+calls itself, which plugin API it was written against, what functions it offers,
+what it has to be told before it can work, which JavaScript it needs, and what
+it asks the server to do on its behalf.
 
 What it declares becomes functions every workspace can call, named for the plugin
 and then for the function — `teammates_isTeammate`. The id is the plugin's
@@ -83,6 +84,86 @@ nothing", and a function has to answer something. `object` names one of a
 *workspace's* own definitions — and a plugin's functions belong to every
 workspace at once, so there is no workspace whose objects they could be naming. A
 plugin that wants a structure asks for a `map`.
+
+## Parameters, and `this.settings`
+
+A function's parameters are filled in by whoever calls it, node by node. A
+*plugin's* parameters are different: each workspace answers them once — by
+typing a value, by pointing at one of its variables, or by picking one of its
+connections — and what they come to arrives frozen as `this.settings` on every
+call. Declaring them is also how a workspace can see what a plugin is able to
+reach, because nothing gets in that is not on the list.
+
+```ts
+import { definePlugin, fn, param } from '@orknux/plugin';
+
+export default definePlugin({
+  id: 'teammates',
+  parameters: [
+    param({ name: 'teamDomain', description: 'The mail domain to treat as ours.', type: 'string' }),
+  ],
+  functions: [
+    fn({
+      name: 'isTeammate',
+      params: [{ name: 'email', type: 'string' }],
+      returnType: 'boolean',
+      // A method, not an arrow: the sandbox calls `run` with the plugin as
+      // `this`, and an arrow written here would close over nothing.
+      run(email) {
+        const domain = this.settings.teamDomain;
+        return typeof domain === 'string' && email.endsWith(`@${domain}`);
+      },
+    }),
+  ],
+});
+```
+
+A parameter is one of `string`, `number`, `boolean` — what a workspace variable
+can hold — or `connection`, which names one of the workspace's connections and
+must say which kind with `connectionType: 'SLACK' | 'SMTP' | 'HTTP'`. What then
+arrives in `settings` is a handle, an `{ id, type }` — never the connection's
+credential. `required` defaults to true; `secret: true` refuses a typed-in
+value, so the only way to answer it is a workspace variable, which is where an
+installation keeps things it encrypts. A parameter nothing usable is set for is
+absent rather than null: `this.settings.token === undefined` is the question to
+ask.
+
+## Permissions
+
+The sandbox hands out very little JavaScript, on purpose, and a bundle written
+for a browser or Node often expects more — `Intl`, `TextEncoder`, `console`. A
+plugin declares what it needs from `permissions()`, whoever loads it is shown
+the list and has to accept it, and only what was accepted is turned on, for
+that plugin alone. The list is closed: `CONSOLE`, `INTL`, `TEXT_ENCODING`,
+`PERFORMANCE`, `TEMPORAL`, and nothing else — there is deliberately no spelling
+for a file, a socket or a host class, so asking is refused rather than
+half-granted. Loading happens with none of them granted, so the top level of
+the bundle has to evaluate without them: ask for what `run` needs, not for what
+loading needs.
+
+## Capabilities, and the `orknux` helpers
+
+A permission relaxes the sandbox; a capability asks the server to act. The
+calls that have to reach outside — reading a Slack thread, posting a message,
+making an HTTP request — are made by the server, under a capability the plugin
+declares from `capabilities()` and a person accepts, through a connection the
+workspace pointed the plugin at. The plugin never holds a token or a socket;
+what crosses is data, both ways.
+
+The doors are on the `orknux` object the sandbox defines — `orknux.slack.thread`,
+`.post`, `.react`, `.message`, `.user`, `.mention`, `orknux.http.request`,
+`.get`, `.post` — each needing its capability (`SLACK_READ_THREAD`,
+`SLACK_POST_MESSAGE`, `SLACK_ADD_REACTION`, `SLACK_READ_MESSAGE`,
+`SLACK_READ_USER`, `SLACK_MENTION`, `NETWORK_REQUEST`), and each answering
+`{ error }` as data rather than throwing when it is refused, so a condition
+that could not be decided does not quietly decide. `orknux.log.debug` through
+`.error` are always there and never needed granting — nothing is reached by a
+log line.
+
+Import style gets the same object as `import { orknux } from '@orknux/plugin'`,
+typed; the ambient style has it declared globally. Outside the sandbox — in a
+test, or under `check` — every helper answers the ungranted sentence, which is
+the truth there too.
 
 ## Why an import is safe here
 
@@ -153,7 +234,7 @@ export default class Teammates extends OrknuxPlugin {
 ```
 
 Do not mix the last one with the first two in a single file: they describe the
-same two classes, and an import shadowing a global of the same name reads as a
+same classes, and an import shadowing a global of the same name reads as a
 puzzle rather than as the choice it is.
 
 ## Building
@@ -179,9 +260,10 @@ turns up in the list as "plugin".
 
 ## Checking
 
-`build` ends by loading the bundle and asking it the three questions the upload
-asks, then applying the rules the upload applies: identifiers, types, duplicate
-names, the API version, the size. It exits non-zero if anything would be refused,
+`build` ends by loading the bundle and asking it the questions the upload asks,
+then applying the rules the upload applies: identifiers, types, duplicate
+names, the parameter kinds, the permission and capability vocabularies, the API
+version, the size. It exits non-zero if anything would be refused,
 so a plugin that would not load does not pass a build script. `orknux-plugin
 check dist/teammates.js` does the same to a file that already exists.
 
@@ -211,19 +293,17 @@ orkx plugin load --file dist/teammates.js
 
 ## What a plugin cannot do
 
-Nothing, yet, but compute. The sandbox denies host access, class loading, IO,
-threads, processes and the environment; there is no `fetch`, no `console`, no
-`load`. A function is given its arguments and answers — which is why `run` is
-typed as synchronous, and why there is no point writing it as `async`.
+Reach anything it was not handed. The sandbox denies host access, class
+loading, IO, threads, processes and the environment; there is no `fetch` and no
+`load`, and `console` is itself a permission. A function is given its
+arguments, `this.settings`, and whatever `orknux` calls its capabilities were
+accepted for — which is why `run` is typed as synchronous, and why there is no
+point writing it as `async`: nothing in there can be awaited.
 
 There is also a clock on it: a plugin has ten seconds and ten million statements
 to be *loaded* in, which is generous for declaring functions and not generous at
-all for doing work at module scope.
-
-Nor does the server call `run` yet. Declarations are checked and stored, and the
-functions appear in every workspace, but the calling half of the plugin API is
-still being written. Write `run` as though it will be called — it will — and do
-not expect a workflow to reach it today.
+all for doing work at module scope — and loading happens with no permissions
+granted, so the module body has to evaluate bare.
 
 ## Versions
 
@@ -233,8 +313,10 @@ refuses a version it does not know rather than guessing. `API_VERSION` and
 server: when the server learns a version, this changes with it.
 
 The rest of what the server enforces is exported too — `PLUGIN_ID`,
-`IDENTIFIER`, `MAX_FUNCTIONS`, `MAX_SOURCE_BYTES`, `VALUE_TYPES` — because the
-only thing this package really sells is that they are the same numbers.
+`IDENTIFIER`, `MAX_FUNCTIONS`, `MAX_PARAMETERS`, `MAX_PERMISSIONS`,
+`MAX_SOURCE_BYTES`, `VALUE_TYPES`, `PARAMETER_TYPES`, `CONNECTION_TYPES`,
+`PERMISSIONS`, `CAPABILITIES` — because the only thing this package really
+sells is that they are the same numbers and the same names.
 
 ## Licence
 

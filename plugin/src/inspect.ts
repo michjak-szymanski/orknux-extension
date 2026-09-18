@@ -4,21 +4,29 @@ import { pathToFileURL } from 'node:url';
 
 import { OrknuxPlugin } from './contract.js';
 import { MAX_SOURCE_BYTES } from './limits.js';
-import type { DeclaredFunction, DeclaredParam, Declaration } from './validate.js';
+import type {
+  DeclaredFunction,
+  DeclaredParam,
+  DeclaredParameter,
+  Declaration,
+} from './validate.js';
 
 /**
  * Loads a built plugin and asks it what it is.
  *
- * The same three questions the server asks, in the same order, refusing on the
- * same answers — so `check` says beforehand what an upload would have said. What
- * it is *not* is the server's sandbox: this imports the bundle into this Node
- * process, with everything Node has. Run it on a plugin you wrote, not on one
- * somebody sent you.
+ * The same questions the server asks, in the same order, refusing on the same
+ * answers — so `check` says beforehand what an upload would have said: what the
+ * plugin calls itself, which API it uses, what it offers, what it has to be
+ * told, which JavaScript it needs, and what it asks the server to do for it.
+ * What it is *not* is the server's sandbox: this imports the bundle into this
+ * Node process, with everything Node has. Run it on a plugin you wrote, not on
+ * one somebody sent you.
  *
- * Importing `./contract.js` is what puts `OrknuxPlugin` and `OrknuxFunction` on
- * the global object before the bundle is evaluated, which is the order the
- * sandbox uses and the reason a plugin written against the ambient globals — with
- * no import of this package at all — loads here too.
+ * Importing `./contract.js` is what puts `OrknuxPlugin`, `OrknuxFunction`,
+ * `OrknuxParameter` and `orknux` on the global object before the bundle is
+ * evaluated, which is the order the sandbox uses and the reason a plugin written
+ * against the ambient globals — with no import of this package at all — loads
+ * here too.
  */
 
 /** The bundle is not a plugin, or did not hold up its end of the contract. */
@@ -31,6 +39,10 @@ export class NotAPluginError extends Error {
 
 /** What a plugin answered, and what the file it came from weighs. */
 export interface Inspection extends Declaration {
+  /** Present even when empty, unlike on a bare [Declaration]: the plugin was asked. */
+  parameters: DeclaredParameter[];
+  permissions: string[];
+  capabilities: string[];
   file: string;
   bytes: number;
   /** The digest the server will store, so the two can be compared. */
@@ -95,10 +107,62 @@ export async function inspect(file: string): Promise<Inspection> {
 
   const functions = declared.map((one) => read(one as Record<string, unknown>));
 
+  /*
+   * What the plugin needs to be told before it can do anything, read the way
+   * the loader reads it: the point of declaring parameters is that a workspace
+   * can be shown what a plugin will be given before it is given anything.
+   */
+  const wanted = answer('parameters');
+  if (!Array.isArray(wanted)) {
+    throw new NotAPluginError('parameters() did not answer with an array');
+  }
+  const parameters = wanted.map((one) => readParameter(one as Record<string, unknown>));
+
+  /*
+   * What JavaScript it says it needs. Trimmed, emptied and read once each, as
+   * the loader reads them, before validation judges the names.
+   */
+  const asked = answer('permissions');
+  if (!Array.isArray(asked)) {
+    throw new NotAPluginError('permissions() did not answer with an array');
+  }
+  const permissions = [
+    ...new Set(
+      asked
+        .map((one) => {
+          if (typeof one !== 'string') {
+            throw new NotAPluginError('permissions() answered with something that is not a name');
+          }
+          return one.trim();
+        })
+        .filter((one) => one.length > 0),
+    ),
+  ];
+
+  /*
+   * What it asks the server to do for it. Guarded the way the loader guards it —
+   * a plugin with no `capabilities` member asks for nothing — although every
+   * plugin loaded against this contract has one, because the base class does.
+   */
+  const capabilityMember = (plugin as unknown as Record<string, unknown>)['capabilities'];
+  const askedOf = typeof capabilityMember === 'function' ? answer('capabilities') : [];
+  if (!Array.isArray(askedOf)) {
+    throw new NotAPluginError('capabilities() did not answer with an array');
+  }
+  const capabilities = askedOf.map((one) => {
+    if (typeof one !== 'string') {
+      throw new NotAPluginError('capabilities() answered with something that is not a name');
+    }
+    return one;
+  });
+
   return {
     id: id.trim(),
     apiVersion,
     functions,
+    parameters,
+    permissions,
+    capabilities,
     file,
     bytes: source.byteLength,
     sha256,
@@ -123,12 +187,29 @@ function read(declared: Record<string, unknown>): DeclaredFunction {
   };
 }
 
+function readParameter(declared: Record<string, unknown>): DeclaredParameter {
+  return {
+    name: text(declared, 'name') ?? refuse('a parameter has no name'),
+    description: text(declared, 'description') ?? null,
+    type: text(declared, 'type') ?? refuse('a parameter has no type'),
+    required: flag(declared, 'required', true),
+    secret: flag(declared, 'secret', false),
+    connectionType: text(declared, 'connectionType') ?? null,
+  };
+}
+
 /** A member that has to be a string to be worth reading, trimmed, empty read as absent. */
 function text(holder: Record<string, unknown>, member: string): string | undefined {
   const value = holder[member];
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed.length === 0 ? undefined : trimmed;
+}
+
+/** A member that has to be a boolean to be worth reading, as the loader reads one. */
+function flag(holder: Record<string, unknown>, member: string, fallback: boolean): boolean {
+  const value = holder[member];
+  return typeof value === 'boolean' ? value : fallback;
 }
 
 function refuse(reason: string): never {

@@ -29,14 +29,15 @@ absent, and they are a copy of the server's `PluginRunner.CONTRACT` — wording
 included, because the wording is what somebody reads when their plugin is
 refused.
 
-Three files mirror the server, and drift in any of them is a broken promise:
+Five files mirror the server, and drift in any of them is a broken promise:
 
 | here                  | there                                     |
 |-----------------------|-------------------------------------------|
-| `src/contract.ts`     | `PluginRunner.CONTRACT`                   |
+| `src/contract.ts`     | `PluginRunner.CONTRACT`, `HostHelpers`    |
 | `src/inspect.ts`      | `PluginRunner.read`                       |
-| `src/validate.ts`     | `PluginDeclarations.validated`            |
-| `src/limits.ts`       | `PluginApiVersions`, `PluginUploadAPI`, `PluginRunner` |
+| `src/validate.ts`     | `PluginDeclarations.validated` and `validatedParameters`, `PluginPermissions`, `PluginCapabilities` |
+| `src/limits.ts`       | `PluginApiVersions`, `PluginUploadAPI`, `PluginRunner`, `PluginPermission`, `PluginCapability`, `ConnectionType` |
+| `types/globals.d.ts`  | the TypeScript template `PluginUploadAPI` serves |
 
 Where this is deliberately stricter than the server, the comment says so and
 says why — a parameter typed `none` is the one such place today. Stricter is
