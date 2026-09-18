@@ -19,9 +19,10 @@ npx orknux-plugin init my-plugin
 One file, evaluated as a single ES module in a sandbox with no network, no
 filesystem and no module resolution. It exports one class by default, that class
 extends `OrknuxPlugin`, and the server questions it when it is loaded: what it
-calls itself, which plugin API it was written against, what functions it offers,
-what it has to be told before it can work, which JavaScript it needs, and what
-it asks the server to do on its behalf.
+calls itself, which plugin API it was written against, what functions it offers
+to workflows and what tools to agents, what it has to be told before it can
+work, which JavaScript it needs, and what it asks the server to do on its
+behalf.
 
 What it declares becomes functions every workspace can call, named for the plugin
 and then for the function — `teammates_isTeammate`. The id is the plugin's
@@ -127,6 +128,51 @@ value, so the only way to answer it is a workspace variable, which is where an
 installation keeps things it encrypts. A parameter nothing usable is set for is
 absent rather than null: `this.settings.token === undefined` is the question to
 ask.
+
+## Tools, for agents
+
+Workflows call functions; agents call tools. `tools()` is a surface of its own
+because it has a reader of its own: a tool's description is read by a model
+deciding whether to call it, where a function's is read by a person building a
+workflow. A tool that is really one of the plugin's functions is declared as an
+`OrknuxFunctionTool` — `functionTool` in the described style — which proxies it
+rather than describing it twice: the params, return type and implementation
+stay the function's, including any edit somebody makes to it on the server
+later, and only the name and the model-facing description may be the tool's
+own. A proxy naming a function `functions()` does not declare is refused at
+load.
+
+```ts
+import { definePlugin, fn, functionTool, tool } from '@orknux/plugin';
+
+export default definePlugin({
+  id: 'teammates',
+  functions: [/* … */],
+  tools: [
+    // The function, fronted. The name defaults to the function's, and so does
+    // the description — write one only when the model needs different words.
+    functionTool({ function: 'isTeammate' }),
+
+    // Or a tool of its own, with a run of its own, declared like a function.
+    tool({
+      name: 'countTeammates',
+      description: 'How many of a list of email addresses belong to this workspace.',
+      params: [{ name: 'addresses', type: 'array' }],
+      returnType: 'number',
+      run(addresses) {
+        /* … */
+      },
+    }),
+  ],
+});
+```
+
+Tool names are identifiers and unique among the tools; sharing a name with a
+function is fine, and is exactly what a proxy defaults to — the two lists have
+different readers and never answer the same call. A tool answers a model, so it
+has to return one of `string`, `number`, `boolean`, `map`, `array` — neither
+`none` nor `object` will do. An agent is granted a tool by its qualified name,
+`teammates_isTeammate`, under the same prefix rule the functions follow.
 
 ## Permissions
 

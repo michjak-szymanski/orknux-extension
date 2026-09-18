@@ -1,7 +1,11 @@
-import { definePlugin, fn, param } from '@orknux/plugin';
+import { definePlugin, fn, functionTool, param } from '@orknux/plugin';
 
 export default definePlugin({
   id: 'imported',
+  tools: [
+    // The function below, fronted for agents, with words written for the model.
+    functionTool({ function: 'shout', description: 'Say it louder. Use when asked to emphasise.' }),
+  ],
   parameters: [
     param({
       name: 'shoutier',

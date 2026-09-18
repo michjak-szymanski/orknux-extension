@@ -135,6 +135,31 @@ async function report(file: string): Promise<number> {
   }
 
   /*
+   * The agents' surface, under the same prefix rule the functions follow. A
+   * proxy prints the shape it resolved to and says whose it is, because that
+   * is the shape the grant list will show.
+   */
+  if (inspected.tools.length > 0) {
+    process.stdout.write('\n  It offers agents:\n');
+    for (const declared of inspected.tools) {
+      const params = declared.params
+        .map((param) => `${param.name}: ${param.type.toLowerCase()}`)
+        .join(', ');
+      const fronting =
+        declared.proxyOf === null || declared.proxyOf === undefined
+          ? ''
+          : ` — proxies ${declared.proxyOf}`;
+      process.stdout.write(
+        `    ${qualifiedName(inspected.id, declared.name)}(${params}): ` +
+          `${declared.returnType.toLowerCase()}${fronting}\n`,
+      );
+      if (declared.description !== null && declared.description !== undefined) {
+        process.stdout.write(`        ${declared.description}\n`);
+      }
+    }
+  }
+
+  /*
    * The rest of what an administrator is shown: what each workspace will be
    * asked to answer, and what loading means agreeing to. Printed even when it
    * is only going to be read once, because "this asks for nothing" is exactly

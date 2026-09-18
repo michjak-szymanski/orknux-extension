@@ -6,6 +6,7 @@ import {
   MAX_FUNCTIONS,
   MAX_PARAMETERS,
   MAX_PERMISSIONS,
+  MAX_TOOLS,
   PARAMETER_TYPES,
   PERMISSIONS,
   PLUGIN_ID,
@@ -41,6 +42,22 @@ export interface DeclaredFunction {
 }
 
 /**
+ * One tool the plugin offers to agents, as the inspection resolved it.
+ *
+ * The same shape as a function's declaration plus `proxyOf`: set, it names the
+ * plugin's own function this tool stands in front of, and the params and
+ * return type here were copied from it when the plugin was questioned. Absent
+ * or null for a tool with a `run` of its own.
+ */
+export interface DeclaredTool {
+  name: string;
+  description?: string | null;
+  params: DeclaredParam[];
+  returnType: string;
+  proxyOf?: string | null;
+}
+
+/**
  * One thing the plugin says it has to be told, as it wrote it.
  *
  * `required` and `secret` are optional here because a declaration is what a
@@ -62,6 +79,7 @@ export interface Declaration {
   apiVersion: number;
   functions: DeclaredFunction[];
   /** Optional because a declaration written before these existed has none. */
+  tools?: DeclaredTool[];
   parameters?: DeclaredParameter[];
   permissions?: string[];
   capabilities?: string[];
@@ -70,7 +88,7 @@ export interface Declaration {
 /** Something that would stop this plugin being accepted. */
 export interface Problem {
   /** Which of the plugin's answers it came from, for grouping in a report. */
-  part: 'id' | 'apiVersion' | 'functions' | 'parameters' | 'permissions' | 'capabilities';
+  part: 'id' | 'apiVersion' | 'functions' | 'tools' | 'parameters' | 'permissions' | 'capabilities';
   message: string;
 }
 
@@ -80,6 +98,7 @@ export function validate(declared: Declaration): Problem[] {
     ...validateId(declared.id),
     ...validateApiVersion(declared.apiVersion),
     ...validateFunctions(declared.functions),
+    ...validateTools(declared.tools ?? [], declared.functions),
     ...validateParameters(declared.parameters ?? []),
     ...validatePermissions(declared.permissions ?? []),
     ...validateCapabilities(declared.capabilities ?? []),
@@ -187,6 +206,95 @@ export function validateFunctions(declared: DeclaredFunction[]): Problem[] {
         refuse(`${name}'s ${param.name} is a "none", and a parameter has to carry something`);
       } else if (!isValueType(param.type)) {
         refuse(`${name}'s ${param.name} is a "${param.type}", which is not a type this server has`);
+      }
+    }
+  }
+
+  return problems;
+}
+
+/**
+ * The rules the agents' surface is held to — `PluginDeclarations.validatedTools`,
+ * in the upload's own sentences.
+ *
+ * Tool names are identifiers and unique among the tools; sharing a name with a
+ * function is fine, and is exactly what a proxy defaults to — the two lists
+ * have different readers and never answer the same call. A tool answers a
+ * model, so `none` and `object` are refused as return types by name. And a
+ * proxy has to front a function the plugin declares, which is the loader's
+ * refusal rather than the upload's: the inspection resolves proxies before the
+ * upload ever judges them, so it is applied here from [functions].
+ */
+export function validateTools(
+  declared: DeclaredTool[],
+  functions: DeclaredFunction[] = [],
+): Problem[] {
+  const problems: Problem[] = [];
+  const refuse = (message: string): void => {
+    problems.push({ part: 'tools', message });
+  };
+
+  if (declared.length > MAX_TOOLS) {
+    refuse(`tools() declared more than ${MAX_TOOLS} tools`);
+  }
+
+  const offered = new Set(functions.map((one) => one.name));
+  const names = new Set<string>();
+  for (const tool of declared) {
+    const name = tool.name;
+
+    if (!IDENTIFIER.test(name)) {
+      refuse(`"${name}" is not a usable tool name`);
+    }
+    if (names.has(name)) {
+      refuse(`it declares the tool ${name} more than once`);
+    }
+    names.add(name);
+
+    const proxyOf = tool.proxyOf ?? null;
+    if (proxyOf !== null && !offered.has(proxyOf)) {
+      refuse(`tools() proxies "${proxyOf}", which functions() does not declare`);
+    }
+
+    if (isReserved(tool.returnType)) {
+      refuse(
+        `the tool ${name} returns ${tool.returnType.trim().toLowerCase()}; a tool answers a model, ` +
+          `so it has to return one of ${VALUE_TYPES.join(', ')}`,
+      );
+    } else if (!isValueType(tool.returnType)) {
+      refuse(`the tool ${name} returns "${tool.returnType}", which is not a type this server has`);
+    }
+
+    const params = new Set<string>();
+    for (const param of tool.params) {
+      if (!IDENTIFIER.test(param.name)) {
+        refuse(`the tool ${name} has a parameter called "${param.name}", which is not a usable name`);
+      }
+      if (params.has(param.name)) {
+        refuse(`the tool ${name} declares ${param.name} twice`);
+      }
+      params.add(param.name);
+
+      /*
+       * Stricter than the upload, which reads a tool's params against the
+       * whole type list: `none` and `object` cannot be filled in by a model
+       * any more than by a workflow, the types in this package cannot express
+       * them, and refusing them here can only stop something no plugin should
+       * be doing.
+       */
+      const written = param.type.trim().toLowerCase();
+      if (written === 'none') {
+        refuse(`the tool ${name}'s ${param.name} is a "none", and a parameter has to carry something`);
+      } else if (written === 'object') {
+        refuse(
+          `the tool ${name}'s ${param.name} is an object, which names one of a workspace's ` +
+            "definitions. A plugin's tools belong to every workspace at once, so there is " +
+            'no workspace whose objects they could name. Use map instead.',
+        );
+      } else if (!isValueType(param.type)) {
+        refuse(
+          `the tool ${name}'s ${param.name} is a "${param.type}", which is not a type this server has`,
+        );
       }
     }
   }

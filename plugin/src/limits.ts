@@ -18,6 +18,13 @@ export const SUPPORTED_API_VERSIONS: readonly number[] = [1];
 export const MAX_FUNCTIONS = 100;
 
 /**
+ * The same bound again for the agents' surface: the loader reads `tools()`
+ * under `MAX_FUNCTIONS` too, and the separate name here is only so a refusal
+ * about tools can say which list overran.
+ */
+export const MAX_TOOLS = MAX_FUNCTIONS;
+
+/**
  * More than a plugin has any business asking a workspace to fill in.
  *
  * Lower than the function bound on purpose: every one of these is something a

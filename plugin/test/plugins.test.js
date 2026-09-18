@@ -37,6 +37,7 @@ test('the github plugin declares what the server would accept', async () => {
   ]);
   assert.deepEqual(inspected.permissions, ['TEXT_ENCODING']);
   assert.deepEqual(inspected.capabilities, []);
+  assert.deepEqual(inspected.tools, []);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
     ['verify', 'describe'],
@@ -67,6 +68,23 @@ test('the slack plugin declares what the server would accept', async () => {
     inspected.functions.map((declared) => declared.name),
     ['isFirstReply', 'readMessage', 'whoIs', 'mention'],
   );
+
+  /*
+   * The agents' surface: the three lookups, each an OrknuxFunctionTool the
+   * inspection resolved — so every tool carries its function's own params,
+   * return type and description, and `isFirstReply` stays a workflow's gate.
+   */
+  assert.deepEqual(
+    inspected.tools.map((declared) => declared.name),
+    ['readMessage', 'whoIs', 'mention'],
+  );
+  for (const declared of inspected.tools) {
+    assert.equal(declared.proxyOf, declared.name);
+    const fronted = inspected.functions.find((one) => one.name === declared.proxyOf);
+    assert.deepEqual(declared.params, fronted.params);
+    assert.equal(declared.returnType, fronted.returnType);
+    assert.equal(declared.description, fronted.description);
+  }
 });
 
 test('the teams plugin declares what the server would accept', async () => {
@@ -83,6 +101,7 @@ test('the teams plugin declares what the server would accept', async () => {
   /* It asks for nothing at all — the hashing is written out so that holds. */
   assert.deepEqual(inspected.permissions, []);
   assert.deepEqual(inspected.capabilities, []);
+  assert.deepEqual(inspected.tools, []);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
     ['verify', 'text', 'sender', 'message', 'channelUrl', 'replyUrl'],

@@ -8,6 +8,7 @@ import type {
   DeclaredFunction,
   DeclaredParam,
   DeclaredParameter,
+  DeclaredTool,
   Declaration,
 } from './validate.js';
 
@@ -40,6 +41,7 @@ export class NotAPluginError extends Error {
 /** What a plugin answered, and what the file it came from weighs. */
 export interface Inspection extends Declaration {
   /** Present even when empty, unlike on a bare [Declaration]: the plugin was asked. */
+  tools: DeclaredTool[];
   parameters: DeclaredParameter[];
   permissions: string[];
   capabilities: string[];
@@ -108,6 +110,19 @@ export async function inspect(file: string): Promise<Inspection> {
   const functions = declared.map((one) => read(one as Record<string, unknown>));
 
   /*
+   * What it offers to agents, read the way the loader reads it: a tool
+   * constructed as an OrknuxFunctionTool carries `proxyOf` instead of its own
+   * params, return type and run, and those are resolved here against what
+   * functions() just declared — so a proxy to a function the plugin does not
+   * have is refused at load, not discovered by the first agent to call it.
+   */
+  const offered = answer('tools');
+  if (!Array.isArray(offered)) {
+    throw new NotAPluginError('tools() did not answer with an array');
+  }
+  const tools = offered.map((one) => readTool(one as Record<string, unknown>, functions));
+
+  /*
    * What the plugin needs to be told before it can do anything, read the way
    * the loader reads it: the point of declaring parameters is that a workspace
    * can be shown what a plugin will be given before it is given anything.
@@ -160,6 +175,7 @@ export async function inspect(file: string): Promise<Inspection> {
     id: id.trim(),
     apiVersion,
     functions,
+    tools,
     parameters,
     permissions,
     capabilities,
@@ -184,6 +200,38 @@ function read(declared: Record<string, unknown>): DeclaredFunction {
         type: text(one, 'type') ?? refuse('a parameter has no type'),
       };
     }),
+  };
+}
+
+function readTool(declared: Record<string, unknown>, functions: DeclaredFunction[]): DeclaredTool {
+  const proxyOf = text(declared, 'proxyOf');
+  if (proxyOf !== undefined) {
+    const target = functions.find((one) => one.name === proxyOf);
+    if (target === undefined) {
+      throw new NotAPluginError(`tools() proxies "${proxyOf}", which functions() does not declare`);
+    }
+    return {
+      name: text(declared, 'name') ?? proxyOf,
+      description: text(declared, 'description') ?? target.description,
+      params: target.params,
+      returnType: target.returnType,
+      proxyOf,
+    };
+  }
+
+  const params = Array.isArray(declared['params']) ? declared['params'] : [];
+  return {
+    name: text(declared, 'name') ?? refuse('a tool has no name'),
+    description: text(declared, 'description') ?? null,
+    returnType: text(declared, 'returnType') ?? refuse('a tool has no returnType'),
+    params: params.map((param): DeclaredParam => {
+      const one = param as Record<string, unknown>;
+      return {
+        name: text(one, 'name') ?? refuse('a tool parameter has no name'),
+        type: text(one, 'type') ?? refuse('a tool parameter has no type'),
+      };
+    }),
+    proxyOf: null,
   };
 }
 

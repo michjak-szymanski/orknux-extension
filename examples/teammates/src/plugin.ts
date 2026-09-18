@@ -1,4 +1,4 @@
-import { definePlugin, fn, param } from '@orknux/plugin';
+import { definePlugin, fn, functionTool, param } from '@orknux/plugin';
 
 /**
  * The plugin from the server's own template, written against this package.
@@ -85,6 +85,21 @@ export default definePlugin({
         );
         return { total: addresses.length, teammates: inside.length };
       },
+    }),
+  ],
+
+  /*
+   * The agents' surface: `isTeammate` again, fronted. A proxy rather than a
+   * copy, so the params, return type and implementation — and any edit made to
+   * the function on the server — stay the function's own; only the description
+   * is this tool's, written for the model that decides whether to call it.
+   */
+  tools: [
+    functionTool({
+      function: 'isTeammate',
+      description:
+        'Whether an email address belongs to a member of this workspace. ' +
+        'Use it before treating a sender as a colleague.',
     }),
   ],
 });

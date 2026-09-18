@@ -2,12 +2,16 @@ import type {
   OrknuxCapability,
   OrknuxFunctionDeclaration,
   OrknuxFunctionInstance,
+  OrknuxFunctionToolDeclaration,
+  OrknuxFunctionToolInstance,
   OrknuxHelpers,
   OrknuxParam,
   OrknuxParameterDeclaration,
   OrknuxParameterInstance,
   OrknuxPermission,
   OrknuxSettings,
+  OrknuxToolDeclaration,
+  OrknuxToolInstance,
   OrknuxValueType,
 } from './types.js';
 
@@ -62,6 +66,10 @@ class OrknuxPluginFallback {
     return [];
   }
 
+  tools(): (OrknuxToolInstance | OrknuxFunctionToolInstance)[] {
+    return [];
+  }
+
   parameters(): OrknuxParameterInstance[] {
     return [];
   }
@@ -101,6 +109,66 @@ class OrknuxFunctionFallback {
     }
     if (!Array.isArray(self['params'])) {
       throw new Error(`${self['name']} declares params that are not an array`);
+    }
+  }
+}
+
+class OrknuxToolFallback {
+  constructor(declared: unknown) {
+    if (declared === null || typeof declared !== 'object') {
+      throw new Error('an OrknuxTool needs a declaration');
+    }
+
+    const source = declared as Record<string, unknown>;
+    const self = this as unknown as Record<string, unknown>;
+
+    self['name'] = source['name'];
+    self['description'] = source['description'] === undefined ? null : source['description'];
+    self['params'] = source['params'] === undefined ? [] : source['params'];
+    self['returnType'] = source['returnType'];
+    self['run'] = source['run'];
+    self['proxyOf'] = null;
+
+    if (typeof self['name'] !== 'string' || self['name'].length === 0) {
+      throw new Error('an OrknuxTool needs a name');
+    }
+    if (typeof self['returnType'] !== 'string') {
+      throw new Error(`${self['name']} needs a returnType`);
+    }
+    if (typeof self['run'] !== 'function') {
+      throw new Error(`${self['name']} needs a run function; it is what the tool does`);
+    }
+    if (!Array.isArray(self['params'])) {
+      throw new Error(`${self['name']} declares params that are not an array`);
+    }
+  }
+}
+
+/*
+ * A tool that is one of the plugin's own functions, exposed to agents. As in
+ * the sandbox, the instance carries only `proxyOf`, the name and the
+ * description: the params, return type and implementation stay the function's,
+ * and the loader resolves them — refusing a `function` that `functions()` does
+ * not declare — when the plugin is questioned.
+ */
+class OrknuxFunctionToolFallback {
+  constructor(declared: unknown) {
+    if (declared === null || typeof declared !== 'object') {
+      throw new Error('an OrknuxFunctionTool needs a declaration');
+    }
+
+    const source = declared as Record<string, unknown>;
+    const self = this as unknown as Record<string, unknown>;
+
+    self['proxyOf'] = source['function'];
+    self['name'] = source['name'] === undefined ? source['function'] : source['name'];
+    self['description'] = source['description'] === undefined ? null : source['description'];
+
+    if (typeof self['proxyOf'] !== 'string' || self['proxyOf'].length === 0) {
+      throw new Error('an OrknuxFunctionTool needs a function to proxy, named by `function`');
+    }
+    if (typeof self['name'] !== 'string' || self['name'].length === 0) {
+      throw new Error('an OrknuxFunctionTool needs a name');
     }
   }
 }
@@ -224,8 +292,20 @@ declare abstract class OrknuxPluginContract {
   /** Which plugin API this was written against. */
   abstract apiVersion(): number;
 
-  /** What this plugin offers. Defaults to none. */
+  /** What this plugin offers to workflows. Defaults to none. */
   functions(): OrknuxFunctionInstance[];
+
+  /**
+   * What this plugin offers to agents, as tools a model calls. Defaults to
+   * none.
+   *
+   * A surface of its own because it has a reader of its own: a tool's
+   * description is read by a model deciding whether to call it, where a
+   * function's is read by a person building a workflow. A tool that is really
+   * one of the functions is declared as an `OrknuxFunctionTool`, which proxies
+   * it rather than describing it twice.
+   */
+  tools(): (OrknuxToolInstance | OrknuxFunctionToolInstance)[];
 
   /** What this plugin has to be told before it can work. Defaults to none. */
   parameters(): OrknuxParameterInstance[];
@@ -278,6 +358,29 @@ export interface OrknuxFunctionConstructor {
 }
 
 /**
+ * What each tool of the plugin's own is wrapped in — the same checking as a
+ * function's, at the line that declares it, because a tool is a declaration
+ * with a run of its own.
+ */
+export interface OrknuxToolConstructor {
+  new <
+    const Params extends readonly OrknuxParam[] = readonly [],
+    Returns extends OrknuxValueType = OrknuxValueType,
+  >(
+    declaration: OrknuxToolDeclaration<Params, Returns>,
+  ): OrknuxToolInstance;
+}
+
+/**
+ * What a proxy to one of the plugin's own functions is wrapped in. Nothing to
+ * infer: the params and return type are the named function's, resolved by the
+ * loader when the plugin is questioned.
+ */
+export interface OrknuxFunctionToolConstructor {
+  new (declaration: OrknuxFunctionToolDeclaration): OrknuxFunctionToolInstance;
+}
+
+/**
  * What each declared parameter is wrapped in, checking as it builds for the
  * same reason: a connection that does not say which kind, or a secret that is
  * not asking for anything a secret could protect, fails on the line that
@@ -290,18 +393,26 @@ export interface OrknuxParameterConstructor {
 const scope = globalThis as unknown as {
   OrknuxPlugin?: unknown;
   OrknuxFunction?: unknown;
+  OrknuxTool?: unknown;
+  OrknuxFunctionTool?: unknown;
   OrknuxParameter?: unknown;
   orknux?: unknown;
 };
 
 scope.OrknuxPlugin ??= OrknuxPluginFallback;
 scope.OrknuxFunction ??= OrknuxFunctionFallback;
+scope.OrknuxTool ??= OrknuxToolFallback;
+scope.OrknuxFunctionTool ??= OrknuxFunctionToolFallback;
 scope.OrknuxParameter ??= OrknuxParameterFallback;
 scope.orknux ??= ungrantedHelpers();
 
 export const OrknuxPlugin = scope.OrknuxPlugin as typeof OrknuxPluginContract;
 
 export const OrknuxFunction = scope.OrknuxFunction as OrknuxFunctionConstructor;
+
+export const OrknuxTool = scope.OrknuxTool as OrknuxToolConstructor;
+
+export const OrknuxFunctionTool = scope.OrknuxFunctionTool as OrknuxFunctionToolConstructor;
 
 export const OrknuxParameter = scope.OrknuxParameter as OrknuxParameterConstructor;
 

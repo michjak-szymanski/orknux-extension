@@ -5,11 +5,15 @@ import {
   API_VERSION,
   definePlugin,
   fn,
+  functionTool,
   orknux,
   OrknuxFunction,
+  OrknuxFunctionTool,
   OrknuxParameter,
   OrknuxPlugin,
+  OrknuxTool,
   param,
+  tool,
 } from '../dist/index.js';
 
 /**
@@ -75,6 +79,71 @@ test('an absent description is null and absent parameters are none', () => {
   assert.deepEqual(declared.params, []);
 });
 
+test('a tool with nothing to run is refused as it is constructed', () => {
+  assert.throws(
+    () => new OrknuxTool({ name: 'shout', returnType: 'string' }),
+    /shout needs a run function; it is what the tool does/,
+  );
+});
+
+test('a tool of its own carries no proxy, and says so with null', () => {
+  const declared = tool({ name: 'now', returnType: 'number', run: () => 1 });
+
+  assert.equal(declared.proxyOf, null);
+  assert.equal(declared.description, null);
+  assert.deepEqual(declared.params, []);
+});
+
+test('a proxy needs a function to front, named by `function`', () => {
+  assert.throws(
+    () => new OrknuxFunctionTool({ name: 'shout' }),
+    /needs a function to proxy, named by `function`/,
+  );
+});
+
+test('a proxy is named after its function unless it says otherwise', () => {
+  const fronted = functionTool({ function: 'shout' });
+  assert.equal(fronted.name, 'shout');
+  assert.equal(fronted.proxyOf, 'shout');
+  assert.equal(fronted.description, null);
+
+  const renamed = functionTool({ function: 'shout', name: 'emphasise', description: 'Louder.' });
+  assert.equal(renamed.name, 'emphasise');
+  assert.equal(renamed.proxyOf, 'shout');
+  assert.equal(renamed.description, 'Louder.');
+});
+
+test('what a defined plugin was told to offer agents is what it answers', () => {
+  const Defined = definePlugin({
+    id: 'teammates',
+    functions: [isTeammate()],
+    tools: [functionTool({ function: 'isTeammate' })],
+  });
+  const plugin = new Defined();
+
+  assert.equal(plugin.tools().length, 1);
+  assert.equal(plugin.tools()[0].proxyOf, 'isTeammate');
+
+  /* A copy each time, like the functions: nothing can be edited from under it. */
+  plugin.tools().push(functionTool({ function: 'isTeammate', name: 'again' }));
+  assert.equal(plugin.tools().length, 1);
+});
+
+test('a proxy to a function the plugin does not declare is refused where it is written', () => {
+  assert.throws(
+    () => definePlugin({ id: 'teammates', tools: [functionTool({ function: 'missing' })] }),
+    /tools\(\) proxies "missing", which functions\(\) does not declare/,
+  );
+});
+
+test('declaring one tool name twice is refused where it is written', () => {
+  const fronted = () => functionTool({ function: 'isTeammate' });
+  assert.throws(
+    () => definePlugin({ id: 'teammates', functions: [isTeammate()], tools: [fronted(), fronted()] }),
+    /declares the tool isTeammate more than once/,
+  );
+});
+
 test('what a defined plugin was told to declare is what it answers', () => {
   const Defined = definePlugin({
     id: 'slackish',
@@ -94,6 +163,7 @@ test('declaring nothing is answering none, as the base class does', () => {
   const Defined = definePlugin({ id: 'quiet' });
   const plugin = new Defined();
 
+  assert.deepEqual(plugin.tools(), []);
   assert.deepEqual(plugin.parameters(), []);
   assert.deepEqual(plugin.permissions(), []);
   assert.deepEqual(plugin.capabilities(), []);

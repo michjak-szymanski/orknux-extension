@@ -51,6 +51,16 @@ test('a plugin written against this package survives being bundled', async () =>
   ]);
   assert.deepEqual(inspected.permissions, ['INTL']);
   assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
+  /* The proxy came back resolved: the params and return type are `shout`'s own. */
+  assert.deepEqual(inspected.tools, [
+    {
+      name: 'shout',
+      description: 'Say it louder. Use when asked to emphasise.',
+      params: [{ name: 'text', type: 'string' }],
+      returnType: 'string',
+      proxyOf: 'shout',
+    },
+  ]);
   assert.deepEqual(validate(inspected), []);
   assert.ok(inspected.withinSizeLimit);
 });
@@ -73,9 +83,24 @@ test('a plugin written against the ambient globals loads too', async () => {
     { name: 'answer', description: null, params: [], returnType: 'number' },
   ]);
   /* Everything it did not declare defaults to none, as the base class answers. */
+  assert.deepEqual(inspected.tools, []);
   assert.deepEqual(inspected.parameters, []);
   assert.deepEqual(inspected.permissions, []);
   assert.deepEqual(inspected.capabilities, []);
+});
+
+test('a tool proxying a function the plugin does not declare is refused at load', async () => {
+  const outfile = await built('proxying.js');
+
+  await assert.rejects(() => inspect(outfile), (failure) => {
+    assert.ok(failure instanceof NotAPluginError);
+    /* The loader's own sentence, wrapper included, as an upload would answer. */
+    assert.equal(
+      failure.message,
+      'That file is not a usable plugin: tools() proxies "missing", which functions() does not declare',
+    );
+    return true;
+  });
 });
 
 test('something merely shaped like a plugin is refused', async () => {

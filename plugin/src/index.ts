@@ -10,14 +10,23 @@
  * The tooling — bundling a plugin, and loading a built one to check it — is
  * `@orknux/plugin/tooling`, and is deliberately not here.
  */
-export { orknux, OrknuxFunction, OrknuxParameter, OrknuxPlugin } from './contract.js';
+export {
+  orknux,
+  OrknuxFunction,
+  OrknuxFunctionTool,
+  OrknuxParameter,
+  OrknuxPlugin,
+  OrknuxTool,
+} from './contract.js';
 export type {
   OrknuxFunctionConstructor,
+  OrknuxFunctionToolConstructor,
   OrknuxParameterConstructor,
   OrknuxPluginBase,
+  OrknuxToolConstructor,
 } from './contract.js';
 
-export { definePlugin, fn, param } from './define.js';
+export { definePlugin, fn, functionTool, param, tool } from './define.js';
 export type { OrknuxPluginSpec } from './define.js';
 
 export {
@@ -30,6 +39,7 @@ export {
   MAX_PARAMETERS,
   MAX_PERMISSIONS,
   MAX_SOURCE_BYTES,
+  MAX_TOOLS,
   PARAMETER_TYPES,
   PERMISSIONS,
   PLUGIN_ID,
@@ -44,6 +54,8 @@ export type {
   OrknuxConnectionType,
   OrknuxFunctionDeclaration,
   OrknuxFunctionInstance,
+  OrknuxFunctionToolDeclaration,
+  OrknuxFunctionToolInstance,
   OrknuxHelpers,
   OrknuxParam,
   OrknuxParameterDeclaration,
@@ -55,6 +67,8 @@ export type {
   OrknuxResponse,
   OrknuxRunContext,
   OrknuxSettings,
+  OrknuxToolDeclaration,
+  OrknuxToolInstance,
   OrknuxValues,
   OrknuxValueType,
   SlackConnectionArgument,
@@ -76,11 +90,13 @@ export {
   validateId,
   validateParameters,
   validatePermissions,
+  validateTools,
 } from './validate.js';
 export type {
   DeclaredFunction,
   DeclaredParam,
   DeclaredParameter,
+  DeclaredTool,
   Declaration,
   Problem,
 } from './validate.js';

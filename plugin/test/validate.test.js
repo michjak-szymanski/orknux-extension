@@ -8,6 +8,7 @@ import {
   validateFunctions,
   validateParameters,
   validatePermissions,
+  validateTools,
 } from '../dist/index.js';
 
 /**
@@ -113,6 +114,80 @@ test('every problem is reported, not only the first', () => {
     { name: 'one two', params: [{ name: 'a b', type: 'nope' }], returnType: 'nope' },
   ]);
   assert.equal(problems.length, 4);
+});
+
+test('a tool may share its name with a function, which is what a proxy defaults to', () => {
+  const problems = validate({
+    ...teammates,
+    tools: [
+      {
+        name: 'isTeammate',
+        params: [{ name: 'email', type: 'string' }],
+        returnType: 'boolean',
+        proxyOf: 'isTeammate',
+      },
+    ],
+  });
+  assert.deepEqual(problems, []);
+});
+
+test('a tool proxying a function the plugin does not declare is refused', () => {
+  const problems = validateTools(
+    [{ name: 'missing', params: [], returnType: 'boolean', proxyOf: 'missing' }],
+    teammates.functions,
+  );
+  assert.deepEqual(
+    problems.map((problem) => problem.message),
+    ['tools() proxies "missing", which functions() does not declare'],
+  );
+});
+
+test('a tool has to answer a model, so none and object are refused by name', () => {
+  const problems = validateTools([{ name: 'post', params: [], returnType: 'none' }]);
+  assert.deepEqual(
+    problems.map((problem) => problem.message),
+    [
+      'the tool post returns none; a tool answers a model, so it has to return one of ' +
+        'string, number, boolean, map, array',
+    ],
+  );
+});
+
+test('the same tool twice is refused', () => {
+  const one = { name: 'same', params: [], returnType: 'boolean' };
+  const problems = validateTools([one, { ...one }]);
+  assert.deepEqual(
+    problems.map((problem) => problem.message),
+    ['it declares the tool same more than once'],
+  );
+});
+
+test('a tool name that is not an identifier is refused', () => {
+  const problems = validateTools([{ name: 'read message', params: [], returnType: 'map' }]);
+  assert.deepEqual(
+    problems.map((problem) => problem.message),
+    ['"read message" is not a usable tool name'],
+  );
+});
+
+test("a tool's parameters are held to the functions' rules, in the tool's name", () => {
+  const problems = validateTools([
+    {
+      name: 'compare',
+      params: [
+        { name: 'left', type: 'string' },
+        { name: 'left', type: 'nope' },
+      ],
+      returnType: 'boolean',
+    },
+  ]);
+  assert.deepEqual(
+    problems.map((problem) => problem.message),
+    [
+      'the tool compare declares left twice',
+      'the tool compare\'s left is a "nope", which is not a type this server has',
+    ],
+  );
 });
 
 test('a plugin declaring the rest of the contract has nothing wrong with it either', () => {

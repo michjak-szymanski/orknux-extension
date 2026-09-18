@@ -1,8 +1,8 @@
 /*
  * Never built and never run: this file exists to be *typechecked*, by
  * `tsconfig.ambient.json`, against `types/globals.d.ts` alone. It leans on
- * every part of the ambient contract — parameters, permissions, capabilities,
- * `this.settings`, the `orknux` helpers and their refusal arms — so a globals
+ * every part of the ambient contract — tools, parameters, permissions,
+ * capabilities, `this.settings`, the `orknux` helpers and their refusal arms — so a globals
  * file that stops describing what the server's template describes stops the
  * typecheck rather than shipping quietly.
  */
@@ -38,6 +38,24 @@ export default class Probe extends OrknuxPlugin {
 
   capabilities(): OrknuxCapability[] {
     return ['SLACK_READ_THREAD', 'NETWORK_REQUEST'];
+  }
+
+  tools(): (OrknuxTool | OrknuxFunctionTool)[] {
+    return [
+      // The proxy: `status` below, fronted, with words written for the model.
+      new OrknuxFunctionTool({
+        function: 'status',
+        description: 'Ask a URL which HTTP status it answers with.',
+      }),
+      // And a tool of its own, declared the way a function is.
+      new OrknuxTool({
+        name: 'ping',
+        description: 'Whether a URL answers at all.',
+        params: [{ name: 'url', type: 'string' }],
+        returnType: 'boolean',
+        run: (url: string): boolean => orknux.http.get(url).error === undefined,
+      }),
+    ];
   }
 
   functions(): OrknuxFunction[] {

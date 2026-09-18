@@ -17,9 +17,12 @@ examples/teammates/  a plugin that builds, in the style the server's template us
 ```
 
 A plugin is JavaScript loaded into an installation to give workflows functions
-the platform does not ship: one ES module, one default export extending
-`OrknuxPlugin`, evaluated in a sandbox with no network, no filesystem and no
-module resolution. What it declares becomes functions every workspace can call.
+— and agents tools — the platform does not ship: one ES module, one default
+export extending `OrknuxPlugin`, evaluated in a sandbox with no network, no
+filesystem and no module resolution. What `functions()` declares becomes
+functions every workspace can call; what `tools()` declares becomes tools an
+agent can be granted, most often the plugin's own functions fronted by an
+`OrknuxFunctionTool` proxy.
 
 [plugin/README.md](plugin/README.md) is how to write one. This file is how to
 work on the library itself.
@@ -39,7 +42,7 @@ comment and push payloads into one flat answer a condition can read.
 **[slack](plugins/slack/slack.js)** answers what a Slack payload alone cannot —
 whether a message is the first reply in its thread, what a permalink points at,
 who a user id is — by asking the server to read Slack through a connection the
-workspace pointed it at.
+workspace pointed it at. The three lookups are also fronted to agents as tools.
 
     https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/slack/slack.js
 
@@ -82,7 +85,8 @@ copy of the server's own contract with its wording intact.
 
 **That copy has to track the server.** It lives in `PluginRunner.CONTRACT` in
 orknux-server, along with the loader's own checks; `plugin/src/validate.ts` is
-the same again for `PluginDeclarations.validated` and `validatedParameters`;
+the same again for `PluginDeclarations.validated`, `validatedTools` and
+`validatedParameters`;
 `plugin/src/limits.ts` holds the numbers both sides enforce and the two
 vocabularies — `PluginPermission` and `PluginCapability` — a plugin declares
 against; and the `orknux` helper types in `plugin/src/types.ts` and

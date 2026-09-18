@@ -328,6 +328,30 @@ interface OrknuxFunctionDeclared {
   run: (...args: never[]) => unknown;
 }
 
+/** A tool's declaration — a run of its own, offered to agents. */
+interface OrknuxToolDeclared {
+  /** An identifier: letters, digits and underscores. */
+  name: string;
+  /** Written for the model that reads it: when to call this, and with what. */
+  description?: string;
+  /** In the order `run` receives them. */
+  params?: { name: string; type: OrknuxValueType }[];
+  /** What it answers with. A tool answers a model, so it has to answer something. */
+  returnType: OrknuxValueType;
+  /** What it does. Stays here; the server calls back into it. */
+  run: (...args: never[]) => unknown;
+}
+
+/** A proxy's declaration — one of this plugin's own functions, fronted for agents. */
+interface OrknuxFunctionToolDeclared {
+  /** The name of one of this plugin's functions, as `functions()` declares it. */
+  function: string;
+  /** What agents call it. Defaults to the function's own name. */
+  name?: string;
+  /** Written for the model. Defaults to the function's description. */
+  description?: string;
+}
+
 /** What a parameter may be: exactly what a workspace variable can hold. */
 type OrknuxParameterType = 'string' | 'number' | 'boolean' | 'connection';
 
@@ -381,8 +405,22 @@ declare abstract class OrknuxPlugin {
   /** Which plugin API this was written against. */
   abstract apiVersion(): number;
 
-  /** What this plugin offers. Defaults to none. */
+  /** What this plugin offers to workflows. Defaults to none. */
   functions(): OrknuxFunction[];
+
+  /**
+   * What this plugin offers to agents, as tools a model calls. Defaults to
+   * none.
+   *
+   * A surface of its own because it has a reader of its own: a tool's
+   * description is read by a model deciding whether to call it, where a
+   * function's is read by a person building a workflow. A tool that is really
+   * one of the functions is declared as an `OrknuxFunctionTool`, which proxies
+   * it rather than describing it twice — params, return type and
+   * implementation stay the function's, and only the name and description may
+   * be its own.
+   */
+  tools(): (OrknuxTool | OrknuxFunctionTool)[];
 
   /** What this plugin has to be told before it can work. Defaults to none. */
   parameters(): OrknuxParameter[];
@@ -437,6 +475,37 @@ declare class OrknuxFunction {
   readonly params: { name: string; type: OrknuxValueType }[];
   readonly returnType: OrknuxValueType;
   readonly run: (...args: never[]) => unknown;
+}
+
+/** A tool of the plugin's own: a declaration with a run, offered to agents. */
+declare class OrknuxTool {
+  constructor(declaration: OrknuxToolDeclared);
+
+  readonly name: string;
+  readonly description: string | null;
+  readonly params: { name: string; type: OrknuxValueType }[];
+  readonly returnType: OrknuxValueType;
+  readonly run: (...args: never[]) => unknown;
+  /** Null: this tool has a run of its own rather than fronting a function. */
+  readonly proxyOf: null;
+}
+
+/**
+ * A tool that is one of this plugin's own functions, exposed to agents.
+ *
+ * The utility that says so rather than a copy: params, return type and
+ * implementation are the function's — including any edit somebody makes to it
+ * on the server later — and only the name and the model-facing description may
+ * be this tool's own. A `function` that `functions()` does not declare is
+ * refused at load.
+ */
+declare class OrknuxFunctionTool {
+  constructor(declaration: OrknuxFunctionToolDeclared);
+
+  /** The plugin's own function this tool stands in front of. */
+  readonly proxyOf: string;
+  readonly name: string;
+  readonly description: string | null;
 }
 
 /** What each declared parameter is wrapped in. */

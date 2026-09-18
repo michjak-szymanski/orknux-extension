@@ -1,14 +1,24 @@
-import { OrknuxFunction, OrknuxParameter, OrknuxPlugin } from './contract.js';
+import {
+  OrknuxFunction,
+  OrknuxFunctionTool,
+  OrknuxParameter,
+  OrknuxPlugin,
+  OrknuxTool,
+} from './contract.js';
 import { API_VERSION, PLUGIN_ID } from './limits.js';
 import type {
   OrknuxCapability,
   OrknuxFunctionDeclaration,
   OrknuxFunctionInstance,
+  OrknuxFunctionToolDeclaration,
+  OrknuxFunctionToolInstance,
   OrknuxParam,
   OrknuxParameterDeclaration,
   OrknuxParameterInstance,
   OrknuxPermission,
   OrknuxPluginConstructor,
+  OrknuxToolDeclaration,
+  OrknuxToolInstance,
   OrknuxValueType,
 } from './types.js';
 
@@ -25,6 +35,38 @@ export function fn<
   Returns extends OrknuxValueType = OrknuxValueType,
 >(declaration: OrknuxFunctionDeclaration<Params, Returns>): OrknuxFunctionInstance {
   return new OrknuxFunction<Params, Returns>(declaration);
+}
+
+/**
+ * Declares one tool of the plugin's own — offered to agents, with a run of its
+ * own.
+ *
+ * Sugar over `new OrknuxTool(...)`, with the inference `fn` has: the
+ * parameters are a tuple and `run` is typed from them. The declaration is a
+ * function's; what differs is the reader, so write the description for the
+ * model that decides whether to call it. A tool that is really one of the
+ * plugin's functions wants `functionTool` instead.
+ */
+export function tool<
+  const Params extends readonly OrknuxParam[] = readonly [],
+  Returns extends OrknuxValueType = OrknuxValueType,
+>(declaration: OrknuxToolDeclaration<Params, Returns>): OrknuxToolInstance {
+  return new OrknuxTool<Params, Returns>(declaration);
+}
+
+/**
+ * Fronts one of the plugin's own functions for agents.
+ *
+ * Sugar over `new OrknuxFunctionTool(...)`. A proxy rather than a copy: the
+ * params, return type and implementation stay the function's — including any
+ * edit somebody makes to it on the server later — and only the name and the
+ * model-facing description may be the tool's own. Naming a function
+ * `functions()` does not declare is refused where it is written.
+ */
+export function functionTool(
+  declaration: OrknuxFunctionToolDeclaration,
+): OrknuxFunctionToolInstance {
+  return new OrknuxFunctionTool(declaration);
 }
 
 /**
@@ -53,8 +95,16 @@ export interface OrknuxPluginSpec {
   /** Which plugin API this was written against. Defaults to the current one. */
   apiVersion?: number;
 
-  /** What it offers. A plugin may have none and still be worth loading. */
+  /** What it offers to workflows. A plugin may have none and still be worth loading. */
   functions?: readonly OrknuxFunctionInstance[];
+
+  /**
+   * What it offers to agents — tools of its own from `tool`, or its own
+   * functions fronted with `functionTool`. A tool may share a name with a
+   * function, and a proxy defaults to exactly that: the two lists have
+   * different readers and never answer the same call.
+   */
+  tools?: readonly (OrknuxToolInstance | OrknuxFunctionToolInstance)[];
 
   /**
    * What it has to be told before it can work. Each workspace answers these
@@ -106,6 +156,7 @@ export function definePlugin(spec: OrknuxPluginSpec): OrknuxPluginConstructor {
 
   const apiVersion = spec.apiVersion ?? API_VERSION;
   const declared = spec.functions === undefined ? [] : [...spec.functions];
+  const offered = spec.tools === undefined ? [] : [...spec.tools];
   const wanted = spec.parameters === undefined ? [] : [...spec.parameters];
   const asked = spec.permissions === undefined ? [] : [...spec.permissions];
   const askedOf = spec.capabilities === undefined ? [] : [...spec.capabilities];
@@ -122,6 +173,24 @@ export function definePlugin(spec: OrknuxPluginSpec): OrknuxPluginConstructor {
       throw new Error(`${id} declares ${declaration.name} more than once`);
     }
     seen.add(declaration.name);
+  }
+
+  /*
+   * Unique among the tools, and a proxy has to name a function that is there.
+   * Sharing a name with a function is fine — it is what a proxy defaults to —
+   * but a proxy to a function the plugin does not declare is refused by the
+   * load, so it is refused here with the load's own sentence.
+   */
+  const granted = new Set<string>();
+  for (const one of offered) {
+    if (granted.has(one.name)) {
+      throw new Error(`${id} declares the tool ${one.name} more than once`);
+    }
+    granted.add(one.name);
+
+    if (one.proxyOf !== null && !seen.has(one.proxyOf)) {
+      throw new Error(`tools() proxies "${one.proxyOf}", which functions() does not declare`);
+    }
   }
 
   const named = new Set<string>();
@@ -144,6 +213,10 @@ export function definePlugin(spec: OrknuxPluginSpec): OrknuxPluginConstructor {
     /* Copies, so nothing the server is handed can be edited from under it. */
     override functions(): OrknuxFunctionInstance[] {
       return declared.slice();
+    }
+
+    override tools(): (OrknuxToolInstance | OrknuxFunctionToolInstance)[] {
+      return offered.slice();
     }
 
     override parameters(): OrknuxParameterInstance[] {
