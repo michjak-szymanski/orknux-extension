@@ -402,16 +402,16 @@ test('the web plugin declares what the server would accept', async () => {
 
   assert.deepEqual(
     inspected.parameters.map((parameter) => parameter.name),
-    ['apiKey', 'answer'],
+    ['backend', 'apiKey', 'answer'],
   );
-  /* The key is the one secret; the answer toggle is a plain setting. */
+  /* The key is the one secret; the backend and the answer toggle are settings. */
   assert.deepEqual(
     inspected.parameters.map((parameter) => parameter.secret),
-    [true, false],
+    [false, true, false],
   );
   assert.deepEqual(
     inspected.parameters.map((parameter) => parameter.required),
-    [true, false],
+    [true, true, false],
   );
 
   /* Nothing of the language is needed — only the request and what came back. */
@@ -427,15 +427,58 @@ test('the web plugin declares what the server would accept', async () => {
   );
 });
 
-test('a web search refuses an empty query and a missing key, before reaching anything', async () => {
+test('a web search says which setting is wrong, before reaching anything', async () => {
   const url = new URL(`../../plugins/web/web.js`, import.meta.url);
   const { default: Web } = await import(url.href);
-  const declared = new Web().functions().find((one) => one.name === 'search');
 
-  /* Nothing to search for is decided before the key is even looked at. */
-  assert.throws(() => declared.run('   ', 0), /nothing to search for/);
-  /* And a real query with no key says which parameter, rather than failing at the door. */
-  assert.throws(() => declared.run('what happened today', 0), /apiKey parameter is not set/);
+  /*
+   * An instance carrying settings. The base class freezes `settings` onto an
+   * instance as it constructs one, and does it non-configurably — so a test
+   * that wants a workspace's answers builds the object without running that
+   * constructor, which is the only door left and is enough: `functions()` is
+   * a prototype method and the runs read `this.settings`.
+   */
+  const configured = (settings) => {
+    const plugin = Object.create(Web.prototype);
+    Object.defineProperty(plugin, 'settings', { value: Object.freeze(settings) });
+    return plugin.functions().find((one) => one.name === 'search');
+  };
+
+  /* Nothing to search for is decided before any setting is looked at. */
+  assert.throws(() => configured({}).run('   ', 0), /nothing to search for/);
+
+  /* Then the backend, named or not, and the refusal says what it takes. */
+  assert.throws(
+    () => configured({}).run('what happened today', 0),
+    /backend parameter is not set: it takes tavily or brave/,
+  );
+  assert.throws(
+    () => configured({ backend: 'bing' }).run('what happened today', 0),
+    /no search backend called bing: it takes tavily or brave/,
+  );
+
+  /*
+   * And the key last — asked for by the backend's own name, off a setting
+   * that was typed into a page and so is matched trimmed and in any case.
+   */
+  assert.throws(
+    () => configured({ backend: '  TAVILY ' }).run('what happened today', 0),
+    /apiKey parameter is not set, and tavily needs one/,
+  );
+  assert.throws(
+    () => configured({ backend: 'Brave' }).run('what happened today', 0),
+    /apiKey parameter is not set, and brave needs one/,
+  );
+
+  /* With both set, the only thing left is the network — which is not granted here. */
+  assert.throws(
+    () => configured({ backend: 'brave', apiKey: 'nope' }).run('what happened today', 0),
+    /could not reach Brave: this plugin was not granted NETWORK_REQUEST/,
+  );
+  assert.throws(
+    () => configured({ backend: 'tavily', apiKey: 'nope' }).run('what happened today', 0),
+    /could not reach Tavily: this plugin was not granted NETWORK_REQUEST/,
+  );
 });
 
 test('the todo plugin declares what the server would accept', async () => {

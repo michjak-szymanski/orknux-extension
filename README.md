@@ -75,9 +75,10 @@ drawn into the page as vectors. Writer, fonts and renderer are all bundled in.
 
     https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/pdf/pdf.js
 
-**[web](plugins/web/web.js)** searches the web through Tavily and answers title,
-url and a readable snippet per result, so a model can look something up rather
-than answer from memory.
+**[web](plugins/web/web.js)** searches the web — through Tavily or Brave,
+whichever the workspace configures — and answers title, url and a readable
+snippet per result, so a model can look something up rather than answer from
+memory.
 
     https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/web/web.js
 
