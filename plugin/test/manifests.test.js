@@ -84,10 +84,16 @@ for (const entry of catalog) {
 test('every plugin ships a manifest, and there is one to copy', () => {
   assert.ok(shipped.length > 0, 'no plugins found');
   for (const name of shipped) {
-    assert.ok(
-      readdirSync(root + name).includes('plugin.json'),
-      `${name} has no plugin.json`,
-    );
+    const held = readdirSync(root + name);
+    assert.ok(held.includes('plugin.json'), `${name} has no plugin.json`);
+    /*
+     * `plugin.json` and no variation of it. The marketplace reads that one
+     * name, so a folder carrying a second spelling is a plugin describing
+     * itself twice with nobody able to say which was read.
+     */
+    for (const variant of ['marketplace.json', 'orknux.json']) {
+      assert.ok(!held.includes(variant), `${name} carries a ${variant}; the name is plugin.json`);
+    }
   }
   /* The schema itself and a filled-in example, for a plugin written next. */
   const beside = readdirSync(root);
