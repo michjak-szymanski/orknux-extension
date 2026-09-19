@@ -82,6 +82,18 @@ memory.
 
     https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/web/web.js
 
+**[date](plugins/date/date.js)** answers the working calendar: business days,
+working hours, and date arithmetic that gets month ends and daylight saving
+right. It reaches nothing, so it cannot break when an API does.
+
+    https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/date/date.js
+
+**[markdown](plugins/markdown/markdown.js)** turns the markdown a model writes
+into the mrkdwn Slack actually reads — or into plain text — without mangling
+the code spans and links along the way.
+
+    https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/markdown/markdown.js
+
 **[todo](plugins/todo/todo.js)** gives an agent a todo list for the length of one
 conversation, so a request too complex to hold in one step is split, worked and
 checked off. It asks the platform for nothing at all.

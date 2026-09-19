@@ -38,6 +38,12 @@ const BRANDED = [
   { plugin: 'confluence', icon: 'siConfluence' },
   { plugin: 'prometheus', icon: 'siPrometheus' },
   { plugin: 'mermaid', icon: 'siMermaid' },
+  /*
+   * The odd one out: the markdown mark is not a trademark anybody holds —
+   * Dustin Curtis put it in the public domain — so it is here for the plainer
+   * reason that it is the mark the thing already has.
+   */
+  { plugin: 'markdown', icon: 'siMarkdown' },
 ];
 
 for (const { plugin, icon } of BRANDED) {

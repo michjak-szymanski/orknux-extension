@@ -1,0 +1,10 @@
+{
+  "$schema": "https://orknux.ai/marketplace/plugin.schema.json",
+  "key": "markdown",
+  "name": "Markdown",
+  "author": "Orknux",
+  "summary": "Turn the markdown a model writes into Slack mrkdwn, or into plain text.",
+  "version": "0.1.0",
+  "icon": "icon.svg",
+  "descriptionPath": "README.md"
+}
