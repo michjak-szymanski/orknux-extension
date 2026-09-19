@@ -8,6 +8,7 @@ import {
   MAX_LIBRARIES,
   MAX_LIBRARY_PATH_LENGTH,
   MAX_OBJECTS,
+  MAX_OPTIONS,
   MAX_PARAMETERS,
   MAX_PERMISSIONS,
   MAX_PROPERTIES,
@@ -81,6 +82,8 @@ export interface DeclaredParameter {
   required?: boolean;
   secret?: boolean;
   connectionType?: string | null;
+  /** The values it may take, where the plugin knows them all. */
+  options?: readonly string[] | null;
 }
 
 /** What a plugin answered when it was loaded and asked. */
@@ -625,6 +628,17 @@ export function validateParameters(declared: DeclaredParameter[]): Problem[] {
             "connection rather than holding one's credential.",
         );
       }
+      /*
+       * And a connection is not chosen from a list of values - it names a row
+       * the workspace has, and the settings form already draws a picker of
+       * those. Said inside this branch because the branch returns: leaving it
+       * to the check below meant a connection carrying options passed here
+       * and was refused by the sandbox, which is the wrong way round for a
+       * mirror to be wrong.
+       */
+      if (parameter.options !== undefined && parameter.options !== null) {
+        refuse(`the parameter ${name} cannot have options: it is a connection`);
+      }
       continue;
     }
 
@@ -640,6 +654,32 @@ export function validateParameters(declared: DeclaredParameter[]): Problem[] {
           'connections, so it has to be one of ' +
           `${[...PARAMETER_TYPES, CONNECTION].join(', ')}.`,
       );
+    }
+
+    /*
+     * The values it may take, where there is a fixed set. What this buys is a
+     * picker on the settings page instead of a text box - so the rules are
+     * about what a picker can be: something to choose from, each row distinct,
+     * and short enough to read rather than search.
+     */
+    const offered = parameter.options ?? null;
+    if (offered !== null) {
+      if (!Array.isArray(offered) || offered.length === 0) {
+        refuse(`the parameter ${name} has options, which have to be a non-empty array`);
+      } else if (offered.some((one) => typeof one !== 'string' || one.trim().length === 0)) {
+        refuse(`the parameter ${name} has an option that is not a name`);
+      } else if (new Set(offered.map((one) => one.trim())).size !== offered.length) {
+        refuse(`the parameter ${name} offers the same option more than once`);
+      } else if (offered.length > MAX_OPTIONS) {
+        refuse(
+          `the parameter ${name} offers ${offered.length} options, and a picker holds at most ${MAX_OPTIONS}`,
+        );
+      }
+      // A secret cannot be one of a set somebody can read; the connection case
+      // has already been dealt with and continued above.
+      if (parameter.secret === true) {
+        refuse(`the parameter ${name} cannot have options: it is a secret`);
+      }
     }
   }
 

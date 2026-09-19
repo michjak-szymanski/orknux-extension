@@ -241,6 +241,19 @@ export interface OrknuxFunctionToolInstance {
  * is able to reach — nothing gets in that is not on the list.
  */
 export interface OrknuxParameterDeclaration {
+  /**
+   * The values this may take, where the plugin knows them all.
+   *
+   * Leave it out where anything typed will do. A set makes the settings field
+   * a picker, which deletes the check a plugin otherwise writes by hand and
+   * the sentence that lists the choices — and a value that is not on the list
+   * cannot be typed rather than being found at the first call.
+   *
+   * Not on a `secret`, which cannot be one of a set somebody can read, and not
+   * on a `connection`, which names a row the workspace has and has its own
+   * picker already. At most `MAX_OPTIONS`, no duplicates.
+   */
+  options?: readonly string[];
   /** An identifier: letters, digits and underscores. */
   name: string;
 
@@ -281,6 +294,8 @@ export interface OrknuxParameterDeclaration {
  * `connectionType` null.
  */
 export interface OrknuxParameterInstance {
+  /** The values it may take, or null where anything typed will do. */
+  readonly options: readonly string[] | null;
   readonly name: string;
   readonly description: string | null;
   readonly type: string;

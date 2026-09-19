@@ -284,6 +284,7 @@ class OrknuxParameterFallback {
     self['required'] = source['required'] === undefined ? true : source['required'];
     self['secret'] = source['secret'] === undefined ? false : source['secret'];
     self['connectionType'] = source['connectionType'] === undefined ? null : source['connectionType'];
+    self['options'] = source['options'] === undefined ? null : source['options'];
 
     if (typeof self['name'] !== 'string' || self['name'].length === 0) {
       throw new Error('an OrknuxParameter needs a name');
@@ -307,6 +308,25 @@ class OrknuxParameterFallback {
     }
     if (self['connectionType'] !== null && self['type'] !== 'connection') {
       throw new Error(`${self['name']} names a connectionType but is not a connection`);
+    }
+    const offered = self['options'];
+    if (offered !== null) {
+      if (!Array.isArray(offered) || offered.length === 0) {
+        throw new Error(`${self['name']} has options, which have to be a non-empty array`);
+      }
+      if (offered.some((one) => typeof one !== 'string' || one.length === 0)) {
+        throw new Error(`${self['name']} has an option that is not a name`);
+      }
+      /*
+       * Neither a connection nor a secret is chosen from a list of values: a
+       * connection names a row the workspace has, and a secret cannot be one
+       * of a set somebody can read.
+       */
+      if (self['type'] === 'connection' || self['secret'] === true) {
+        throw new Error(
+          `${self['name']} cannot have options: it is a ${self['secret'] === true ? 'secret' : 'connection'}`,
+        );
+      }
     }
   }
 }

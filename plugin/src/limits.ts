@@ -104,6 +104,15 @@ export const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
  */
 export const PLUGIN_ID = /^[A-Za-z_$][A-Za-z0-9_$]{0,31}$/;
 
+/**
+ * How many values a parameter's picker may offer.
+ *
+ * A list past this is not a choice anybody scans, it is a search — and a
+ * parameter with two hundred answers wants a different control than this one.
+ * `MOST_OPTIONS` in `PluginDeclarations` on the server.
+ */
+export const MAX_OPTIONS = 50;
+
 /** A function or parameter name, held to the rule a workspace's own functions are. */
 export const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/;
 

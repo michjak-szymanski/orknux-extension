@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  MAX_OPTIONS,
   qualifiedName,
   validate,
   validateCapabilities,
@@ -283,4 +284,50 @@ test('a capability this server does not have is refused', () => {
 
 test('a capability is matched the way the server matches one: trimmed, any case', () => {
   assert.deepEqual(validateCapabilities([' slack_read_thread ']), []);
+});
+
+/*
+ * Options on a parameter: what turns a text box into a picker.
+ *
+ * The rules are about what a picker can be — something to choose from, each
+ * row distinct, short enough to read rather than search — and about the two
+ * kinds that are not chosen from a list of values at all.
+ */
+test('a parameter may name the values it takes', () => {
+  assert.deepEqual(
+    validateParameters([{ name: 'backend', type: 'string', options: ['tavily', 'brave'] }]),
+    [],
+  );
+});
+
+test('an empty set is not a choice', () => {
+  const problems = validateParameters([{ name: 'backend', type: 'string', options: [] }]);
+  assert.match(problems[0].message, /non-empty array/);
+});
+
+test('the same option twice is a picker with one row drawn twice', () => {
+  const problems = validateParameters([
+    { name: 'backend', type: 'string', options: ['brave', 'brave'] },
+  ]);
+  assert.match(problems[0].message, /more than once/);
+});
+
+test('a secret cannot be one of a set somebody can read', () => {
+  const problems = validateParameters([
+    { name: 'token', type: 'string', secret: true, options: ['a', 'b'] },
+  ]);
+  assert.match(problems[0].message, /it is a secret/);
+});
+
+test('and a connection already has its own picker', () => {
+  const problems = validateParameters([
+    { name: 'slack', type: 'connection', connectionType: 'SLACK', options: ['a', 'b'] },
+  ]);
+  assert.match(problems[0].message, /it is a connection/);
+});
+
+test('the bound is the server’s', () => {
+  const many = Array.from({ length: MAX_OPTIONS + 1 }, (_unused, at) => `option-${at}`);
+  const problems = validateParameters([{ name: 'backend', type: 'string', options: many }]);
+  assert.match(problems[0].message, new RegExp(`at most ${MAX_OPTIONS}`));
 });
