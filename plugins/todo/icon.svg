@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <title>A list with its first items checked off</title>
+  <path d="m3.5 7.5 2 2 3.5-4"/>
+  <path d="m3.5 17 2 2 3.5-4"/>
+  <path d="M13 7.5h7.5"/>
+  <path d="M13 17h7.5"/>
+</svg>
