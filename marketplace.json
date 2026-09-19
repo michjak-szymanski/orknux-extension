@@ -6,7 +6,8 @@
     "summary": "Read, post, react and search Slack from workflows and agents.",
     "descriptionPath": "plugins/slack/README.md",
     "version": "1.0.0",
-    "path": "plugins/slack/slack.js"
+    "path": "plugins/slack/slack.js",
+    "icon": "💬"
   },
   {
     "key": "github",
@@ -15,7 +16,8 @@
     "summary": "Webhook checks, search, files, builds and comments against GitHub.",
     "descriptionPath": "plugins/github/README.md",
     "version": "1.0.0",
-    "path": "plugins/github/github.js"
+    "path": "plugins/github/github.js",
+    "icon": "🐙"
   },
   {
     "key": "teams",
@@ -24,7 +26,8 @@
     "summary": "Microsoft Teams messages, wrapped for workflows and agents.",
     "descriptionPath": "plugins/teams/README.md",
     "version": "1.0.0",
-    "path": "plugins/teams/teams.js"
+    "path": "plugins/teams/teams.js",
+    "icon": "👥"
   },
   {
     "key": "confluence",
@@ -33,7 +36,8 @@
     "summary": "Search the wiki beside the work, and open its pages as text.",
     "descriptionPath": "plugins/confluence/README.md",
     "version": "0.1.0",
-    "path": "plugins/confluence/confluence.js"
+    "path": "plugins/confluence/confluence.js",
+    "icon": "📚"
   },
   {
     "key": "prometheus",
@@ -42,7 +46,8 @@
     "summary": "Ask what the system is doing, from a condition or an agent.",
     "descriptionPath": "plugins/prometheus/README.md",
     "version": "0.1.0",
-    "path": "plugins/prometheus/prometheus.js"
+    "path": "plugins/prometheus/prometheus.js",
+    "icon": "📈"
   },
   {
     "key": "mermaid",
@@ -51,7 +56,8 @@
     "summary": "Render Mermaid diagrams to SVG, offline, inside the sandbox.",
     "descriptionPath": "plugins/mermaid/README.md",
     "version": "0.1.0",
-    "path": "plugins/mermaid/mermaid.js"
+    "path": "plugins/mermaid/mermaid.js",
+    "icon": "📐"
   },
   {
     "key": "pdf",
@@ -60,7 +66,8 @@
     "summary": "Compose PDF documents from a workflow, diagrams drawn in.",
     "descriptionPath": "plugins/pdf/README.md",
     "version": "0.1.0",
-    "path": "plugins/pdf/pdf.js"
+    "path": "plugins/pdf/pdf.js",
+    "icon": "📄"
   },
   {
     "key": "todo",
@@ -69,6 +76,7 @@
     "summary": "A todo list for the agent's own plan, kept in the session store.",
     "descriptionPath": "plugins/todo/README.md",
     "version": "0.1.0",
-    "path": "plugins/todo/todo.js"
+    "path": "plugins/todo/todo.js",
+    "icon": "✅"
   }
 ]
