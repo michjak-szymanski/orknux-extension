@@ -10,7 +10,7 @@
  *
  * ## Setting one up
  *
- * 1. Load this plugin and accept TEXT_ENCODING and NETWORK_REQUEST.
+ * 1. Load this plugin and accept NETWORK_REQUEST, which is all it asks for.
  * 2. Set `url` to the wiki's root — `https://your-site.atlassian.net/wiki` for
  *    Cloud, or the base url of a Server/Data Center install.
  * 3. Put a credential in one of the workspace's variables and point `token` at
@@ -22,13 +22,16 @@
  * as a Bearer token, which is Server's. Nothing else about the two differs
  * here, because `/rest/api/search` and `/rest/api/content` answer on both.
  *
- * ## Why base64 is written out longhand
+ * ## Why this asks for no permission
  *
  * Basic authentication is base64, and the sandbox hands out language builtins
- * and nothing else — no `btoa`, on purpose. So base64 is here, in the plugin,
- * which is exactly what "a plugin declares the JavaScript it needs" means. The
- * bytes come from TextEncoder, so an email with anything past ASCII in it is
- * encoded the way the other end will decode it.
+ * and nothing else — no `btoa`, on purpose. This file used to carry the
+ * alphabet and the loop, and ask for TEXT_ENCODING to get at the bytes.
+ * `orknux.encoding` replaced both: the server does the UTF-8 and the base64,
+ * so an email with anything past ASCII in it is still encoded the way the
+ * other end will decode it, and the plugin needs no permission to say so.
+ * Encoding is ungranted because it reaches nothing — it is arithmetic on a
+ * string, the way a digest is.
  *
  * Licensed under the Apache License, Version 2.0.
  * SPDX-License-Identifier: Apache-2.0
@@ -230,8 +233,7 @@ export default class Confluence extends OrknuxPlugin {
           'Searches Confluence. Pass plain words to search page text, or CQL for anything sharper - ' +
           'space = "DOC", title ~ "runbook", type = blogpost, lastmodified > now("-4w") - which is used ' +
           'as written. Answers the total and the matches - id, type, title, space, an excerpt around ' +
-          'the match and a url each; openPage takes the id or the url. limit caps the matches, 0 for ' +
-          'the default.',
+          'the match and a url each; openPage takes the id or the url. limit caps the matches.',
         params: [
           { name: 'query', type: 'string' },
           { name: 'limit', type: 'number', required: false, default: 20 },
