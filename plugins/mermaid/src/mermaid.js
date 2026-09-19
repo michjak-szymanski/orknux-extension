@@ -130,12 +130,12 @@ export default class Mermaid extends OrknuxPlugin {
           'flowchart/graph, sequenceDiagram, stateDiagram-v2, classDiagram and erDiagram; another ' +
           'kind (pie, gantt, mindmap, ...) is refused by name - use links for those. theme names a ' +
           'palette (zinc-light, zinc-dark, tokyo-night, catppuccin-mocha, catppuccin-latte, nord, ' +
-          '...), empty for the light default. The answer is SVG text: put it on Slack with ' +
+          '...), left out for the light default. The answer is SVG text: put it on Slack with ' +
           'slack_upload and a .svg filename, where it shows as an image. Answers svg and its byte ' +
           'count.',
         params: [
           { name: 'source', type: 'string' },
-          { name: 'theme', type: 'string' },
+          { name: 'theme', type: 'string', required: false, default: '' },
         ],
         returnType: 'Drawing',
         run: (source, theme) => {
@@ -180,10 +180,10 @@ export default class Mermaid extends OrknuxPlugin {
           'image ready to paste into a GitHub comment. The source travels inside the links and the ' +
           'reader\'s browser does the rendering - so this handles every diagram kind, including the ' +
           'ones render refuses, at the price of the reader\'s browser reaching mermaid.ink. theme is ' +
-          'default, dark, forest or neutral - empty for default.',
+          'default, dark, forest or neutral.',
         params: [
           { name: 'source', type: 'string' },
-          { name: 'theme', type: 'string' },
+          { name: 'theme', type: 'string', required: false, default: 'default' },
         ],
         returnType: 'Links',
         run: (source, theme) => {

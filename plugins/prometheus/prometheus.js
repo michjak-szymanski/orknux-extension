@@ -169,10 +169,10 @@ export default class Prometheus extends OrknuxPlugin {
           'Lists the metric names the server knows, alphabetically - the vocabulary a query is written ' +
           'in. match narrows the list to the series a selector matches, like {job="api"} - or pass an ' +
           'empty match for everything. Answers the names and how many there were before limit capped ' +
-          'them; 0 for no cap.',
+          'them; leave limit out for no cap.',
         params: [
           { name: 'match', type: 'string' },
-          { name: 'limit', type: 'number' },
+          { name: 'limit', type: 'number', required: false, default: 0 },
         ],
         returnType: 'Metrics',
         run: (match, limit) => {
@@ -182,7 +182,8 @@ export default class Prometheus extends OrknuxPlugin {
           }
           const names = read(this.settings, path);
           const metrics = Array.isArray(names) ? names : [];
-          const capped = typeof limit === 'number' && limit > 0 ? metrics.slice(0, limit) : metrics;
+          /* Zero is this one's real answer rather than a sentinel: no cap. */
+          const capped = limit > 0 ? metrics.slice(0, limit) : metrics;
           return { metrics: capped, count: metrics.length };
         },
       }),
@@ -192,12 +193,11 @@ export default class Prometheus extends OrknuxPlugin {
         description:
           'Executes a PromQL expression as an instant query: rate(http_requests_total[5m]), ' +
           'up{job="api"}, histogram_quantile(0.99, ...) - anything the expression browser takes. ' +
-          'Evaluated now, or at `time` when one is passed (RFC 3339 or a unix timestamp; empty for ' +
-          'now). Answers Prometheus\'s own result: resultType (vector, matrix, scalar or string) and ' +
+          'Evaluated now, or at `time` when one is given (RFC 3339 or a unix timestamp). Answers Prometheus\'s own result: resultType (vector, matrix, scalar or string) and ' +
           'result, where each vector element is {metric: {labels}, value: [time, "value"]}.',
         params: [
           { name: 'promql', type: 'string' },
-          { name: 'time', type: 'string' },
+          { name: 'time', type: 'string', required: false, default: '' },
         ],
         returnType: 'map',
         run: (promql, time) => {

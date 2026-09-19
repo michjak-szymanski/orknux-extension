@@ -263,12 +263,12 @@ export default class Web extends OrknuxPlugin {
           'Searches the web and answers the results: title, url and a readable snippet of each page, ' +
           'best first. Use it for anything that happened recently, anything you are unsure of, and ' +
           'anything the user asks you to look up - then read the snippets and cite the urls rather ' +
-          'than answering from memory. limit caps how many come back, 0 for the default of ' +
-          `${DEFAULT_RESULTS}. answer carries a summary composed over the results where the workspace ` +
-          'turned that on, and is null where it did not.',
+          `than answering from memory. limit caps how many come back, ${DEFAULT_RESULTS} if not given. ` +
+          'answer carries a summary composed over the results where the workspace turned that on, ' +
+          'and is null where it did not.',
         params: [
           { name: 'query', type: 'string' },
-          { name: 'limit', type: 'number' },
+          { name: 'limit', type: 'number', required: false, default: DEFAULT_RESULTS },
         ],
         returnType: 'Search',
         run: (query, limit) => {
@@ -278,9 +278,11 @@ export default class Web extends OrknuxPlugin {
           }
 
           /*
-           * Matched forgivingly — trimmed, any case — because this is typed
-           * into a settings page by hand, and `Tavily` meaning nothing would
-           * be a cruel way to find that out.
+           * Still matched forgivingly, and still refused by name. The settings
+           * page draws a picker for a parameter that names its values now, so
+           * a typo is no longer reachable from the form — but a workspace
+           * variable can hold anything, and answering the wrong index quietly
+           * is worse than being told.
            */
           const named =
             typeof this.settings.backend === 'string'
@@ -299,8 +301,8 @@ export default class Web extends OrknuxPlugin {
             throw new Error(`the plugin's apiKey parameter is not set, and ${named} needs one`);
           }
 
-          const capped =
-            typeof limit === 'number' && limit > 0 ? Math.min(limit, MAX_RESULTS) : DEFAULT_RESULTS;
+          /* The server put the default in, so this only has to cap it. */
+          const capped = Math.min(Math.max(limit, 1), MAX_RESULTS);
           const found =
             named === 'tavily'
               ? tavily(key, asked, capped, this.settings.answer === true)

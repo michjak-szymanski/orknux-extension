@@ -432,11 +432,10 @@ what happened, what was expected, and how to see it — in that order.`,
           '"In Progress", assignee = currentUser() ORDER BY updated DESC, labels = urgent AND ' +
           'created >= -7d. Answers the issues - key, summary, status, type, priority, assignee, ' +
           'reporter, updated and a url each - and how many the whole search holds, which Jira Cloud ' +
-          'no longer tells anybody and so comes back null there. limit caps the issues, 0 for the ' +
-          'default.',
+          'no longer tells anybody and so comes back null there. limit caps the issues, 25 if not given.',
         params: [
           { name: 'jql', type: 'string' },
-          { name: 'limit', type: 'number' },
+          { name: 'limit', type: 'number', required: false, default: 25 },
         ],
         returnType: 'Search',
         run: (jql, limit) => {
@@ -444,7 +443,7 @@ what happened, what was expected, and how to see it — in that order.`,
           if (asked.length === 0) {
             throw new Error('there is no JQL to search with');
           }
-          const capped = typeof limit === 'number' && limit > 0 ? Math.min(limit, 100) : 25;
+          const capped = Math.min(Math.max(limit, 1), 100);
           const site = root(this.settings);
 
           /*

@@ -1039,3 +1039,64 @@ test('the teams plugin verifies a real signature, and refuses a wrong one', asyn
   /* And a header that is not the scheme Teams sends. */
   assert.equal(configured().run({ authorization: `Bearer ${signed}` }, body), false);
 });
+
+test('the sentinel convention is gone from the parameters that could carry a default', async () => {
+  /*
+   * Thirty-six places used to say "0 for the default" or "an empty string to
+   * use the configured one", each a workaround for every positional argument
+   * having to be supplied. Those sentences lived in tool descriptions a model
+   * reads on every call, so the convention cost context repeatedly — and
+   * "pass 0 to mean default" is exactly the instruction a model gets wrong.
+   */
+  const optional = [];
+  for (const key of ['confluence', 'date', 'github', 'jira', 'mermaid', 'pdf', 'prometheus', 'slack', 'web']) {
+    const inspected = await inspect(shipped(key));
+    for (const declared of [...inspected.functions, ...inspected.tools]) {
+      for (const param of declared.params) {
+        if (param.required === false) {
+          optional.push(`${key}.${declared.name}.${param.name}`);
+        }
+      }
+    }
+  }
+  assert.ok(optional.length >= 20, `only ${optional.length} parameters are optional`);
+
+  /*
+   * And every one of them is last, or followed only by others that are. An
+   * argument is positional, so "may be left out" means nothing in the middle —
+   * validate refuses that, and this is the shipped proof it never happens.
+   */
+  for (const key of ['confluence', 'date', 'github', 'jira', 'mermaid', 'pdf', 'prometheus', 'slack', 'web']) {
+    const inspected = await inspect(shipped(key));
+    for (const declared of inspected.functions) {
+      let seenOptional = false;
+      for (const param of declared.params) {
+        if (param.required === false) seenOptional = true;
+        else {
+          assert.ok(
+            !seenOptional,
+            `${key}.${declared.name} has a required ${param.name} after an optional one`,
+          );
+        }
+      }
+    }
+  }
+});
+
+test('a default is of the type its parameter declared', async () => {
+  /* Refused at load rather than at the call that would have found it. */
+  for (const key of ['github', 'slack', 'web', 'date', 'mermaid', 'pdf', 'confluence', 'jira', 'prometheus']) {
+    const inspected = await inspect(shipped(key));
+    for (const declared of inspected.functions) {
+      for (const param of declared.params) {
+        if (param.default === undefined) continue;
+        const kind = param.type === 'number' ? 'number' : param.type === 'boolean' ? 'boolean' : 'string';
+        assert.equal(
+          typeof param.default,
+          kind,
+          `${key}.${declared.name}.${param.name} is a ${param.type} with a ${typeof param.default} default`,
+        );
+      }
+    }
+  }
+});

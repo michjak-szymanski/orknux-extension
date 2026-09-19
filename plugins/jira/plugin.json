@@ -4,7 +4,7 @@
   "name": "Jira",
   "author": "Orknux",
   "summary": "Find issues by JQL, open one whole, comment, move it through its workflow, and raise new ones.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "icon": "icon.svg",
   "descriptionPath": "README.md"
 }

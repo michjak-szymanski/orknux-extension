@@ -609,10 +609,10 @@ export default class Pdf extends OrknuxPlugin {
           'classDiagram, erDiagram). Full Unicode text - Polish, Czech, the lot - set in DejaVu. A ' +
           'report writer, not a browser: no CSS, no raster images, no links; i/em render regular. ' +
           'Answers the file as base64 - hand it to slack_uploadBinary with a .pdf filename - with ' +
-          'its page and byte counts. title is the document\'s title metadata; empty for none.',
+          'its page and byte counts. title is the document\'s title metadata.',
         params: [
           { name: 'html', type: 'string' },
-          { name: 'title', type: 'string' },
+          { name: 'title', type: 'string', required: false, default: '' },
         ],
         returnType: 'Document',
         run: (html, title) => {

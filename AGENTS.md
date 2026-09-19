@@ -68,17 +68,26 @@ settings page does not draw a picker yet, so a text box can still hold a typo �
 and falling through to the wrong backend silently is worse than being told. The
 check comes out when the picker lands.
 
-**`required` and `default` on a *function* parameter are proposed, not
-accepted.** `PARAMETERS.md` has the status table; the server refuses one today,
-and so does `validate` — which it did *not* until it was checked. The fields
-were simply unknown to it, so a plugin declaring a default passed `check` and
-was then refused by the upload. That is the one direction this package may not
-be wrong in, and "we have no rule about it" is how a mirror ends up looser
-without anybody deciding to make it so. A field the contract names has to be
-either allowed or refused, never ignored.
+**`required` and `default` on a function parameter are accepted now**, and the
+sentinel convention they replaced is gone: twenty-two parameters carry a
+default, and the "0 for the default" and "an empty string to use the configured
+one" sentences came out of the descriptions with them. Those sentences lived in
+tool descriptions a model reads on every call, so they cost context repeatedly
+and told it to do something it reliably got wrong.
 
-So the thirty-six "0 for the default" sentences stay until the table says
-otherwise — and when it does, the refusal in `validate.ts` comes out with them.
+Three things to keep in mind when adding one:
+
+- **The server puts the default in before the call**, so `run` still receives
+  every argument. There is no `undefined` to guard and no `limit || 20` to
+  write — `pageSize` in the github library lost its fallback parameter for
+  exactly this reason and now only caps.
+- **Optional parameters go last.** Arguments are positional, so "may be left
+  out" means nothing in the middle, and validate refuses a required one after
+  an optional one. That is why `connection` — first in every slack function —
+  is still required and still takes an empty string: making it optional would
+  mean reordering, and reordering breaks every workflow already calling it.
+- **A default must be of the parameter's own type**, and a default alongside
+  `required: true` is refused rather than ignored.
 
 ## Conventions
 

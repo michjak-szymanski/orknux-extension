@@ -4,7 +4,7 @@
   "name": "Prometheus",
   "author": "Orknux",
   "summary": "Ask what the system is doing, from a condition or an agent.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "icon": "icon.svg",
   "descriptionPath": "README.md"
 }

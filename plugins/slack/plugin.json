@@ -4,7 +4,7 @@
   "name": "Slack",
   "author": "Orknux",
   "summary": "Read threads, messages and users, post, react and search — and carry files both ways, text or binary.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "icon": "icon.svg",
   "descriptionPath": "README.md"
 }

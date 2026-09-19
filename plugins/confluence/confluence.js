@@ -234,7 +234,7 @@ export default class Confluence extends OrknuxPlugin {
           'the default.',
         params: [
           { name: 'query', type: 'string' },
-          { name: 'limit', type: 'number' },
+          { name: 'limit', type: 'number', required: false, default: 20 },
         ],
         returnType: 'Search',
         run: (query, limit) => {
@@ -252,7 +252,7 @@ export default class Confluence extends OrknuxPlugin {
             ? asked
             : `text ~ "${asked.replace(/(["\\])/g, '\\$1')}"`;
 
-          const capped = typeof limit === 'number' && limit > 0 ? Math.min(limit, 100) : 20;
+          const capped = Math.min(Math.max(limit, 1), 100);
           const found = read(this.settings, `/rest/api/search?cql=${encodeURIComponent(cql)}&limit=${capped}`);
 
           /* The webui links are relative to a base the answer itself names. */

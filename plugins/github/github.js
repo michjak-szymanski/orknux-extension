@@ -755,13 +755,13 @@ not obviously say so.`,
           'matches, 0 for the default.',
         params: [
           { name: 'query', type: 'string' },
-          { name: 'limit', type: 'number' },
+          { name: 'limit', type: 'number', required: false, default: 20 },
         ],
         returnType: 'PullSearch',
         run: (query, limit) => {
           const asked = `${scoped(this.settings, query)} is:pr`;
           const found = read(this.settings, {
-            path: `/search/issues?q=${encodeURIComponent(asked)}&per_page=${pageSize(limit, 20)}`,
+            path: `/search/issues?q=${encodeURIComponent(asked)}&per_page=${pageSize(limit)}`,
           }).json;
           return {
             total: at(found, 'total_count'),
@@ -785,14 +785,14 @@ not obviously say so.`,
           'Lists repositories, most recently pushed first. Pass an organization or user as owner, or an ' +
           'empty owner for the configured organization - and with neither, the repositories the token ' +
           'itself can see. Answers name, fullName, description, defaultBranch, private, pushed and a url ' +
-          'each. limit caps the list, 0 for the default.',
+          'each. limit caps the list.',
         params: [
           { name: 'owner', type: 'string' },
-          { name: 'limit', type: 'number' },
+          { name: 'limit', type: 'number', required: false, default: 30 },
         ],
         returnType: 'RepoList',
         run: (owner, limit) => {
-          const query = `per_page=${pageSize(limit, 30)}&sort=pushed`;
+          const query = `per_page=${pageSize(limit)}&sort=pushed`;
           const fallback = this.settings.organization;
           const unnamed =
             (typeof owner !== 'string' || owner.length === 0) &&
@@ -841,7 +841,7 @@ not obviously say so.`,
         params: [
           { name: 'owner', type: 'string' },
           { name: 'repo', type: 'string' },
-          { name: 'ref', type: 'string' },
+          { name: 'ref', type: 'string', required: false, default: '' },
         ],
         returnType: 'FileList',
         run: (owner, repo, ref) => {
@@ -903,15 +903,15 @@ not obviously say so.`,
           'Searches code the way the site\'s search box does. GitHub\'s qualifiers work: repo:owner/name, ' +
           'path:src, language:go, filename:Dockerfile. A query that does not say where to look is scoped ' +
           'to the configured organization. Answers the total and the matches - repository, path, url and ' +
-          'the matching fragments each. limit caps the matches, 0 for the default.',
+          'the matching fragments each. limit caps the matches.',
         params: [
           { name: 'query', type: 'string' },
-          { name: 'limit', type: 'number' },
+          { name: 'limit', type: 'number', required: false, default: 20 },
         ],
         returnType: 'CodeSearch',
         run: (query, limit) => {
           const found = read(this.settings, {
-            path: `/search/code?q=${encodeURIComponent(scoped(this.settings, query))}&per_page=${pageSize(limit, 20)}`,
+            path: `/search/code?q=${encodeURIComponent(scoped(this.settings, query))}&per_page=${pageSize(limit)}`,
             // The variant that carries the matching fragments, which are the
             // half of a code search worth reading.
             accept: 'application/vnd.github.text-match+json',
@@ -934,15 +934,15 @@ not obviously say so.`,
           'Searches commit messages. GitHub\'s qualifiers work: repo:owner/name, author:login, ' +
           'committer-date:>2026-01-01. A query that does not say where to look is scoped to the ' +
           'configured organization. Answers the total and the matches - repository, sha, message, ' +
-          'author, date and a url each. limit caps the matches, 0 for the default.',
+          'author, date and a url each. limit caps the matches.',
         params: [
           { name: 'query', type: 'string' },
-          { name: 'limit', type: 'number' },
+          { name: 'limit', type: 'number', required: false, default: 20 },
         ],
         returnType: 'CommitSearch',
         run: (query, limit) => {
           const found = read(this.settings, {
-            path: `/search/commits?q=${encodeURIComponent(scoped(this.settings, query))}&per_page=${pageSize(limit, 20)}`,
+            path: `/search/commits?q=${encodeURIComponent(scoped(this.settings, query))}&per_page=${pageSize(limit)}`,
           }).json;
           return {
             total: at(found, 'total_count'),
@@ -1052,12 +1052,12 @@ not obviously say so.`,
         description:
           'Reads one file out of a repository, as the text it is. Pass owner and repo (or the repo as ' +
           'owner/name, or an empty owner for the configured organization), the path from the repository ' +
-          'root, and a branch, tag or sha - or an empty ref for the default branch.',
+          'root, and a branch, tag or sha - or no ref for the default branch.',
         params: [
           { name: 'owner', type: 'string' },
           { name: 'repo', type: 'string' },
           { name: 'path', type: 'string' },
-          { name: 'ref', type: 'string' },
+          { name: 'ref', type: 'string', required: false, default: '' },
         ],
         returnType: 'string',
         run: (owner, repo, path, ref) => {
@@ -1081,18 +1081,18 @@ not obviously say so.`,
         description:
           'The commits that touched one file, newest first: sha, message, author, date and a url each. ' +
           'Pass owner and repo (or the repo as owner/name, or an empty owner for the configured ' +
-          'organization) and the path from the repository root. limit caps the list, 0 for the default.',
+          'organization) and the path from the repository root. limit caps the list.',
         params: [
           { name: 'owner', type: 'string' },
           { name: 'repo', type: 'string' },
           { name: 'path', type: 'string' },
-          { name: 'limit', type: 'number' },
+          { name: 'limit', type: 'number', required: false, default: 20 },
         ],
         returnType: 'FileHistory',
         run: (owner, repo, path, limit) => {
           const base = repoPath(this.settings, owner, repo);
           const commits = read(this.settings, {
-            path: `${base}/commits?path=${encodeURIComponent(path)}&per_page=${pageSize(limit, 20)}`,
+            path: `${base}/commits?path=${encodeURIComponent(path)}&per_page=${pageSize(limit)}`,
           }).json;
           return {
             commits: (Array.isArray(commits) ? commits : []).map((one) => ({
@@ -1118,7 +1118,7 @@ not obviously say so.`,
           { name: 'owner', type: 'string' },
           { name: 'repo', type: 'string' },
           { name: 'prompt', type: 'string' },
-          { name: 'baseRef', type: 'string' },
+          { name: 'baseRef', type: 'string', required: false, default: '' },
         ],
         returnType: 'AgentTask',
         run: (owner, repo, prompt, baseRef) => {

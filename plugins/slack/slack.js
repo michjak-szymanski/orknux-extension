@@ -576,16 +576,16 @@ adding a message to anybody's unread count.`,
           'Reads a Slack thread: the messages under one parent, oldest first, and how many replies the ' +
           'whole thread holds. Pass the channel id and the thread\'s ts (threadTs on an event; a message\'s ' +
           'own ts when it is the parent). Pass the connection the event came in on, or an empty string to ' +
-          'use the configured one. limit caps how many messages come back; pass 0 for the default.',
+          'use the configured one. limit caps how many messages come back.',
         params: [
           { name: 'connection', type: 'string' },
           { name: 'channel', type: 'string' },
           { name: 'threadTs', type: 'string' },
-          { name: 'limit', type: 'number' },
+          { name: 'limit', type: 'number', required: false, default: 20 },
         ],
         returnType: 'Thread',
         run: (connection, channel, threadTs, limit) => {
-          const read = orknux.slack.thread(connection || this.settings.slack, channel, threadTs, limit || 20);
+          const read = orknux.slack.thread(connection || this.settings.slack, channel, threadTs, limit);
           if (read.error !== undefined) {
             throw new Error(`could not read the thread: ${read.error}`);
           }
@@ -661,16 +661,16 @@ adding a message to anybody's unread count.`,
           'Searches Slack messages the way the search box does. Slack\'s search syntax works: in:#channel, ' +
           'from:@name, "an exact phrase". Answers the matches - channel, ts, user, text and a permalink ' +
           'back to each - and how many the whole search holds. Pass the connection the event came in on, ' +
-          'or an empty string to use the configured one; limit caps the matches, 0 for the default. Note: ' +
+          'or an empty string to use the configured one; limit caps the matches. Note: ' +
           'Slack answers search only for a user token, so the connection needs one in its User Token field.',
         params: [
           { name: 'connection', type: 'string' },
           { name: 'query', type: 'string' },
-          { name: 'limit', type: 'number' },
+          { name: 'limit', type: 'number', required: false, default: 20 },
         ],
         returnType: 'SearchResult',
         run: (connection, query, limit) => {
-          const found = orknux.slack.search(connection || this.settings.slack, query, limit || 20);
+          const found = orknux.slack.search(connection || this.settings.slack, query, limit);
           if (found.error !== undefined) {
             throw new Error(`could not search Slack: ${found.error}`);
           }

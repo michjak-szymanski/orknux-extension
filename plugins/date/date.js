@@ -383,11 +383,11 @@ export default class OrknuxDate extends OrknuxPlugin {
         name: 'today',
         description:
           'Today\'s date, as YYYY-MM-DD - in the working timezone, or in timezone when one is passed ' +
-          '(an IANA name like Europe/Warsaw; empty for the configured one). Ask this rather than ' +
+          '(an IANA name like Europe/Warsaw; left out for the configured one). Ask this rather than ' +
           'assuming what the date is: you do not know it, and a guess is wrong by however long ago ' +
           'you were trained. Use now for the time as well, or describe to ask whether a date is a ' +
           'working day.',
-        params: [{ name: 'timezone', type: 'string' }],
+        params: [{ name: 'timezone', type: 'string', required: false, default: '' }],
         returnType: 'string',
         /*
          * The same answer `now` carries in its `date`, as the string on its
@@ -402,10 +402,10 @@ export default class OrknuxDate extends OrknuxPlugin {
         name: 'now',
         description:
           'What the date and time are now, in the working timezone - or in timezone when one is ' +
-          'passed (an IANA name like Europe/Warsaw; empty for the configured one). Answers iso, ' +
+          'passed (an IANA name like Europe/Warsaw; left out for the configured one). Answers iso, ' +
           'date, time, weekday, week, quarter, year, and whether today is a weekend, a holiday or a ' +
           'business day. Ask this rather than assuming what day it is.',
-        params: [{ name: 'timezone', type: 'string' }],
+        params: [{ name: 'timezone', type: 'string', required: false, default: '' }],
         returnType: 'Moment',
         run: (timezone) => {
           const zone = this.zoneOf(timezone);
@@ -419,10 +419,10 @@ export default class OrknuxDate extends OrknuxPlugin {
           'The same account of any date: iso, date, time, weekday, week, quarter, year, and whether ' +
           'it is a weekend, a holiday or a business day. Pass an ISO date (2026-09-19) or an instant ' +
           '(2026-09-19T14:30:00Z) - a bare date means midnight in the working timezone - and a ' +
-          'timezone, or empty for the configured one.',
+          'timezone, or leave it out for the configured one.',
         params: [
           { name: 'when', type: 'string' },
-          { name: 'timezone', type: 'string' },
+          { name: 'timezone', type: 'string', required: false, default: '' },
         ],
         returnType: 'Moment',
         run: (when, timezone) => {
@@ -644,7 +644,7 @@ export default class OrknuxDate extends OrknuxPlugin {
           'front of anything that should wait until somebody is at their desk.',
         params: [
           { name: 'when', type: 'string' },
-          { name: 'timezone', type: 'string' },
+          { name: 'timezone', type: 'string', required: false, default: '' },
         ],
         returnType: 'boolean',
         run: (when, timezone) => {

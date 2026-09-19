@@ -136,9 +136,15 @@ export function escapedPath(path) {
   return String(path).split('/').map(encodeURIComponent).join('/');
 }
 
-/** A page size from a limit somebody may not have passed, capped where GitHub caps. */
-export function pageSize(limit, fallback) {
-  return typeof limit === 'number' && limit > 0 ? Math.min(limit, 100) : fallback;
+/**
+ * A page size, capped where GitHub caps.
+ *
+ * It used to take a fallback for a limit nobody passed. Function parameters
+ * carry their own defaults now — the server puts one in before the call — so
+ * every limit arrives and the only work left is the ceiling.
+ */
+export function pageSize(limit) {
+  return Math.min(Math.max(limit, 1), 100);
 }
 
 /** `owner/name`, from the api url a search result names its repository by. */
