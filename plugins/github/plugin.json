@@ -1,12 +1,10 @@
 {
   "$schema": "https://orknux.ai/marketplace/plugin.schema.json",
-
   "key": "github",
   "name": "GitHub",
-  "summary": "Verifies that a webhook delivery really came from GitHub, and asks GitHub back: pull requests, code, commits, builds, files, comments and Copilot agent tasks.",
+  "author": "Orknux",
+  "summary": "Webhook checks, search, files, builds and comments against GitHub.",
   "version": "1.0.0",
-  "author": "Michał Szymański",
   "icon": "icon.svg",
-
   "descriptionPath": "README.md"
 }

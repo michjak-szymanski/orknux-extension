@@ -1,12 +1,10 @@
 {
   "$schema": "https://orknux.ai/marketplace/plugin.schema.json",
-
   "key": "todo",
   "name": "Todo",
-  "summary": "A todo list an agent keeps for the length of one conversation, so a request too complex to hold in one step is split, worked and checked off.",
-  "version": "1.0.0",
-  "author": "Michał Szymański",
+  "author": "Orknux",
+  "summary": "A todo list for the agent's own plan, kept in the session store.",
+  "version": "0.1.0",
   "icon": "icon.svg",
-
   "descriptionPath": "README.md"
 }

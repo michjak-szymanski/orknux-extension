@@ -7,7 +7,7 @@
     "descriptionPath": "plugins/slack/README.md",
     "version": "1.0.0",
     "path": "plugins/slack/slack.js",
-    "icon": "💬"
+    "icon": "plugins/slack/icon.svg"
   },
   {
     "key": "github",
@@ -17,7 +17,7 @@
     "descriptionPath": "plugins/github/README.md",
     "version": "1.0.0",
     "path": "plugins/github/github.js",
-    "icon": "🐙"
+    "icon": "plugins/github/icon.svg"
   },
   {
     "key": "teams",
@@ -27,7 +27,7 @@
     "descriptionPath": "plugins/teams/README.md",
     "version": "1.0.0",
     "path": "plugins/teams/teams.js",
-    "icon": "👥"
+    "icon": "plugins/teams/icon.svg"
   },
   {
     "key": "confluence",
@@ -37,7 +37,7 @@
     "descriptionPath": "plugins/confluence/README.md",
     "version": "0.1.0",
     "path": "plugins/confluence/confluence.js",
-    "icon": "📚"
+    "icon": "plugins/confluence/icon.svg"
   },
   {
     "key": "prometheus",
@@ -47,7 +47,7 @@
     "descriptionPath": "plugins/prometheus/README.md",
     "version": "0.1.0",
     "path": "plugins/prometheus/prometheus.js",
-    "icon": "📈"
+    "icon": "plugins/prometheus/icon.svg"
   },
   {
     "key": "mermaid",
@@ -57,7 +57,7 @@
     "descriptionPath": "plugins/mermaid/README.md",
     "version": "0.1.0",
     "path": "plugins/mermaid/mermaid.js",
-    "icon": "📐"
+    "icon": "plugins/mermaid/icon.svg"
   },
   {
     "key": "pdf",
@@ -67,7 +67,7 @@
     "descriptionPath": "plugins/pdf/README.md",
     "version": "0.1.0",
     "path": "plugins/pdf/pdf.js",
-    "icon": "📄"
+    "icon": "plugins/pdf/icon.svg"
   },
   {
     "key": "todo",
@@ -77,6 +77,6 @@
     "descriptionPath": "plugins/todo/README.md",
     "version": "0.1.0",
     "path": "plugins/todo/todo.js",
-    "icon": "✅"
+    "icon": "plugins/todo/icon.svg"
   }
 ]

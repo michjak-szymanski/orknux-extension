@@ -1,14 +1,11 @@
 {
   "$schema": "https://orknux.ai/marketplace/plugin.schema.json",
-
   "key": "mermaid",
   "name": "Mermaid",
-  "summary": "Renders mermaid diagrams to SVG inside the sandbox — no browser, no DOM, nothing fetched — and links to the live editor for the kinds it does not draw.",
-  "version": "1.0.0",
-  "author": "Michał Szymański",
+  "author": "Orknux",
+  "summary": "Render Mermaid diagrams to SVG, offline, inside the sandbox.",
+  "version": "0.1.0",
   "icon": "icon.svg",
-
   "descriptionPath": "README.md",
-
   "path": "mermaid.js"
 }
