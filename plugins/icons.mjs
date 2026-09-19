@@ -7,13 +7,16 @@
  * each trademark stays its owner's. Using one here is the use trademark law
  * has always allowed: saying which service this plugin talks to.
  *
- * Two are deliberately absent. Slack's mark and Microsoft's were **removed
- * from simple-icons at the brand owners' request**, which is those owners
- * saying plainly that they do not want their marks redistributed this way — so
- * `plugins/slack/icon.svg` and `plugins/teams/icon.svg` are drawn glyphs
- * instead, and stay that way unless somebody takes the assets from Slack's own
- * media kit or Microsoft's brand centre under those companies' terms. `pdf`
- * and `todo` front no service and never had a mark to use.
+ * Two are deliberately absent, and the reason is stronger than simple-icons
+ * not carrying them. Slack's brand terms say most uses need a specific written
+ * licence, and — decisively for this file — *"don't modify the marks"*,
+ * spelled out to include changing their colours. Every icon here is drawn in
+ * `currentColor`, which is a colour change. So an official Slack mark could
+ * not join this set even with a licence: it would have to ship unmodified and
+ * full-colour, as a deliberate exception. Microsoft's guidelines are the same
+ * shape. Until then `plugins/slack/icon.svg` and `plugins/teams/icon.svg` are
+ * drawn glyphs. `pdf`, `todo`, `date` and `web` front no service and never had
+ * a mark to use.
  *
  * Drawn in `currentColor` rather than in the brand's own hex. Two reasons, and
  * the second is the one that decides it: half these marks are near-black

@@ -91,12 +91,25 @@ trademark stays its owner's. Using one to say what a plugin works with is the
 use trademark law has always allowed, and `npm run build:icons` regenerates
 them; do not hand-edit those four.
 
-**Slack's and Microsoft's are not there, and that is not an oversight.** Both
-were removed from simple-icons at the brand owners' request, which is those
-owners saying they do not want their marks redistributed this way — so `slack`
-and `teams` wear drawn glyphs, and only somebody taking the assets from Slack's
-own media kit or Microsoft's brand centre, under those companies' terms, should
-change that. `pdf` and `todo` front no service and never had a mark to use.
+**Slack's and Microsoft's are not there, and that is not an oversight.**
+simple-icons does not ship either — Slack's is tracked under a *permission
+required* label — but the decisive reason is Slack's own brand terms rather
+than anybody else's policy. Two lines of them rule this out:
+
+- *"Most uses require a specific written license"*, which redistributing the
+  mark in a public Apache-2.0 repository is not covered by; and
+- *"Don't modify the marks"*, spelled out to include changing their colours —
+  which is exactly what the `currentColor` treatment below does to every icon
+  here.
+
+So the second point would bite even with a licence: an official Slack mark
+could not join this set on the set's own terms. It would have to ship
+unmodified and full-colour, as a deliberate exception, from
+[Slack's brand portal](https://brand.slackhq.com/logo) — and the
+`currentColor` assertion in `manifests.test.js` would need to make room for it.
+Microsoft's guidelines are the same shape. Until somebody takes that on,
+`slack` and `teams` wear drawn glyphs. `pdf`, `todo`, `date` and `web` front no
+service and never had a mark to use.
 
 All eight are drawn in `currentColor` rather than a brand hex: half the marks
 are near-black and would vanish on a dark listing, and a fill attribute
