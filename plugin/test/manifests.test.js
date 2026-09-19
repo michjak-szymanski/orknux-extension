@@ -19,6 +19,11 @@ import { inspect } from '../dist/tooling.js';
  * The rest is what a manifest cannot be trusted to get right on its own: the
  * files it names have to be there, because `descriptionPath` pointing at a
  * README nobody wrote is a listing with an empty details pane.
+ *
+ * There is nothing above these to agree with. A plugin is described in its own
+ * folder and nowhere else — no catalog listing the offerings a second time —
+ * so what is on offer is whatever carries a `plugin.json`, and this walks the
+ * same directories a reader would.
  */
 
 const root = fileURLToPath(new URL('../../plugins/', import.meta.url));
@@ -34,52 +39,6 @@ const shipped = readdirSync(root).filter((name) => {
 
 /** The pattern the schema holds `key` to. */
 const KEY = /^[a-z][a-z0-9-]{1,63}$/;
-
-/**
- * The repository's own catalog, which the marketplace reads. A plugin's
- * `plugin.json` is deliberately one entry of this with its paths made
- * relative to the plugin's own folder — so a folder zipped out of here, with
- * its manifest beside it, needs nothing retyped. The two saying different
- * things about the same plugin is the drift this catches: whichever the
- * marketplace happened to read would be the truth, and nobody would know
- * which.
- */
-const catalog = JSON.parse(
-  readFileSync(fileURLToPath(new URL('../../marketplace.json', import.meta.url)), 'utf8'),
-);
-
-test('the catalog and the plugins agree on who is offered', () => {
-  assert.deepEqual(
-    [...catalog.map((entry) => entry.key)].sort(),
-    [...shipped].sort(),
-    'the catalog lists plugins the repository does not have, or misses some it does',
-  );
-});
-
-for (const entry of catalog) {
-  test(`the ${entry.key} catalog entry and its manifest say the same thing`, () => {
-    const manifest = JSON.parse(readFileSync(`${root}${entry.key}/plugin.json`, 'utf8'));
-
-    /* The prose is the same words in both places, not two descriptions. */
-    for (const field of ['key', 'name', 'author', 'summary', 'version']) {
-      assert.equal(manifest[field], entry[field], `${field} differs between the two`);
-    }
-
-    /*
-     * The paths are the same files said two ways: the catalog from the
-     * repository root, the manifest from inside the plugin's own folder.
-     */
-    for (const field of ['icon', 'descriptionPath', 'path']) {
-      if (entry[field] === undefined) continue;
-      const named = manifest[field] ?? `${entry.key}.js`;
-      assert.equal(
-        entry[field],
-        `plugins/${entry.key}/${named}`,
-        `${field} names a different file in each`,
-      );
-    }
-  });
-}
 
 test('every plugin ships a manifest, and there is one to copy', () => {
   assert.ok(shipped.length > 0, 'no plugins found');

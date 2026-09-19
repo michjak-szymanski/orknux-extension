@@ -101,6 +101,11 @@ block carrying a media query might not.
 against it and so the test can. `plugins/plugin.example.json` is a filled-in
 one to copy when writing a new plugin.
 
+There is no catalog above these, and there should not be one: a plugin is
+described in its own folder and nowhere else, so what is on offer is whatever
+carries a `plugin.json`. A list at the root repeating the same prose is one
+more thing to write and one more thing that can disagree with the code.
+
 The manifest is prose, with one exception. The marketplace does not read what a
 plugin will ask to be allowed and does not vouch for it — permissions,
 capabilities and libraries are discovered by the installing server from the
