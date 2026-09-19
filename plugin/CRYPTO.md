@@ -49,6 +49,23 @@ const { base64, error } = orknux.crypto.hash('sha256', { text: 'hello' });
 
 ## The surface
 
+### `encodeBase64(input)` and `decodeBase64(base64)`
+
+```js
+orknux.crypto.encodeBase64('hello')    → { base64: 'aGVsbG8=' }
+orknux.crypto.decodeBase64('aGVsbG8=') → { text: 'hello' }
+```
+
+First because without them the rest is unreachable. The sandbox has no
+`TextEncoder` unless somebody granted `TEXT_ENCODING`, so a plugin holding a
+string has no way to make the bytes every call below takes, and no way to read
+the bytes they answer with.
+
+`decodeBase64` is the one conversion here that can fail: base64 is bytes and
+text is characters, and not every sequence of bytes is a sequence of
+characters. A plugin decoding a digest expecting to read it gets a sentence
+saying so rather than a string of replacement marks that looks like data.
+
 ### `hash(algorithm, input)`
 
 ```js
@@ -100,6 +117,13 @@ Comparing a signature with `===` leaks its prefix through how long the
 comparison took. A plugin verifying a webhook signature should use this, and
 the reason it is here rather than left to the plugin is that a constant-time
 comparison written in JavaScript is not constant-time after a JIT has seen it.
+
+## Everything answers, nothing throws
+
+A refusal is `{ error }` and never an exception: an algorithm this server does
+not have, an iteration count past the cap, bytes that spell no text. A plugin
+has to be able to say something useful about a failure, and `{ error }` is
+something it can put in a message.
 
 ## The bounds
 
