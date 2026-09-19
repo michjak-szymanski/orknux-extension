@@ -8,7 +8,7 @@ a plugin is currently writing by hand.
 | what | the server today |
 |------|------------------|
 | `options` on a plugin parameter | **accepted** — declare it and it is stored |
-| a picker on the settings page | not drawn yet; the field is still a text box |
+| a picker on the settings page | **drawn** — a parameter naming values is chosen from a list |
 | `required: false` and `default` on a *function* parameter | **accepted** |
 
 All three are live. The last of them took the longest because it had to mean
