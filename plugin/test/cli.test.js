@@ -1,0 +1,109 @@
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+/**
+ * What `check` actually prints.
+ *
+ * The report is the whole product of the CLI: somebody runs it to see what an
+ * upload would see, and a surface the plugin declares but the report leaves out
+ * is one they find out about from an administrator instead. That is exactly how
+ * libraries, skills and objects went missing — they landed in the contract, in
+ * the validation and in the tests, and nothing ever asked the CLI to show them.
+ *
+ * So this runs the real binary, the way a person does, and reads what came back.
+ */
+
+const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
+const shipped = (name) =>
+  fileURLToPath(new URL(`../../plugins/${name}/${name}.js`, import.meta.url));
+
+/** The report for one plugin, or the report of why it was refused. */
+function checked(file) {
+  try {
+    return execFileSync(process.execPath, [cli, 'check', file], { encoding: 'utf8' });
+  } catch (failure) {
+    /* A refusal exits non-zero and still prints; the caller decides. */
+    return `${failure.stdout ?? ''}${failure.stderr ?? ''}`;
+  }
+}
+
+test('the report names the libraries that travel with a plugin', () => {
+  const report = checked(shipped('github'));
+
+  assert.match(report, /It ships with:/);
+  assert.match(report, /lib\/hashing\.js/);
+  assert.match(report, /lib\/api\.js/);
+  /* And still says the rest of what it always said. */
+  assert.match(report, /Loading it means accepting: TEXT_ENCODING, NETWORK_REQUEST/);
+  assert.match(report, /github_searchPulls/);
+});
+
+test('the report names the skills a plugin brings, and what each is for', () => {
+  const report = checked(shipped('todo'));
+
+  assert.match(report, /It teaches:/);
+  assert.match(report, /Planning work before starting it/);
+  /* The description is the line an agent chooses from, so it earns a line here too. */
+  assert.match(report, /When a request is too big to hold in your head/);
+  /*
+   * The content is not printed. A skill runs to sixty-four thousand
+   * characters and this is a report — the size stands in for it.
+   */
+  assert.doesNotMatch(report, /## When to write one/);
+});
+
+test('the report names the shapes a plugin exports, qualified as they are stored', () => {
+  /*
+   * Nothing shipped declares objects yet, so this writes one — which is also
+   * the only way to see that `of` is printed, and that is the half of a
+   * property worth seeing.
+   */
+  const where = mkdtempSync(join(tmpdir(), 'shapes-'));
+  const file = join(where, 'shapes.js');
+  writeFileSync(
+    file,
+    `export default class Shapes extends OrknuxPlugin {
+       id() { return 'shapes'; }
+       apiVersion() { return 1; }
+       objects() {
+         return [
+           new OrknuxObject({ name: 'User', properties: [{ name: 'email', kind: 'string' }] }),
+           new OrknuxObject({
+             name: 'Issue',
+             properties: [
+               { name: 'key', kind: 'string' },
+               { name: 'labels', kind: 'array', of: 'string' },
+               { name: 'reporter', kind: 'object', of: 'User' },
+             ],
+           }),
+         ];
+       }
+       functions() {
+         return [new OrknuxFunction({ name: 'ping', description: 'x', returnType: 'boolean', run: () => true })];
+       }
+     }`,
+  );
+
+  const report = checked(file);
+
+  assert.match(report, /It exports these shapes:/);
+  /* Under the plugin's key, because that is how they arrive in a workspace. */
+  assert.match(report, /shapes_User/);
+  assert.match(report, /shapes_Issue/);
+  assert.match(report, /labels: array of string/);
+  assert.match(report, /reporter: object of User/);
+});
+
+test('a plugin that declares none of them says nothing about them', () => {
+  /* The sections are worth having only where there is something to say. */
+  const report = checked(shipped('markdown'));
+
+  assert.doesNotMatch(report, /It ships with:/);
+  assert.doesNotMatch(report, /It exports these shapes:/);
+  assert.match(report, /markdown_toSlack/);
+});

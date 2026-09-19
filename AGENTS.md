@@ -175,6 +175,13 @@ wording — `assert.match(problem.message, /is not a usable function name/)` —
 that a message changing there shows up here as a failure rather than as two
 products saying different things about the same refusal.
 
+`cli.test.js` runs the real binary and reads the report back. The CLI is the
+whole product for somebody checking a plugin before an upload, so a surface it
+declares and the report omits is one they learn about from an administrator
+instead — which is exactly how libraries, skills and objects went missing for a
+while. They landed in the contract, the validation and the tests, and nothing
+ever asked the CLI to show them.
+
 `bundle.test.js` is the important one: it builds each fixture the way the CLI
 does and then loads the result. `fixtures/imported.ts` proves the import style
 survives bundling, `fixtures/ambient.js` proves the no-imports style still

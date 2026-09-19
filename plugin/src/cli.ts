@@ -165,6 +165,42 @@ async function report(file: string): Promise<number> {
    * is only going to be read once, because "this asks for nothing" is exactly
    * as much worth knowing before an upload as after one.
    */
+  /*
+   * The third surface. Neither called nor run, so there is nothing to print a
+   * signature for — what is worth seeing before an upload is which pages
+   * arrive, and the line an agent chooses from. The content is not shown: a
+   * skill runs to sixty-four thousand characters, and this is a report.
+   */
+  if (inspected.skills.length > 0) {
+    process.stdout.write('\n  It teaches:\n');
+    for (const skill of inspected.skills) {
+      process.stdout.write(`    ${skill.name}  (${size(skill.content.length)})\n`);
+      if (skill.description !== null && skill.description !== undefined) {
+        process.stdout.write(`        ${skill.description}\n`);
+      }
+    }
+  }
+
+  /*
+   * The shapes it brings, each under the plugin's key once it is stored —
+   * `Issue` declared by `jira` arrives as `jira_Issue` — so they are shown
+   * qualified, the way the functions above are.
+   */
+  if (inspected.objects.length > 0) {
+    process.stdout.write('\n  It exports these shapes:\n');
+    for (const shape of inspected.objects) {
+      process.stdout.write(`    ${qualifiedName(inspected.id, shape.name)}\n`);
+      for (const property of shape.properties) {
+        /* `of` is what stops a shape being flat, so it is the half worth printing. */
+        const kind =
+          property.of === null || property.of === undefined
+            ? property.kind.toLowerCase()
+            : `${property.kind.toLowerCase()} of ${property.of}`;
+        process.stdout.write(`      ${property.name}: ${kind}\n`);
+      }
+    }
+  }
+
   if (inspected.parameters.length > 0) {
     process.stdout.write('\n  It has to be told:\n');
     for (const parameter of inspected.parameters) {
@@ -179,6 +215,20 @@ async function report(file: string): Promise<number> {
       process.stdout.write(
         `    ${parameter.name}: ${kind}${marks.length > 0 ? ` — ${marks.join(', ')}` : ''}\n`,
       );
+    }
+  }
+
+  /*
+   * Printed beside the permissions rather than with the functions, because
+   * this is the same kind of fact: whoever loads the plugin is shown these
+   * files and has to allow them, and a load from a URL fetches exactly this
+   * list from beside the plugin. Somebody checking a bundle before an upload
+   * is checking what arrives with it, not only what it declares.
+   */
+  if (inspected.libraries.length > 0) {
+    process.stdout.write('\n  It ships with:\n');
+    for (const library of inspected.libraries) {
+      process.stdout.write(`    ${library}\n`);
     }
   }
 
