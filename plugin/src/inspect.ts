@@ -255,6 +255,9 @@ function read(declared: Record<string, unknown>): DeclaredFunction {
       return {
         name: text(one, 'name') ?? refuse('a parameter has no name'),
         type: text(one, 'type') ?? refuse('a parameter has no type'),
+        ...(text(one, 'description') === undefined
+          ? {}
+          : { description: text(one, 'description') }),
         /*
          * Read, not judged. Whether a default is of the parameter's own type,
          * and whether an optional one sits before a required one, are
@@ -326,6 +329,9 @@ function readTool(declared: Record<string, unknown>, functions: DeclaredFunction
       return {
         name: text(one, 'name') ?? refuse('a tool parameter has no name'),
         type: text(one, 'type') ?? refuse('a tool parameter has no type'),
+        ...(text(one, 'description') === undefined
+          ? {}
+          : { description: text(one, 'description') }),
         /* As above: read here, judged by validation, absent left absent. */
         ...(one['required'] === undefined ? {} : { required: one['required'] === true }),
         ...(one['default'] === undefined ? {} : { default: one['default'] }),

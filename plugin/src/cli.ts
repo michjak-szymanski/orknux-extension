@@ -8,7 +8,7 @@ import { inspect, NotAPluginError } from './inspect.js';
 import type { Inspection } from './inspect.js';
 import { API_VERSION, MAX_SOURCE_BYTES, VALUE_TYPES } from './limits.js';
 import { qualifiedName, validate } from './validate.js';
-import type { Problem } from './validate.js';
+import type { DeclaredParam, Problem } from './validate.js';
 
 /**
  * `orknux-plugin` — build a plugin, and find out beforehand whether the server
@@ -124,7 +124,7 @@ async function report(file: string): Promise<number> {
   }
   for (const declared of inspected.functions) {
     const params = declared.params
-      .map((param) => `${param.name}: ${typeName(param.type)}`)
+      .map(paramText)
       .join(', ');
     process.stdout.write(
       `  ${qualifiedName(inspected.id, declared.name)}(${params}): ${typeName(declared.returnType)}\n`,
@@ -143,7 +143,7 @@ async function report(file: string): Promise<number> {
     process.stdout.write('\n  It offers agents:\n');
     for (const declared of inspected.tools) {
       const params = declared.params
-        .map((param) => `${param.name}: ${typeName(param.type)}`)
+        .map(paramText)
         .join(', ');
       const fronting =
         declared.proxyOf === null || declared.proxyOf === undefined
@@ -362,6 +362,22 @@ function describe(failure: unknown): string {
  * of those: it is an identifier the plugin declared, matched exactly, and
  * lowering `Issue` to `issue` would print a name that does not resolve.
  */
+/**
+ * One parameter in a printed signature.
+ *
+ * An optional one shows what arrives when a call leaves it out, because that
+ * is the whole of what `required: false` and `default` buy a reader: the
+ * signature says `limit: number = 20` rather than making the default something
+ * only the description mentions.
+ */
+function paramText(param: DeclaredParam): string {
+  const written = `${param.name}: ${typeName(param.type)}`;
+  if (param.required !== false && param.default === undefined) {
+    return written;
+  }
+  return `${written} = ${JSON.stringify(param.default) ?? 'undefined'}`;
+}
+
 function typeName(written: string): string {
   const lowered = written.trim().toLowerCase();
   return (VALUE_TYPES as readonly string[]).includes(lowered) ? lowered : written.trim();

@@ -752,7 +752,7 @@ not obviously say so.`,
           'repo:owner/name, author:login, is:open, review:required, "an exact phrase". A query that does ' +
           'not say where to look is scoped to the configured organization. Answers the total and the ' +
           'matches - number, title, state, repository, author, updated and a url each. limit caps the ' +
-          'matches, 0 for the default.',
+          'matches.',
         params: [
           { name: 'query', type: 'string' },
           { name: 'limit', type: 'number', required: false, default: 20 },

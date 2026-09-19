@@ -533,6 +533,43 @@ declare const orknux: {
   };
 };
 
+/**
+ * One parameter of a function or a tool, as it is declared.
+ *
+ * Written once and referred to four times below. It used to be an inline
+ * `{ name, type }` copied into each of them, which is how `required` and
+ * `default` came to be accepted by the server, validated by this package, and
+ * still a compile error to write.
+ */
+interface OrknuxParamDeclared {
+  /** An identifier: letters, digits and underscores. */
+  name: string;
+  /** What arrives in it. */
+  type: OrknuxValueType;
+  /**
+   * What this argument is, for whoever — or whatever — reads it.
+   *
+   * A tool's description is where a model looks first, and a name says what an
+   * argument is called and nothing about what belongs in it.
+   */
+  description?: string | null;
+  /**
+   * Whether a call has to supply it. True unless a `default` says otherwise.
+   *
+   * Arguments are positional, so the ones that may be left out come last: a
+   * required parameter after an optional one is refused at load.
+   */
+  required?: boolean;
+  /**
+   * What arrives when a call leaves it out — and declaring one makes the
+   * parameter optional.
+   *
+   * `run` still receives every argument: the server puts the default in before
+   * the call, so there is no `undefined` to guard against.
+   */
+  default?: unknown;
+}
+
 /** A function's declaration, checked as it is constructed. */
 interface OrknuxFunctionDeclared {
   /** An identifier: letters, digits and underscores. */
@@ -540,7 +577,7 @@ interface OrknuxFunctionDeclared {
   /** Optional; shown beside it in the interface. */
   description?: string;
   /** In the order `run` receives them. */
-  params?: { name: string; type: OrknuxValueType }[];
+  params?: OrknuxParamDeclared[];
   /** What it answers with. A function has to answer something. */
   returnType: OrknuxValueType;
   /** What it does. Stays here; the server calls back into it. */
@@ -554,7 +591,7 @@ interface OrknuxToolDeclared {
   /** Written for the model that reads it: when to call this, and with what. */
   description?: string;
   /** In the order `run` receives them. */
-  params?: { name: string; type: OrknuxValueType }[];
+  params?: OrknuxParamDeclared[];
   /** What it answers with. A tool answers a model, so it has to answer something. */
   returnType: OrknuxValueType;
   /** What it does. Stays here; the server calls back into it. */
@@ -746,7 +783,7 @@ declare class OrknuxFunction {
 
   readonly name: string;
   readonly description: string | null;
-  readonly params: { name: string; type: OrknuxValueType }[];
+  readonly params: OrknuxParamDeclared[];
   readonly returnType: OrknuxValueType;
   readonly run: (...args: never[]) => unknown;
 }
@@ -757,7 +794,7 @@ declare class OrknuxTool {
 
   readonly name: string;
   readonly description: string | null;
-  readonly params: { name: string; type: OrknuxValueType }[];
+  readonly params: OrknuxParamDeclared[];
   readonly returnType: OrknuxValueType;
   readonly run: (...args: never[]) => unknown;
   /** Null: this tool has a run of its own rather than fronting a function. */

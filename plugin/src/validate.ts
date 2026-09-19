@@ -43,6 +43,14 @@ export interface DeclaredParam {
   name: string;
   type: string;
   /**
+   * What this argument is, for whoever — or whatever — reads it.
+   *
+   * A tool's description is where a model looks first, and a name says what an
+   * argument is called and nothing about what belongs in it. Absent where the
+   * declaration said nothing, rather than an empty string.
+   */
+  description?: string | null;
+  /**
    * Whether a call has to supply it; absent means it does, which is what every
    * declaration written before this meant by saying nothing.
    */
