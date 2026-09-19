@@ -42,6 +42,16 @@ import {
 export interface DeclaredParam {
   name: string;
   type: string;
+  /**
+   * Proposed, and refused until `plugin/PARAMETERS.md` says otherwise.
+   *
+   * Declared here so the check above can see one rather than ignore it: a
+   * field this file does not know about is a field it cannot refuse, and
+   * accepting something the upload rejects is the one way this package may
+   * not be wrong.
+   */
+  required?: boolean;
+  default?: unknown;
 }
 
 /** One function, as the plugin wrote it. */
@@ -455,6 +465,28 @@ export function validateFunctions(
       if (params.has(param.name)) {
         refuse(`${name} declares ${param.name} twice`);
       }
+      /*
+       * Neither is accepted on a *function's* parameter, and the mirror has to
+       * say so — silence here is the one direction this package may not be
+       * wrong in. A plugin declaring a default passed `check` and was then
+       * refused by the upload, which is exactly the drift this file exists to
+       * prevent.
+       *
+       * They are proposed rather than absent: `plugin/PARAMETERS.md` has the
+       * status table and the reasoning. A function's parameters are rows read
+       * by four things — the argument form, the tool spec a model is given,
+       * the caller that positions the arguments, and the editor that lets
+       * somebody take a plugin function over — and a default that exists in
+       * the declaration but not in the stored row is a function that behaves
+       * differently depending on which of them called it. When that lands,
+       * this check comes out.
+       */
+      if (param.required !== undefined || param.default !== undefined) {
+        refuse(
+          `${name}'s ${param.name} declares ${param.required !== undefined ? 'required' : 'default'}, ` +
+            'which a function\'s parameter may not yet — see PARAMETERS.md',
+        );
+      }
       params.add(param.name);
 
       const written = param.type.trim().toLowerCase();
@@ -544,6 +576,29 @@ export function validateTools(
       }
       if (params.has(param.name)) {
         refuse(`the tool ${name} declares ${param.name} twice`);
+      }
+      /*
+       * Neither is accepted on a *function's* parameter, and the mirror has to
+       * say so — silence here is the one direction this package may not be
+       * wrong in. A plugin declaring a default passed `check` and was then
+       * refused by the upload, which is exactly the drift this file exists to
+       * prevent.
+       *
+       * They are proposed rather than absent: `plugin/PARAMETERS.md` has the
+       * status table and the reasoning. A function's parameters are rows read
+       * by four things — the argument form, the tool spec a model is given,
+       * the caller that positions the arguments, and the editor that lets
+       * somebody take a plugin function over — and a default that exists in
+       * the declaration but not in the stored row is a function that behaves
+       * differently depending on which of them called it. When that lands,
+       * this check comes out.
+       */
+      if (param.required !== undefined || param.default !== undefined) {
+        refuse(
+          `the tool ${name}'s ${param.name} declares ` +
+            `${param.required !== undefined ? 'required' : 'default'}, which a parameter may not ` +
+            'yet — see PARAMETERS.md',
+        );
       }
       params.add(param.name);
 

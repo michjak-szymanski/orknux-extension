@@ -69,9 +69,16 @@ and falling through to the wrong backend silently is worse than being told. The
 check comes out when the picker lands.
 
 **`required` and `default` on a *function* parameter are proposed, not
-accepted.** `PARAMETERS.md` has the status table; a plugin declaring one today
-is refused. So the thirty-six "0 for the default" sentences stay until it says
-otherwise — do not pre-empt it.
+accepted.** `PARAMETERS.md` has the status table; the server refuses one today,
+and so does `validate` — which it did *not* until it was checked. The fields
+were simply unknown to it, so a plugin declaring a default passed `check` and
+was then refused by the upload. That is the one direction this package may not
+be wrong in, and "we have no rule about it" is how a mirror ends up looser
+without anybody deciding to make it so. A field the contract names has to be
+either allowed or refused, never ignored.
+
+So the thirty-six "0 for the default" sentences stay until the table says
+otherwise — and when it does, the refusal in `validate.ts` comes out with them.
 
 ## Conventions
 
