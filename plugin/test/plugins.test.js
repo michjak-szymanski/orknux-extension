@@ -255,6 +255,113 @@ test('the confluence plugin reads a page id out of either spelling of a page url
   );
 });
 
+test('the jira plugin declares what the server would accept', async () => {
+  const inspected = await inspect(shipped('jira'));
+
+  assert.equal(inspected.id, 'jira');
+  assert.deepEqual(validate(inspected), []);
+
+  assert.deepEqual(
+    inspected.parameters.map((parameter) => parameter.name),
+    ['url', 'email', 'token', 'project'],
+  );
+  /* The token is the one secret; the rest are plain settings. */
+  assert.deepEqual(
+    inspected.parameters.map((parameter) => parameter.secret),
+    [false, false, true, false],
+  );
+  assert.deepEqual(
+    inspected.parameters.map((parameter) => parameter.required),
+    [true, false, true, false],
+  );
+
+  assert.deepEqual(inspected.permissions, ['TEXT_ENCODING']);
+  assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
+  assert.deepEqual(
+    inspected.functions.map((declared) => declared.name),
+    ['search', 'openIssue', 'comment', 'transition', 'createIssue'],
+  );
+  assert.deepEqual(
+    inspected.tools.map((declared) => declared.name),
+    ['search', 'openIssue', 'comment', 'transition', 'createIssue'],
+  );
+});
+
+test('a jira call says what is missing, and picks its search endpoint by deployment', async () => {
+  const url = new URL(`../../plugins/jira/jira.js`, import.meta.url);
+  const { default: Jira } = await import(url.href);
+
+  const configured = (settings) => {
+    const plugin = Object.create(Jira.prototype);
+    Object.defineProperty(plugin, 'settings', { value: Object.freeze(settings) });
+    const functions = plugin.functions();
+    return (name) => functions.find((one) => one.name === name);
+  };
+
+  /* Nothing to do with is decided before any setting is read. */
+  assert.throws(() => configured({})('search').run('   ', 0), /no JQL to search with/);
+  assert.throws(() => configured({})('openIssue').run(''), /no issue key to open/);
+  assert.throws(() => configured({})('comment').run('PROJ-1', '  '), /no comment to add/);
+  assert.throws(() => configured({})('transition').run('PROJ-1', ''), /no status to move/);
+  assert.throws(() => configured({})('createIssue').run('', 'Task', '', ''), /needs a summary/);
+
+  /* Then the settings, each named. */
+  assert.throws(() => configured({})('search').run('project = PROJ', 0), /url parameter is not set/);
+  assert.throws(
+    () => configured({ url: 'https://x.atlassian.net' })('search').run('project = PROJ', 0),
+    /token parameter is not set/,
+  );
+  /* A create with no project and no default says so rather than guessing one. */
+  assert.throws(
+    () => configured({ url: 'https://x.atlassian.net', token: 't' })('createIssue').run('', 'Task', 'A thing', ''),
+    /no project was passed and no default project is configured/,
+  );
+
+  /*
+   * And the split that matters, watched rather than inferred: Cloud — which is
+   * what having an email to send means — must ask the only search endpoint it
+   * has left, because Atlassian removed the other one in 2025. Server still
+   * has v2. The request is caught on its way out to see which was chosen, and
+   * to see that the two authentication schemes differ with it.
+   */
+  const asked = [];
+  const door = globalThis.orknux.http.request;
+  globalThis.orknux.http.request = (what) => {
+    asked.push(what);
+    return { status: 200, headers: {}, body: '{}', json: { issues: [] } };
+  };
+  try {
+    configured({ url: 'https://x.atlassian.net', email: 'a@b.c', token: 't' })('search')
+      .run('project = PROJ', 10);
+    configured({ url: 'https://jira.example.com', token: 't' })('search')
+      .run('project = PROJ', 10);
+  } finally {
+    globalThis.orknux.http.request = door;
+  }
+
+  assert.equal(asked.length, 2);
+  const [onCloud, onServer] = asked;
+
+  /* Cloud: the bounded POST, with the fields named because it insists on them. */
+  assert.equal(onCloud.url, 'https://x.atlassian.net/rest/api/3/search/jql');
+  assert.equal(onCloud.method, 'POST');
+  assert.equal(onCloud.body.jql, 'project = PROJ');
+  assert.ok(Array.isArray(onCloud.body.fields) && onCloud.body.fields.includes('summary'));
+  assert.match(onCloud.headers.authorization, /^Basic /);
+
+  /* Server: the GET that has always been there, and a bearer token. */
+  assert.match(onServer.url, /^https:\/\/jira\.example\.com\/rest\/api\/2\/search\?jql=/);
+  assert.match(onServer.url, /maxResults=10/);
+  assert.equal(onServer.method, 'GET');
+  assert.equal(onServer.headers.authorization, 'Bearer t');
+
+  /* The Basic credential is the pair, encoded — base64 written out longhand. */
+  assert.equal(
+    Buffer.from(onCloud.headers.authorization.slice('Basic '.length), 'base64').toString('utf8'),
+    'a@b.c:t',
+  );
+});
+
 test('the prometheus plugin declares what the server would accept', async () => {
   const inspected = await inspect(shipped('prometheus'));
 

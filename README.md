@@ -58,6 +58,12 @@ words or CQL — and opens a page whole: title, space, version and body.
 
     https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/confluence/confluence.js
 
+**[jira](plugins/jira/jira.js)** finds issues by JQL, opens one whole, comments,
+moves it through its workflow and raises new ones — the other half of the
+sentence the github plugin starts.
+
+    https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/jira/jira.js
+
 **[prometheus](plugins/prometheus/prometheus.js)** lists the metric names a
 Prometheus knows and executes PromQL against it, so a condition can ask what the
 running system is doing.

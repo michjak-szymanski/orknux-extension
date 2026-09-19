@@ -36,6 +36,7 @@ const here = fileURLToPath(new URL('.', import.meta.url));
 const BRANDED = [
   { plugin: 'github', icon: 'siGithub' },
   { plugin: 'confluence', icon: 'siConfluence' },
+  { plugin: 'jira', icon: 'siJira' },
   { plugin: 'prometheus', icon: 'siPrometheus' },
   { plugin: 'mermaid', icon: 'siMermaid' },
   /*

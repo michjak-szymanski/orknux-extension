@@ -1,0 +1,10 @@
+{
+  "$schema": "https://orknux.ai/marketplace/plugin.schema.json",
+  "key": "jira",
+  "name": "Jira",
+  "author": "Orknux",
+  "summary": "Find issues by JQL, open one whole, comment, move it through its workflow, and raise new ones.",
+  "version": "0.1.0",
+  "icon": "icon.svg",
+  "descriptionPath": "README.md"
+}
