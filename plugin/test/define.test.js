@@ -9,7 +9,9 @@ import {
   orknux,
   OrknuxFunction,
   OrknuxFunctionTool,
+  OrknuxObject,
   OrknuxParameter,
+  OrknuxSkill,
   OrknuxPlugin,
   OrknuxTool,
   param,
@@ -214,4 +216,32 @@ test('an ungranted helper answers a sentence as data, never a throw', () => {
 
   const answered = orknux.http.get('https://example.com');
   assert.equal(answered.error, 'this plugin was not granted NETWORK_REQUEST');
+});
+
+/*
+ * The two newest surfaces, which definePlugin did not know about.
+ *
+ * It handled id, functions, tools, parameters, permissions, capabilities and
+ * libraries, and said nothing about skills or objects - so the ergonomic way
+ * to write a plugin was quietly the one that could not teach an agent or
+ * export a shape. The kind of gap found by somebody confused rather than by a
+ * test, which is what this is.
+ */
+test('definePlugin carries skills and objects like everything else', () => {
+  const Plugin = definePlugin({
+    id: 'jira',
+    skills: [new OrknuxSkill({ name: 'Triage', content: 'Read the title first.' })],
+    objects: [new OrknuxObject({ name: 'Issue', properties: [{ name: 'key', kind: 'string' }] })],
+  });
+
+  const made = new Plugin();
+  assert.deepEqual(made.skills().map((one) => one.name), ['Triage']);
+  assert.deepEqual(made.objects().map((one) => one.name), ['Issue']);
+});
+
+test('and a plugin that declares neither still answers with empty lists', () => {
+  const made = new (definePlugin({ id: 'bare' }))();
+
+  assert.deepEqual(made.skills(), []);
+  assert.deepEqual(made.objects(), []);
 });

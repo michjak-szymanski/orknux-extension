@@ -12,11 +12,13 @@ import type {
   OrknuxFunctionInstance,
   OrknuxFunctionToolDeclaration,
   OrknuxFunctionToolInstance,
+  OrknuxObjectInstance,
   OrknuxParam,
   OrknuxParameterDeclaration,
   OrknuxParameterInstance,
   OrknuxPermission,
   OrknuxPluginConstructor,
+  OrknuxSkillInstance,
   OrknuxToolDeclaration,
   OrknuxToolInstance,
   OrknuxValueType,
@@ -136,6 +138,24 @@ export interface OrknuxPluginSpec {
    * single-file plugin, which is the common case.
    */
   libraries?: readonly string[];
+
+  /**
+   * The instruction sets it brings: markdown an agent reads, never code it
+   * runs. Leave it out for a plugin that teaches nothing.
+   *
+   * They arrive as a skill catalog named `<id>_plugin`, granted the way any
+   * other catalog is.
+   */
+  skills?: readonly OrknuxSkillInstance[];
+
+  /**
+   * The shapes it exports, for its own functions and tools to pass around.
+   * Leave it out for a plugin whose functions answer with scalars and maps.
+   *
+   * Available wherever the plugin is, under its key: `Issue` declared by
+   * `jira` arrives as `jira_Issue`.
+   */
+  objects?: readonly OrknuxObjectInstance[];
 }
 
 /**
@@ -170,6 +190,8 @@ export function definePlugin(spec: OrknuxPluginSpec): OrknuxPluginConstructor {
   const asked = spec.permissions === undefined ? [] : [...spec.permissions];
   const askedOf = spec.capabilities === undefined ? [] : [...spec.capabilities];
   const shipped = spec.libraries === undefined ? [] : [...spec.libraries];
+  const taught = spec.skills === undefined ? [] : [...spec.skills];
+  const exported = spec.objects === undefined ? [] : [...spec.objects];
 
   /*
    * Checked here rather than left to the upload: a plugin that declares one name
@@ -243,6 +265,14 @@ export function definePlugin(spec: OrknuxPluginSpec): OrknuxPluginConstructor {
 
     override libraries(): string[] {
       return shipped.slice();
+    }
+
+    override skills(): OrknuxSkillInstance[] {
+      return taught.slice();
+    }
+
+    override objects(): OrknuxObjectInstance[] {
+      return exported.slice();
     }
   };
 }
