@@ -1,0 +1,74 @@
+[
+  {
+    "key": "slack",
+    "name": "Slack",
+    "author": "Orknux",
+    "summary": "Read, post, react and search Slack from workflows and agents.",
+    "descriptionPath": "plugins/slack/README.md",
+    "version": "1.0.0",
+    "path": "plugins/slack/slack.js"
+  },
+  {
+    "key": "github",
+    "name": "GitHub",
+    "author": "Orknux",
+    "summary": "Webhook checks, search, files, builds and comments against GitHub.",
+    "descriptionPath": "plugins/github/README.md",
+    "version": "1.0.0",
+    "path": "plugins/github/github.js"
+  },
+  {
+    "key": "teams",
+    "name": "Microsoft Teams",
+    "author": "Orknux",
+    "summary": "Microsoft Teams messages, wrapped for workflows and agents.",
+    "descriptionPath": "plugins/teams/README.md",
+    "version": "1.0.0",
+    "path": "plugins/teams/teams.js"
+  },
+  {
+    "key": "confluence",
+    "name": "Confluence",
+    "author": "Orknux",
+    "summary": "Search the wiki beside the work, and open its pages as text.",
+    "descriptionPath": "plugins/confluence/README.md",
+    "version": "0.1.0",
+    "path": "plugins/confluence/confluence.js"
+  },
+  {
+    "key": "prometheus",
+    "name": "Prometheus",
+    "author": "Orknux",
+    "summary": "Ask what the system is doing, from a condition or an agent.",
+    "descriptionPath": "plugins/prometheus/README.md",
+    "version": "0.1.0",
+    "path": "plugins/prometheus/prometheus.js"
+  },
+  {
+    "key": "mermaid",
+    "name": "Mermaid",
+    "author": "Orknux",
+    "summary": "Render Mermaid diagrams to SVG, offline, inside the sandbox.",
+    "descriptionPath": "plugins/mermaid/README.md",
+    "version": "0.1.0",
+    "path": "plugins/mermaid/mermaid.js"
+  },
+  {
+    "key": "pdf",
+    "name": "PDF",
+    "author": "Orknux",
+    "summary": "Compose PDF documents from a workflow, diagrams drawn in.",
+    "descriptionPath": "plugins/pdf/README.md",
+    "version": "0.1.0",
+    "path": "plugins/pdf/pdf.js"
+  },
+  {
+    "key": "todo",
+    "name": "Todo",
+    "author": "Orknux",
+    "summary": "A todo list for the agent's own plan, kept in the session store.",
+    "descriptionPath": "plugins/todo/README.md",
+    "version": "0.1.0",
+    "path": "plugins/todo/todo.js"
+  }
+]
