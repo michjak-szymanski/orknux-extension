@@ -75,6 +75,12 @@ drawn into the page as vectors. Writer, fonts and renderer are all bundled in.
 
     https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/pdf/pdf.js
 
+**[web](plugins/web/web.js)** searches the web through Tavily and answers title,
+url and a readable snippet per result, so a model can look something up rather
+than answer from memory.
+
+    https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/web/web.js
+
 **[todo](plugins/todo/todo.js)** gives an agent a todo list for the length of one
 conversation, so a request too complex to hold in one step is split, worked and
 checked off. It asks the platform for nothing at all.

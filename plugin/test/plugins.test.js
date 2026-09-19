@@ -394,6 +394,50 @@ test('the pdf plugin writes a pdf out of html, diagrams and all, without a DOM',
   assert.throws(() => declared.run('<p>   </p>', ''), /no text to lay out/);
 });
 
+test('the web plugin declares what the server would accept', async () => {
+  const inspected = await inspect(shipped('web'));
+
+  assert.equal(inspected.id, 'web');
+  assert.deepEqual(validate(inspected), []);
+
+  assert.deepEqual(
+    inspected.parameters.map((parameter) => parameter.name),
+    ['apiKey', 'answer'],
+  );
+  /* The key is the one secret; the answer toggle is a plain setting. */
+  assert.deepEqual(
+    inspected.parameters.map((parameter) => parameter.secret),
+    [true, false],
+  );
+  assert.deepEqual(
+    inspected.parameters.map((parameter) => parameter.required),
+    [true, false],
+  );
+
+  /* Nothing of the language is needed — only the request and what came back. */
+  assert.deepEqual(inspected.permissions, []);
+  assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
+  assert.deepEqual(
+    inspected.functions.map((declared) => declared.name),
+    ['search'],
+  );
+  assert.deepEqual(
+    inspected.tools.map((declared) => declared.name),
+    ['search'],
+  );
+});
+
+test('a web search refuses an empty query and a missing key, before reaching anything', async () => {
+  const url = new URL(`../../plugins/web/web.js`, import.meta.url);
+  const { default: Web } = await import(url.href);
+  const declared = new Web().functions().find((one) => one.name === 'search');
+
+  /* Nothing to search for is decided before the key is even looked at. */
+  assert.throws(() => declared.run('   ', 0), /nothing to search for/);
+  /* And a real query with no key says which parameter, rather than failing at the door. */
+  assert.throws(() => declared.run('what happened today', 0), /apiKey parameter is not set/);
+});
+
 test('the todo plugin declares what the server would accept', async () => {
   const inspected = await inspect(shipped('todo'));
 
