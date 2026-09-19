@@ -4,8 +4,11 @@
  * GitHub is not a connection type and there is no GitHub trigger. What this
  * installation already had was a webhook trigger that answers on a path, checks
  * an arriving body against a shape, and asks a function whether the caller may
- * start anything. All this does is be that function, and know GitHub's three
- * payloads well enough to say what one of them is about.
+ * start anything. The first half of this file is that function, and knows
+ * GitHub's three payloads well enough to say what one of them is about. The
+ * second half faces the other way: functions that ask GitHub's REST API
+ * questions — and post answers back — fronted as tools so an agent can work a
+ * repository the way a person at the site would.
  *
  * The whole integration is therefore a file somebody loads and a workspace
  * points a trigger at. Nothing about GitHub is in the server, which is the point
@@ -31,17 +34,44 @@
  * GitHub says which event this is. `github_describe` turns the pair into one
  * flat answer a condition or an action can read.
  *
- * ## Why the hashing is written out longhand
+ * ## The API surface
  *
- * A plugin's sandbox has no crypto: it hands out language builtins and nothing
- * else, on purpose, and there is no permission that could be asked for that
- * would open a door to the host. So SHA-256 and HMAC are here, in the plugin,
- * which is exactly what "a plugin declares the JavaScript it needs" means. It
- * costs roughly a thousand statements per 64 bytes hashed, so a payload in the
- * hundreds of kilobytes will run out of the sandbox's statement budget and the
- * caller will be refused — with the reason written into the trigger's log. Set
- * the repository's webhook to send the events below rather than everything, and
- * nothing it sends comes close.
+ * The webhook half needs no credential of GitHub's; everything else here does.
+ * Those functions ask GitHub's REST API — search, repositories, pull requests,
+ * commits, builds, files, comments, and the Copilot agent tasks — and a plugin
+ * has no network, deliberately and permanently. So each call is made by the
+ * *server* on the plugin's behalf, under the NETWORK_REQUEST capability a
+ * person accepted, authenticated with the `token` parameter: a fine-grained
+ * personal access token (or a GitHub App user token) with read access to the
+ * repositories it should see, and write access to pull requests where the
+ * commenting and the agent tasks are wanted. Declared as a secret, so it lives
+ * in a workspace variable, never typed into a page.
+ *
+ * `organization` is the owner every function falls back to when a call does not
+ * name one — so "search the backlog" does not need the org spelled into every
+ * query — and search queries that do not say where to look are scoped to it.
+ * `apiUrl` points the whole surface at a GitHub Enterprise Server instead of
+ * api.github.com.
+ *
+ * The agent-task functions drive GitHub's Copilot cloud agent. That API is in
+ * public preview and only answers a *user* token — a GitHub App installation
+ * token is refused by GitHub, not by this file. Steering a task that is already
+ * running is done the way GitHub does it: a comment on the task's pull request
+ * mentioning @copilot, which is what `messageAgentTask` posts.
+ *
+ * ## How the plugin is laid out
+ *
+ * Two libraries travel with this file, and `libraries()` declares them.
+ * `lib/hashing.js` is SHA-256 and HMAC written out longhand — the sandbox has
+ * no crypto, on purpose, and there is no permission that could be asked for
+ * that would open a door to the host. Hashing costs roughly a thousand
+ * statements per 64 bytes, so a payload in the hundreds of kilobytes will run
+ * out of the sandbox's statement budget and the caller will be refused — set
+ * the repository's webhook to send the events below rather than everything,
+ * and nothing it sends comes close. `lib/api.js` is the door every REST call
+ * goes through, and the readers every answer is picked apart with. What stays
+ * in this file is what the plugin *declares*, which is the part somebody
+ * loading it reads.
  *
  * Written as JavaScript rather than as TypeScript compiled to it: the server
  * runs JavaScript, and a plugin somebody may need to load in a hurry should not
@@ -51,169 +81,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/** The round constants of SHA-256, as FIPS 180-4 gives them. */
-const ROUND_CONSTANTS = new Uint32Array([
-  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-]);
-
-/** The initial hash value of SHA-256. */
-const INITIAL = new Uint32Array([
-  0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
-]);
-
-/** The block size HMAC pads its key out to. */
-const BLOCK = 64;
-
-function rotate(word, by) {
-  return ((word >>> by) | (word << (32 - by))) >>> 0;
-}
-
-/**
- * SHA-256 of some bytes, as bytes.
- *
- * Straight out of the specification, working on a Uint8Array so nothing here
- * depends on how a string was encoded — that decision is made once, above.
- */
-function sha256(bytes) {
-  const hash = INITIAL.slice();
-
-  // One 0x80 byte, then zeroes, then the length in bits as 64 big-endian bits:
-  // so the message needs at least nine bytes of room past its own end.
-  const padded = new Uint8Array(((((bytes.length + 8) / BLOCK) | 0) + 1) * BLOCK);
-  padded.set(bytes);
-  padded[bytes.length] = 0x80;
-
-  const view = new DataView(padded.buffer);
-  const bits = bytes.length * 8;
-  view.setUint32(padded.length - 8, Math.floor(bits / 0x100000000));
-  view.setUint32(padded.length - 4, bits >>> 0);
-
-  const schedule = new Uint32Array(64);
-  for (let at = 0; at < padded.length; at += BLOCK) {
-    for (let index = 0; index < 16; index++) {
-      schedule[index] = view.getUint32(at + index * 4);
-    }
-    for (let index = 16; index < 64; index++) {
-      const early = schedule[index - 15];
-      const late = schedule[index - 2];
-      const mixEarly = rotate(early, 7) ^ rotate(early, 18) ^ (early >>> 3);
-      const mixLate = rotate(late, 17) ^ rotate(late, 19) ^ (late >>> 10);
-      schedule[index] = (schedule[index - 16] + mixEarly + schedule[index - 7] + mixLate) >>> 0;
-    }
-
-    let a = hash[0];
-    let b = hash[1];
-    let c = hash[2];
-    let d = hash[3];
-    let e = hash[4];
-    let f = hash[5];
-    let g = hash[6];
-    let h = hash[7];
-
-    for (let round = 0; round < 64; round++) {
-      const sum1 = rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25);
-      const choose = (e & f) ^ (~e & g);
-      const first = (h + sum1 + choose + ROUND_CONSTANTS[round] + schedule[round]) >>> 0;
-      const sum0 = rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22);
-      const majority = (a & b) ^ (a & c) ^ (b & c);
-      const second = (sum0 + majority) >>> 0;
-
-      h = g;
-      g = f;
-      f = e;
-      e = (d + first) >>> 0;
-      d = c;
-      c = b;
-      b = a;
-      a = (first + second) >>> 0;
-    }
-
-    hash[0] = (hash[0] + a) >>> 0;
-    hash[1] = (hash[1] + b) >>> 0;
-    hash[2] = (hash[2] + c) >>> 0;
-    hash[3] = (hash[3] + d) >>> 0;
-    hash[4] = (hash[4] + e) >>> 0;
-    hash[5] = (hash[5] + f) >>> 0;
-    hash[6] = (hash[6] + g) >>> 0;
-    hash[7] = (hash[7] + h) >>> 0;
-  }
-
-  const digest = new Uint8Array(32);
-  const out = new DataView(digest.buffer);
-  for (let word = 0; word < 8; word++) {
-    out.setUint32(word * 4, hash[word]);
-  }
-  return digest;
-}
-
-/** HMAC-SHA-256, as RFC 2104 gives it. */
-function hmacSha256(key, message) {
-  const shortened = key.length > BLOCK ? sha256(key) : key;
-  const padded = new Uint8Array(BLOCK);
-  padded.set(shortened);
-
-  const inner = new Uint8Array(BLOCK + message.length);
-  const outer = new Uint8Array(BLOCK + 32);
-  for (let at = 0; at < BLOCK; at++) {
-    inner[at] = padded[at] ^ 0x36;
-    outer[at] = padded[at] ^ 0x5c;
-  }
-  inner.set(message, BLOCK);
-  outer.set(sha256(inner), BLOCK);
-  return sha256(outer);
-}
-
-function hex(bytes) {
-  let written = '';
-  for (let at = 0; at < bytes.length; at++) {
-    written += (bytes[at] < 0x10 ? '0' : '') + bytes[at].toString(16);
-  }
-  return written;
-}
-
-/**
- * Whether two hex digests are the same, in time that does not depend on where
- * they first differ.
- *
- * A comparison that returns early tells whoever is guessing how much of their
- * guess was right, one byte at a time, which is enough to forge a signature
- * without ever knowing the secret.
- */
-function sameDigest(mine, theirs) {
-  if (typeof theirs !== 'string' || mine.length !== theirs.length) {
-    return false;
-  }
-  let differing = 0;
-  for (let at = 0; at < mine.length; at++) {
-    differing |= mine.charCodeAt(at) ^ theirs.charCodeAt(at);
-  }
-  return differing === 0;
-}
-
-/** A header by name, from a map whose keys the server has already lower-cased. */
-function header(headers, name) {
-  if (headers === null || typeof headers !== 'object') {
-    return null;
-  }
-  const held = headers[name];
-  return typeof held === 'string' ? held : null;
-}
-
-/** A nested field, or null rather than a thrown error on the way down. */
-function at(holder, name) {
-  if (holder === null || typeof holder !== 'object') {
-    return null;
-  }
-  const held = holder[name];
-  return held === undefined ? null : held;
-}
+import { hmacSha256, hex, sameDigest } from './lib/hashing.js';
+import {
+  at,
+  call,
+  changedFile,
+  escapedPath,
+  header,
+  ownerOr,
+  pageSize,
+  read,
+  repoNamed,
+  repoPath,
+  scoped,
+  statusError,
+} from './lib/api.js';
 
 export default class Github extends OrknuxPlugin {
 
@@ -231,12 +113,43 @@ export default class Github extends OrknuxPlugin {
         name: 'webhookSecret',
         description: 'The secret set on the repository\'s webhook, which every delivery is signed with.',
         type: 'string',
-        required: true,
+        // Optional since the API surface arrived: a workspace that only asks
+        // questions of GitHub never sets up a webhook. `verify` answers false
+        // while it is unset, which is the safe reading of not knowing.
+        required: false,
         // The webhook's own secret. Declared as a secret so it cannot be typed
         // into the plugins page: the only way to answer it is to point at one of
         // the workspace's variables, which is where this installation encrypts
         // what it keeps.
         secret: true,
+      }),
+      new OrknuxParameter({
+        name: 'token',
+        description:
+          'A GitHub token — fine-grained PAT or App user token — for the API surface. ' +
+          'The agent-task functions only answer a user token.',
+        type: 'string',
+        // Optional the other way round: a workspace that only verifies webhook
+        // deliveries never calls the API. Every API function checks for it and
+        // says so when it is missing.
+        required: false,
+        secret: true,
+      }),
+      new OrknuxParameter({
+        name: 'organization',
+        description:
+          'The owner every function falls back to when a call does not name one, ' +
+          'and the org unqualified searches are scoped to.',
+        type: 'string',
+        required: false,
+      }),
+      new OrknuxParameter({
+        name: 'apiUrl',
+        description:
+          'The API root, for a GitHub Enterprise Server (https://ghes.example.com/api/v3). ' +
+          'Left empty, it is api.github.com.',
+        type: 'string',
+        required: false,
       }),
     ];
   }
@@ -248,6 +161,47 @@ export default class Github extends OrknuxPlugin {
     // outside the ASCII range. A pull request title with an accent in it is
     // not an edge case.
     return ['TEXT_ENCODING'];
+  }
+
+  capabilities() {
+    // The widest capability there is, asked for because this plugin is about
+    // exactly one outside service: every request the functions below make goes
+    // to the API root above, which is GitHub's or the GHES the workspace named.
+    return ['NETWORK_REQUEST'];
+  }
+
+  libraries() {
+    // The files that travel with this one — the complete list, shown to
+    // whoever loads the plugin. Every relative import above resolves here.
+    return ['lib/hashing.js', 'lib/api.js'];
+  }
+
+  /*
+   * The agents' surface: every API function, fronted. Proxies rather than
+   * copies, so the params, return types and implementations stay the
+   * functions' own. `verify` and `describe` are deliberately not here — they
+   * are the webhook trigger's machinery, and a model has no delivery to check.
+   */
+  tools() {
+    return [
+      new OrknuxFunctionTool({ function: 'searchPulls' }),
+      new OrknuxFunctionTool({ function: 'listRepos' }),
+      new OrknuxFunctionTool({ function: 'listFiles' }),
+      new OrknuxFunctionTool({ function: 'openPull' }),
+      new OrknuxFunctionTool({ function: 'searchCode' }),
+      new OrknuxFunctionTool({ function: 'searchCommits' }),
+      new OrknuxFunctionTool({ function: 'openCommit' }),
+      new OrknuxFunctionTool({ function: 'buildStatus' }),
+      new OrknuxFunctionTool({ function: 'openFile' }),
+      new OrknuxFunctionTool({ function: 'fileHistory' }),
+      new OrknuxFunctionTool({ function: 'createAgentTask' }),
+      new OrknuxFunctionTool({ function: 'agentTask' }),
+      new OrknuxFunctionTool({ function: 'agentTaskLogs' }),
+      new OrknuxFunctionTool({ function: 'messageAgentTask' }),
+      new OrknuxFunctionTool({ function: 'comment' }),
+      new OrknuxFunctionTool({ function: 'reviewComment' }),
+      new OrknuxFunctionTool({ function: 'replyToComment' }),
+    ];
   }
 
   functions() {
@@ -272,8 +226,8 @@ export default class Github extends OrknuxPlugin {
         run: (headers, rawBody) => {
           const secret = this.settings.webhookSecret;
           if (typeof secret !== 'string' || secret.length === 0) {
-            // Required, so a workspace that has not set it is already marked as
-            // needing to. Answering no is the safe reading of not knowing.
+            // Unset — a workspace that only uses the API surface never answers
+            // it. Answering no is the safe reading of not knowing.
             return false;
           }
           if (typeof rawBody !== 'string') {
@@ -356,6 +310,565 @@ export default class Github extends OrknuxPlugin {
           }
 
           return described;
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'searchPulls',
+        description:
+          'Searches pull requests the way the site\'s search box does. GitHub\'s search syntax works: ' +
+          'repo:owner/name, author:login, is:open, review:required, "an exact phrase". A query that does ' +
+          'not say where to look is scoped to the configured organization. Answers the total and the ' +
+          'matches - number, title, state, repository, author, updated and a url each. limit caps the ' +
+          'matches, 0 for the default.',
+        params: [
+          { name: 'query', type: 'string' },
+          { name: 'limit', type: 'number' },
+        ],
+        returnType: 'map',
+        run: (query, limit) => {
+          const asked = `${scoped(this.settings, query)} is:pr`;
+          const found = read(this.settings, {
+            path: `/search/issues?q=${encodeURIComponent(asked)}&per_page=${pageSize(limit, 20)}`,
+          }).json;
+          return {
+            total: at(found, 'total_count'),
+            matches: (at(found, 'items') ?? []).map((one) => ({
+              number: at(one, 'number'),
+              title: at(one, 'title'),
+              state: at(one, 'state'),
+              draft: at(one, 'draft'),
+              repository: repoNamed(at(one, 'repository_url')),
+              author: at(at(one, 'user'), 'login'),
+              updated: at(one, 'updated_at'),
+              url: at(one, 'html_url'),
+            })),
+          };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'listRepos',
+        description:
+          'Lists repositories, most recently pushed first. Pass an organization or user as owner, or an ' +
+          'empty owner for the configured organization - and with neither, the repositories the token ' +
+          'itself can see. Answers name, fullName, description, defaultBranch, private, pushed and a url ' +
+          'each. limit caps the list, 0 for the default.',
+        params: [
+          { name: 'owner', type: 'string' },
+          { name: 'limit', type: 'number' },
+        ],
+        returnType: 'map',
+        run: (owner, limit) => {
+          const query = `per_page=${pageSize(limit, 30)}&sort=pushed`;
+          const fallback = this.settings.organization;
+          const unnamed =
+            (typeof owner !== 'string' || owner.length === 0) &&
+            (typeof fallback !== 'string' || fallback.length === 0);
+
+          let answered;
+          if (unnamed) {
+            answered = read(this.settings, { path: `/user/repos?${query}` });
+          } else {
+            /*
+             * An owner is an organization or a user, and the caller should not
+             * have to know which: ask as an org first, and read the one 404
+             * that means "not an org" as an instruction to ask again.
+             */
+            const who = encodeURIComponent(ownerOr(this.settings, owner));
+            answered = call(this.settings, { path: `/orgs/${who}/repos?${query}` });
+            if (answered.status === 404) {
+              answered = read(this.settings, { path: `/users/${who}/repos?${query}` });
+            } else if (answered.status >= 400) {
+              throw statusError(answered, `/orgs/${who}/repos`);
+            }
+          }
+
+          const held = Array.isArray(answered.json) ? answered.json : [];
+          return {
+            repos: held.map((one) => ({
+              name: at(one, 'name'),
+              fullName: at(one, 'full_name'),
+              description: at(one, 'description'),
+              defaultBranch: at(one, 'default_branch'),
+              private: at(one, 'private'),
+              pushed: at(one, 'pushed_at'),
+              url: at(one, 'html_url'),
+            })),
+          };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'listFiles',
+        description:
+          'Lists every file path in a repository at one ref, from its git tree. Pass owner and repo (or ' +
+          'the repo as owner/name, or an empty owner for the configured organization) and a branch, tag ' +
+          'or commit sha - or an empty ref for the default branch. Answers the ref read, the paths, and ' +
+          'truncated=true where the tree was too large for GitHub to give whole.',
+        params: [
+          { name: 'owner', type: 'string' },
+          { name: 'repo', type: 'string' },
+          { name: 'ref', type: 'string' },
+        ],
+        returnType: 'map',
+        run: (owner, repo, ref) => {
+          const base = repoPath(this.settings, owner, repo);
+          let marked = ref;
+          if (typeof marked !== 'string' || marked.length === 0) {
+            marked = at(read(this.settings, { path: base }).json, 'default_branch');
+          }
+          const tree = read(this.settings, {
+            path: `${base}/git/trees/${encodeURIComponent(marked)}?recursive=1`,
+          }).json;
+          const files = (at(tree, 'tree') ?? [])
+            .filter((one) => at(one, 'type') === 'blob')
+            .map((one) => at(one, 'path'));
+          return { ref: marked, files: files, count: files.length, truncated: at(tree, 'truncated') === true };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'openPull',
+        description:
+          'Opens one pull request whole: title, body, state, draft, merged, author, baseRef, headRef, ' +
+          'headSha, mergeable, additions, deletions, url - and its changed files, each with the patch ' +
+          'GitHub shows as the diff. Pass owner and repo (or the repo as owner/name, or an empty owner ' +
+          'for the configured organization) and the PR number.',
+        params: [
+          { name: 'owner', type: 'string' },
+          { name: 'repo', type: 'string' },
+          { name: 'number', type: 'number' },
+        ],
+        returnType: 'map',
+        run: (owner, repo, number) => {
+          const base = repoPath(this.settings, owner, repo);
+          const pull = read(this.settings, { path: `${base}/pulls/${number}` }).json;
+          const files = read(this.settings, { path: `${base}/pulls/${number}/files?per_page=100` }).json;
+          return {
+            number: at(pull, 'number'),
+            title: at(pull, 'title'),
+            body: at(pull, 'body'),
+            state: at(pull, 'state'),
+            draft: at(pull, 'draft'),
+            merged: at(pull, 'merged'),
+            author: at(at(pull, 'user'), 'login'),
+            baseRef: at(at(pull, 'base'), 'ref'),
+            headRef: at(at(pull, 'head'), 'ref'),
+            headSha: at(at(pull, 'head'), 'sha'),
+            mergeable: at(pull, 'mergeable'),
+            additions: at(pull, 'additions'),
+            deletions: at(pull, 'deletions'),
+            url: at(pull, 'html_url'),
+            files: (Array.isArray(files) ? files : []).map(changedFile),
+          };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'searchCode',
+        description:
+          'Searches code the way the site\'s search box does. GitHub\'s qualifiers work: repo:owner/name, ' +
+          'path:src, language:go, filename:Dockerfile. A query that does not say where to look is scoped ' +
+          'to the configured organization. Answers the total and the matches - repository, path, url and ' +
+          'the matching fragments each. limit caps the matches, 0 for the default.',
+        params: [
+          { name: 'query', type: 'string' },
+          { name: 'limit', type: 'number' },
+        ],
+        returnType: 'map',
+        run: (query, limit) => {
+          const found = read(this.settings, {
+            path: `/search/code?q=${encodeURIComponent(scoped(this.settings, query))}&per_page=${pageSize(limit, 20)}`,
+            // The variant that carries the matching fragments, which are the
+            // half of a code search worth reading.
+            accept: 'application/vnd.github.text-match+json',
+          }).json;
+          return {
+            total: at(found, 'total_count'),
+            matches: (at(found, 'items') ?? []).map((one) => ({
+              repository: at(at(one, 'repository'), 'full_name'),
+              path: at(one, 'path'),
+              url: at(one, 'html_url'),
+              fragments: (at(one, 'text_matches') ?? []).map((match) => at(match, 'fragment')),
+            })),
+          };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'searchCommits',
+        description:
+          'Searches commit messages. GitHub\'s qualifiers work: repo:owner/name, author:login, ' +
+          'committer-date:>2026-01-01. A query that does not say where to look is scoped to the ' +
+          'configured organization. Answers the total and the matches - repository, sha, message, ' +
+          'author, date and a url each. limit caps the matches, 0 for the default.',
+        params: [
+          { name: 'query', type: 'string' },
+          { name: 'limit', type: 'number' },
+        ],
+        returnType: 'map',
+        run: (query, limit) => {
+          const found = read(this.settings, {
+            path: `/search/commits?q=${encodeURIComponent(scoped(this.settings, query))}&per_page=${pageSize(limit, 20)}`,
+          }).json;
+          return {
+            total: at(found, 'total_count'),
+            matches: (at(found, 'items') ?? []).map((one) => ({
+              repository: at(at(one, 'repository'), 'full_name'),
+              sha: at(one, 'sha'),
+              message: at(at(one, 'commit'), 'message'),
+              author: at(at(at(one, 'commit'), 'author'), 'name'),
+              date: at(at(at(one, 'commit'), 'author'), 'date'),
+              url: at(one, 'html_url'),
+            })),
+          };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'openCommit',
+        description:
+          'Opens one commit whole: message, author, date, parents, additions, deletions, url - and its ' +
+          'changed files, each with the patch GitHub shows as the diff. Pass owner and repo (or the repo ' +
+          'as owner/name, or an empty owner for the configured organization) and the sha, or a ref that ' +
+          'names one.',
+        params: [
+          { name: 'owner', type: 'string' },
+          { name: 'repo', type: 'string' },
+          { name: 'sha', type: 'string' },
+        ],
+        returnType: 'map',
+        run: (owner, repo, sha) => {
+          const base = repoPath(this.settings, owner, repo);
+          const commit = read(this.settings, {
+            path: `${base}/commits/${encodeURIComponent(sha)}`,
+          }).json;
+          return {
+            sha: at(commit, 'sha'),
+            message: at(at(commit, 'commit'), 'message'),
+            author: at(at(at(commit, 'commit'), 'author'), 'name'),
+            login: at(at(commit, 'author'), 'login'),
+            date: at(at(at(commit, 'commit'), 'author'), 'date'),
+            parents: (at(commit, 'parents') ?? []).map((one) => at(one, 'sha')),
+            additions: at(at(commit, 'stats'), 'additions'),
+            deletions: at(at(commit, 'stats'), 'deletions'),
+            url: at(commit, 'html_url'),
+            files: (at(commit, 'files') ?? []).map(changedFile),
+          };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'buildStatus',
+        description:
+          'What the builds say about one commit: the combined commit status and every check run, in one ' +
+          'answer. Pass owner and repo (or the repo as owner/name, or an empty owner for the configured ' +
+          'organization) and a sha, branch or tag. overall is failure, pending, success, or none where ' +
+          'nothing has reported; statuses and checks carry each reporter by name.',
+        params: [
+          { name: 'owner', type: 'string' },
+          { name: 'repo', type: 'string' },
+          { name: 'ref', type: 'string' },
+        ],
+        returnType: 'map',
+        run: (owner, repo, ref) => {
+          const base = repoPath(this.settings, owner, repo);
+          const marked = encodeURIComponent(ref);
+
+          /*
+           * Both reporting schemes, because CI uses both: the status API is
+           * what older integrations set, and check runs are what GitHub
+           * Actions and the newer apps write. Reading only one says "success"
+           * about a commit the other knows is red.
+           */
+          const combined = read(this.settings, { path: `${base}/commits/${marked}/status` }).json;
+          const runs =
+            at(read(this.settings, { path: `${base}/commits/${marked}/check-runs?per_page=100` }).json, 'check_runs') ?? [];
+
+          const statuses = (at(combined, 'statuses') ?? []).map((one) => ({
+            context: at(one, 'context'),
+            state: at(one, 'state'),
+            description: at(one, 'description'),
+            url: at(one, 'target_url'),
+          }));
+          const checks = runs.map((one) => ({
+            name: at(one, 'name'),
+            status: at(one, 'status'),
+            conclusion: at(one, 'conclusion'),
+            url: at(one, 'html_url'),
+          }));
+
+          const red = ['failure', 'timed_out', 'cancelled', 'action_required', 'startup_failure'];
+          const state = at(combined, 'state');
+          const failing =
+            state === 'failure' || state === 'error' || checks.some((one) => red.includes(one.conclusion));
+          const running =
+            checks.some((one) => one.status !== 'completed') || (statuses.length > 0 && state === 'pending');
+
+          return {
+            overall: failing ? 'failure' : running ? 'pending' : statuses.length + checks.length > 0 ? 'success' : 'none',
+            sha: at(combined, 'sha'),
+            statuses: statuses,
+            checks: checks,
+          };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'openFile',
+        description:
+          'Reads one file out of a repository, as the text it is. Pass owner and repo (or the repo as ' +
+          'owner/name, or an empty owner for the configured organization), the path from the repository ' +
+          'root, and a branch, tag or sha - or an empty ref for the default branch.',
+        params: [
+          { name: 'owner', type: 'string' },
+          { name: 'repo', type: 'string' },
+          { name: 'path', type: 'string' },
+          { name: 'ref', type: 'string' },
+        ],
+        returnType: 'string',
+        run: (owner, repo, path, ref) => {
+          const base = repoPath(this.settings, owner, repo);
+          const marked = typeof ref === 'string' && ref.length > 0 ? `?ref=${encodeURIComponent(ref)}` : '';
+          /*
+           * The raw variant, asked for in the accept header, so what comes back
+           * is the file — not JSON holding the file as base64, which the
+           * sandbox has no atob to open.
+           */
+          const answered = read(this.settings, {
+            path: `${base}/contents/${escapedPath(path)}${marked}`,
+            accept: 'application/vnd.github.raw+json',
+          });
+          return answered.body;
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'fileHistory',
+        description:
+          'The commits that touched one file, newest first: sha, message, author, date and a url each. ' +
+          'Pass owner and repo (or the repo as owner/name, or an empty owner for the configured ' +
+          'organization) and the path from the repository root. limit caps the list, 0 for the default.',
+        params: [
+          { name: 'owner', type: 'string' },
+          { name: 'repo', type: 'string' },
+          { name: 'path', type: 'string' },
+          { name: 'limit', type: 'number' },
+        ],
+        returnType: 'map',
+        run: (owner, repo, path, limit) => {
+          const base = repoPath(this.settings, owner, repo);
+          const commits = read(this.settings, {
+            path: `${base}/commits?path=${encodeURIComponent(path)}&per_page=${pageSize(limit, 20)}`,
+          }).json;
+          return {
+            commits: (Array.isArray(commits) ? commits : []).map((one) => ({
+              sha: at(one, 'sha'),
+              message: at(at(one, 'commit'), 'message'),
+              author: at(at(at(one, 'commit'), 'author'), 'name'),
+              date: at(at(at(one, 'commit'), 'author'), 'date'),
+              url: at(one, 'html_url'),
+            })),
+          };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'createAgentTask',
+        description:
+          'Starts a GitHub Copilot cloud agent task: the agent works the prompt in its own branch and ' +
+          'opens a draft pull request. Pass owner and repo (or the repo as owner/name, or an empty owner ' +
+          'for the configured organization), the prompt saying what to do, and a base branch - or an ' +
+          'empty baseRef for the default branch. Answers the task\'s id, state and url; follow it with ' +
+          'agentTask. Needs a user token with Copilot access.',
+        params: [
+          { name: 'owner', type: 'string' },
+          { name: 'repo', type: 'string' },
+          { name: 'prompt', type: 'string' },
+          { name: 'baseRef', type: 'string' },
+        ],
+        returnType: 'map',
+        run: (owner, repo, prompt, baseRef) => {
+          if (typeof prompt !== 'string' || prompt.trim().length === 0) {
+            throw new Error('an agent task needs a prompt saying what to do');
+          }
+          const base = repoPath(this.settings, owner, repo);
+          const body = { prompt: prompt };
+          if (typeof baseRef === 'string' && baseRef.length > 0) {
+            body.base_ref = baseRef;
+          }
+          const made = read(this.settings, { method: 'POST', path: `/agents${base}/tasks`, body: body }).json;
+          return {
+            id: at(made, 'id'),
+            state: at(made, 'state'),
+            url: at(made, 'html_url') ?? at(made, 'url'),
+            created: at(made, 'created_at'),
+          };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'agentTask',
+        description:
+          'One Copilot agent task as GitHub sees it now: its state (queued, in_progress, completed, ' +
+          'failed, waiting_for_user, ...), its pull request, and its sessions - whose ids agentTaskLogs ' +
+          'takes. Pass owner and repo (or the repo as owner/name, or an empty owner for the configured ' +
+          'organization) and the task id createAgentTask answered.',
+        params: [
+          { name: 'owner', type: 'string' },
+          { name: 'repo', type: 'string' },
+          { name: 'taskId', type: 'string' },
+        ],
+        returnType: 'map',
+        /*
+         * Passed through rather than curated: the agent-tasks API is in public
+         * preview and its shape still moves, and here a moved shape should be
+         * new data in the answer rather than data this file quietly drops.
+         */
+        run: (owner, repo, taskId) => {
+          const base = repoPath(this.settings, owner, repo);
+          return read(this.settings, {
+            path: `/agents${base}/tasks/${encodeURIComponent(String(taskId))}`,
+          }).json;
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'agentTaskLogs',
+        description:
+          'The logs of one Copilot agent session: the agent\'s own account of what it read, decided and ' +
+          'changed. Pass a session id from agentTask\'s sessions. The answer is the log text itself.',
+        params: [{ name: 'sessionId', type: 'string' }],
+        returnType: 'string',
+        run: (sessionId) => {
+          const answered = read(this.settings, {
+            path: `/agents/sessions/${encodeURIComponent(String(sessionId))}/logs`,
+          });
+          return answered.body;
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'messageAgentTask',
+        description:
+          'Tells a running or finished Copilot agent task to change course - different approach, more ' +
+          'work, a fix. Pass owner and repo (or the repo as owner/name, or an empty owner for the ' +
+          'configured organization), the number of the task\'s pull request (agentTask answers it), and ' +
+          'what to say. Answers the comment\'s id and url.',
+        params: [
+          { name: 'owner', type: 'string' },
+          { name: 'repo', type: 'string' },
+          { name: 'pullNumber', type: 'number' },
+          { name: 'message', type: 'string' },
+        ],
+        returnType: 'map',
+        run: (owner, repo, pullNumber, message) => {
+          const base = repoPath(this.settings, owner, repo);
+          /*
+           * Steering is a PR comment that mentions @copilot — that is GitHub's
+           * own mechanism, not a workaround — so the mention is guaranteed here
+           * rather than hoped for in the message.
+           */
+          const said = /(^|\s)@copilot\b/i.test(message) ? message : `@copilot ${message}`;
+          const made = read(this.settings, {
+            method: 'POST',
+            path: `${base}/issues/${pullNumber}/comments`,
+            body: { body: said },
+          }).json;
+          return { id: at(made, 'id'), url: at(made, 'html_url') };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'comment',
+        description:
+          'Comments on a pull request or issue - the plain kind, under the conversation. Pass owner and ' +
+          'repo (or the repo as owner/name, or an empty owner for the configured organization), the PR ' +
+          'or issue number, and the comment as GitHub markdown. Answers the comment\'s id and url. For a ' +
+          'comment on a line of the diff, use reviewComment instead.',
+        params: [
+          { name: 'owner', type: 'string' },
+          { name: 'repo', type: 'string' },
+          { name: 'number', type: 'number' },
+          { name: 'text', type: 'string' },
+        ],
+        returnType: 'map',
+        run: (owner, repo, number, text) => {
+          const base = repoPath(this.settings, owner, repo);
+          const made = read(this.settings, {
+            method: 'POST',
+            path: `${base}/issues/${number}/comments`,
+            body: { body: text },
+          }).json;
+          return { id: at(made, 'id'), url: at(made, 'html_url') };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'reviewComment',
+        description:
+          'Comments on a pull request\'s diff - the review kind, anchored to a file. Pass owner and repo ' +
+          '(or the repo as owner/name, or an empty owner for the configured organization), the PR ' +
+          'number, the file\'s path as openPull lists it, the line in the new version the comment is ' +
+          'about - or 0 to speak about the file as a whole - and the comment as GitHub markdown. ' +
+          'Answers the comment\'s id and url; replyToComment threads onto it.',
+        params: [
+          { name: 'owner', type: 'string' },
+          { name: 'repo', type: 'string' },
+          { name: 'number', type: 'number' },
+          { name: 'path', type: 'string' },
+          { name: 'line', type: 'number' },
+          { name: 'text', type: 'string' },
+        ],
+        returnType: 'map',
+        run: (owner, repo, number, path, line, text) => {
+          const base = repoPath(this.settings, owner, repo);
+          /*
+           * A review comment is anchored to a commit, and the anchor a reader
+           * expects is the head of the pull request as it stands — so it is
+           * read here rather than asked of the caller.
+           */
+          const pull = read(this.settings, { path: `${base}/pulls/${number}` }).json;
+          const body = { body: text, commit_id: at(at(pull, 'head'), 'sha'), path: path };
+          if (typeof line === 'number' && line > 0) {
+            body.line = line;
+            body.side = 'RIGHT';
+          } else {
+            body.subject_type = 'file';
+          }
+          const made = read(this.settings, {
+            method: 'POST',
+            path: `${base}/pulls/${number}/comments`,
+            body: body,
+          }).json;
+          return { id: at(made, 'id'), url: at(made, 'html_url') };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'replyToComment',
+        description:
+          'Replies in the thread under one review comment. Pass owner and repo (or the repo as ' +
+          'owner/name, or an empty owner for the configured organization), the PR number, the id of the ' +
+          'review comment being answered - reviewComment answers one, and a review_comment webhook ' +
+          'carries one - and the reply as GitHub markdown. Answers the reply\'s id and url.',
+        params: [
+          { name: 'owner', type: 'string' },
+          { name: 'repo', type: 'string' },
+          { name: 'number', type: 'number' },
+          { name: 'commentId', type: 'number' },
+          { name: 'text', type: 'string' },
+        ],
+        returnType: 'map',
+        run: (owner, repo, number, commentId, text) => {
+          const base = repoPath(this.settings, owner, repo);
+          const made = read(this.settings, {
+            method: 'POST',
+            path: `${base}/pulls/${number}/comments/${commentId}/replies`,
+            body: { body: text },
+          }).json;
+          return { id: at(made, 'id'), url: at(made, 'html_url') };
         },
       }),
     ];
