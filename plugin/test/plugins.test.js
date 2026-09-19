@@ -285,6 +285,39 @@ test('the jira plugin declares what the server would accept', async () => {
     inspected.tools.map((declared) => declared.name),
     ['search', 'openIssue', 'comment', 'transition', 'createIssue'],
   );
+
+  /*
+   * The first shipped plugin to export a shape, which is what objects() was
+   * added for: `openIssue` answers `Issue` rather than a bare map, and the
+   * tool fronting it inherits that return because a proxy carries the
+   * function's own.
+   */
+  assert.deepEqual(
+    inspected.objects.map((shape) => shape.name),
+    ['Issue'],
+  );
+  const issue = inspected.objects[0];
+  assert.equal(issue.properties.length, 13);
+  /* `of` is what stops a shape being flat, and labels is the one that has it. */
+  const labels = issue.properties.find((property) => property.name === 'labels');
+  assert.equal(labels.kind, 'array');
+  assert.equal(labels.of, 'string');
+  /* Every field says what belongs in it; a name alone tells a model nothing. */
+  for (const property of issue.properties) {
+    assert.ok(
+      typeof property.description === 'string' && property.description.length > 0,
+      `Issue.${property.name} has no description`,
+    );
+  }
+
+  assert.equal(
+    inspected.functions.find((one) => one.name === 'openIssue').returnType,
+    'Issue',
+  );
+  assert.equal(
+    inspected.tools.find((one) => one.name === 'openIssue').returnType,
+    'Issue',
+  );
 });
 
 test('a jira call says what is missing, and picks its search endpoint by deployment', async () => {

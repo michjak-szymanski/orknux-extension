@@ -136,6 +136,14 @@ is `key`, which must be what `id()` answers, because a listing keyed
 differently from the code is a listing that installs as something else. That
 check is the reason `manifests.test.js` exists.
 
+**A function may return a shape the plugin exports.** That is what
+`objects()` is for, and `jira` is the plugin that shows it: `openIssue` answers
+`Issue`, and a tool fronting it inherits that return because a proxy carries the
+function's own. Inside the plugin a shape is spelled as it was declared; the
+loader rewrites it to `jira_Issue` when it stores it. A *parameter* still may
+not name one — the mirror refuses it whatever the server does, because stricter
+is the safe direction for this file to be wrong in.
+
 **A plugin that knows how its work should be done says so in `skills()`.**
 A tool description is read one at a time, at the moment of calling, by a model
 that has already decided to call something. The decisions worth changing happen

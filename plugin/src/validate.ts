@@ -146,8 +146,8 @@ export function validate(declared: Declaration): Problem[] {
   return [
     ...validateId(declared.id),
     ...validateApiVersion(declared.apiVersion),
-    ...validateFunctions(declared.functions),
-    ...validateTools(declared.tools ?? [], declared.functions),
+    ...validateFunctions(declared.functions, declared.objects ?? []),
+    ...validateTools(declared.tools ?? [], declared.functions, declared.objects ?? []),
     ...validateParameters(declared.parameters ?? []),
     ...validatePermissions(declared.permissions ?? []),
     ...validateCapabilities(declared.capabilities ?? []),
@@ -379,7 +379,10 @@ export function validateApiVersion(version: number): Problem[] {
   return [];
 }
 
-export function validateFunctions(declared: DeclaredFunction[]): Problem[] {
+export function validateFunctions(
+  declared: DeclaredFunction[],
+  objects: DeclaredObject[] = [],
+): Problem[] {
   const problems: Problem[] = [];
   const refuse = (message: string): void => {
     problems.push({ part: 'functions', message });
@@ -388,6 +391,23 @@ export function validateFunctions(declared: DeclaredFunction[]): Problem[] {
   if (declared.length > MAX_FUNCTIONS) {
     refuse(`functions() declared more than ${MAX_FUNCTIONS} functions`);
   }
+
+  /*
+   * The shapes this plugin exports, which a return type may name.
+   *
+   * `Issue` declared by `jira` arrives in a workspace as `jira_Issue`, but
+   * inside the plugin it is spelled as it was declared — the loader rewrites
+   * the reference when it stores it. Matched exactly, the way an `of` is:
+   * these are identifiers, and a shape that differs only in its capitals is a
+   * different shape.
+   *
+   * Only a *return* is allowed to name one. A parameter still may not, and the
+   * refusal below says why — which is stricter than the server if the server
+   * ever relaxes that too, and stricter is the safe direction for this file to
+   * be wrong in.
+   */
+  const exported = new Set(objects.map((one) => one.name));
+
 
   const names = new Set<string>();
   for (const declaration of declared) {
@@ -414,7 +434,13 @@ export function validateFunctions(declared: DeclaredFunction[]): Problem[] {
           : `${name} returns an object, which names one of a workspace's definitions. A ` +
               "plugin's functions belong to every workspace at once, so use map instead.",
       );
-    } else if (!isValueType(declaration.returnType)) {
+    } else if (!isValueType(declaration.returnType) && !exported.has(declaration.returnType.trim())) {
+      /*
+       * The server's own sentence, unchanged. A name that is neither a value
+       * type nor a declared shape is not a type this server has — and the
+       * wording is what somebody reads when their plugin is refused, so it
+       * stays the server's rather than becoming a better one of ours.
+       */
       refuse(`${name} returns "${declaration.returnType}", which is not a type this server has`);
     }
 
@@ -467,6 +493,7 @@ export function validateFunctions(declared: DeclaredFunction[]): Problem[] {
 export function validateTools(
   declared: DeclaredTool[],
   functions: DeclaredFunction[] = [],
+  objects: DeclaredObject[] = [],
 ): Problem[] {
   const problems: Problem[] = [];
   const refuse = (message: string): void => {
@@ -476,6 +503,9 @@ export function validateTools(
   if (declared.length > MAX_TOOLS) {
     refuse(`tools() declared more than ${MAX_TOOLS} tools`);
   }
+
+  /* The shapes a tool's return may name, as above. */
+  const exported = new Set(objects.map((one) => one.name));
 
   const offered = new Set(functions.map((one) => one.name));
   const names = new Set<string>();
@@ -500,7 +530,7 @@ export function validateTools(
         `the tool ${name} returns ${tool.returnType.trim().toLowerCase()}; a tool answers a model, ` +
           `so it has to return one of ${VALUE_TYPES.join(', ')}`,
       );
-    } else if (!isValueType(tool.returnType)) {
+    } else if (!isValueType(tool.returnType) && !exported.has(tool.returnType.trim())) {
       refuse(`the tool ${name} returns "${tool.returnType}", which is not a type this server has`);
     }
 

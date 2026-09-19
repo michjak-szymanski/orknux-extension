@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { MAX_OBJECTS, OrknuxObject, OrknuxPlugin, validateObjects } from '../dist/index.js';
+import {
+  MAX_OBJECTS,
+  OrknuxObject,
+  OrknuxPlugin,
+  validate,
+  validateObjects,
+} from '../dist/index.js';
 
 /**
  * The objects contract: a plugin exports its own shapes, so its functions have
@@ -109,4 +115,73 @@ test('the bound is the server’s', () => {
     properties: [],
   }));
   assert.match(validateObjects(many)[0].message, new RegExp(`more than ${MAX_OBJECTS} objects`));
+});
+
+/*
+ * What a declared shape is *for*: a function may return one.
+ *
+ * This is the limitation objects() exists to answer. A plugin's functions
+ * belong to every workspace at once, so they may never name a workspace's own
+ * definitions — but a shape the plugin declares travels with it, and naming
+ * that is the whole point. Inside the plugin it is spelled as it was declared;
+ * the loader rewrites the reference to `jira_Issue` when it stores it.
+ */
+
+const shaped = (returnType, objects) => ({
+  id: 'jira',
+  apiVersion: 1,
+  objects,
+  functions: [{ name: 'openIssue', params: [], returnType }],
+});
+
+test('a function may return a shape the plugin declares', () => {
+  const issue = { name: 'Issue', properties: [{ name: 'key', kind: 'string' }] };
+  assert.deepEqual(validate(shaped('Issue', [issue])), []);
+});
+
+test('a tool may return one too, because it is the same answer to a model', () => {
+  const issue = { name: 'Issue', properties: [{ name: 'key', kind: 'string' }] };
+  const problems = validate({
+    ...shaped('map', [issue]),
+    tools: [{ name: 'openIssue', params: [], returnType: 'Issue' }],
+  });
+  assert.deepEqual(problems, []);
+});
+
+test('a return naming a shape that is not declared is still refused', () => {
+  const problems = validate(shaped('Issue', [{ name: 'User', properties: [] }]));
+  assert.equal(problems.length, 1);
+  assert.match(problems[0].message, /openIssue returns "Issue", which is not a type this server has/);
+});
+
+test('a shape is matched exactly, because it is an identifier', () => {
+  /* `issue` and `Issue` are two names, and only one of them was declared. */
+  const issue = { name: 'Issue', properties: [{ name: 'key', kind: 'string' }] };
+  assert.deepEqual(validate(shaped('Issue', [issue])), []);
+  assert.equal(validate(shaped('issue', [issue])).length, 1);
+});
+
+test('object is still refused as a return, and says why', () => {
+  const issue = { name: 'Issue', properties: [{ name: 'key', kind: 'string' }] };
+  const problems = validate(shaped('object', [issue]));
+  assert.equal(problems.length, 1);
+  assert.match(problems[0].message, /names one of a workspace's definitions/);
+});
+
+test('a parameter still may not name a shape, which is stricter than a return', () => {
+  /*
+   * Only a return is allowed to. A parameter naming a shape is refused here
+   * whatever the server does with it — stricter is the safe direction for a
+   * mirror to be wrong in, because it can only refuse something that would
+   * have been accepted, never accept something that would have been refused.
+   */
+  const issue = { name: 'Issue', properties: [{ name: 'key', kind: 'string' }] };
+  const problems = validate({
+    id: 'jira',
+    apiVersion: 1,
+    objects: [issue],
+    functions: [{ name: 'openIssue', params: [{ name: 'issue', type: 'Issue' }], returnType: 'map' }],
+  });
+  assert.equal(problems.length, 1);
+  assert.match(problems[0].message, /is a "Issue", which is not a type this server has/);
 });

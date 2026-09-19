@@ -179,7 +179,7 @@ function call(settings, asked) {
   return answered.json;
 }
 
-/** One issue as a search answers it: the scalar facts, and where to read it. */
+/** One issue as the declared `Issue` shape — see objects(). */
 function listed(issue, site) {
   const fields = at(issue, 'fields');
   return {
@@ -193,6 +193,14 @@ function listed(issue, site) {
     created: at(fields, 'created'),
     updated: at(fields, 'updated'),
     url: `${site}/browse/${at(issue, 'key')}`,
+    /*
+     * The three a search does not ask Jira for, present and empty rather than
+     * missing: `Issue` is one shape, and a caller reading `labels` should get
+     * a list either way instead of finding out which call it came from.
+     */
+    description: plainOf(at(fields, 'description')),
+    labels: at(fields, 'labels') ?? [],
+    resolution: at(at(fields, 'resolution'), 'name'),
   };
 }
 
@@ -251,6 +259,44 @@ export default class Jira extends OrknuxPlugin {
     // The widest capability there is, asked for because this plugin is about
     // exactly one outside service: every request goes to the url above.
     return ['NETWORK_REQUEST'];
+  }
+
+  /*
+   * The shapes this plugin's answers actually have.
+   *
+   * `map` was the old answer and it is a weak one: it says a structure came
+   * back and nothing about what is in it, so every caller reads the code — or
+   * guesses — to find out that `status` is a string and `labels` is a list.
+   * Declared here, the shape travels with the plugin and arrives in a
+   * workspace as `jira_Issue`, and a workflow can be built against it.
+   *
+   * `Issue` carries the fields `search` answers for each hit; `openIssue`
+   * answers the same shape with `description`, `labels` and `resolution`
+   * filled in, which are null in a search rather than absent. One shape for
+   * both, because two that differ by three fields is two things to keep right.
+   */
+  objects() {
+    return [
+      new OrknuxObject({
+        name: 'Issue',
+        description: 'One Jira issue, as this plugin answers it.',
+        properties: [
+          { name: 'key', kind: 'string', description: 'PROJ-123, which every other call takes.' },
+          { name: 'summary', kind: 'string', description: 'The one-line title.' },
+          { name: 'description', kind: 'string', description: 'The body, as text. Null from a search.' },
+          { name: 'status', kind: 'string', description: 'Where it sits in its workflow — "In Progress".' },
+          { name: 'type', kind: 'string', description: 'Task, Bug, Story.' },
+          { name: 'priority', kind: 'string', description: 'Null where the project does not use them.' },
+          { name: 'assignee', kind: 'string', description: 'Display name, or null where nobody holds it.' },
+          { name: 'reporter', kind: 'string', description: 'Display name of whoever raised it.' },
+          { name: 'labels', kind: 'array', of: 'string', description: 'Empty from a search.' },
+          { name: 'resolution', kind: 'string', description: 'Why it closed, or null while it is open.' },
+          { name: 'created', kind: 'string', description: 'ISO 8601, as Jira gives it.' },
+          { name: 'updated', kind: 'string', description: 'ISO 8601. What "recently touched" is read off.' },
+          { name: 'url', kind: 'string', description: 'The browse link, for a person to open.' },
+        ],
+      }),
+    ];
   }
 
   /*
@@ -403,7 +449,8 @@ what happened, what was expected, and how to see it — in that order.`,
           'description comes back as text. Read this before commenting on or moving an issue, ' +
           'rather than acting on the summary alone.',
         params: [{ name: 'key', type: 'string' }],
-        returnType: 'map',
+        /* The shape declared above, not a map — see objects(). */
+        returnType: 'Issue',
         run: (key) => {
           const named = typeof key === 'string' ? key.trim() : '';
           if (named.length === 0) {
@@ -414,12 +461,11 @@ what happened, what was expected, and how to see it — in that order.`,
             path: `/rest/api/2/issue/${encodeURIComponent(named)}`,
           });
           const fields = at(issue, 'fields');
-          return {
-            ...listed(issue, site),
-            description: plainOf(at(fields, 'description')),
-            labels: at(fields, 'labels') ?? [],
-            resolution: at(at(fields, 'resolution'), 'name'),
-          };
+          /*
+           * The same shape a search answers — `listed` already reads the three
+           * fields a search leaves empty, and here they are actually there.
+           */
+          return listed(issue, site);
         },
       }),
 

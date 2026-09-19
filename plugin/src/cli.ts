@@ -6,7 +6,7 @@ import process from 'node:process';
 import { bundle } from './build.js';
 import { inspect, NotAPluginError } from './inspect.js';
 import type { Inspection } from './inspect.js';
-import { API_VERSION, MAX_SOURCE_BYTES } from './limits.js';
+import { API_VERSION, MAX_SOURCE_BYTES, VALUE_TYPES } from './limits.js';
 import { qualifiedName, validate } from './validate.js';
 import type { Problem } from './validate.js';
 
@@ -124,10 +124,10 @@ async function report(file: string): Promise<number> {
   }
   for (const declared of inspected.functions) {
     const params = declared.params
-      .map((param) => `${param.name}: ${param.type.toLowerCase()}`)
+      .map((param) => `${param.name}: ${typeName(param.type)}`)
       .join(', ');
     process.stdout.write(
-      `  ${qualifiedName(inspected.id, declared.name)}(${params}): ${declared.returnType.toLowerCase()}\n`,
+      `  ${qualifiedName(inspected.id, declared.name)}(${params}): ${typeName(declared.returnType)}\n`,
     );
     if (declared.description !== null && declared.description !== undefined) {
       process.stdout.write(`      ${declared.description}\n`);
@@ -143,7 +143,7 @@ async function report(file: string): Promise<number> {
     process.stdout.write('\n  It offers agents:\n');
     for (const declared of inspected.tools) {
       const params = declared.params
-        .map((param) => `${param.name}: ${param.type.toLowerCase()}`)
+        .map((param) => `${param.name}: ${typeName(param.type)}`)
         .join(', ');
       const fronting =
         declared.proxyOf === null || declared.proxyOf === undefined
@@ -151,7 +151,7 @@ async function report(file: string): Promise<number> {
           : ` — proxies ${declared.proxyOf}`;
       process.stdout.write(
         `    ${qualifiedName(inspected.id, declared.name)}(${params}): ` +
-          `${declared.returnType.toLowerCase()}${fronting}\n`,
+          `${typeName(declared.returnType)}${fronting}\n`,
       );
       if (declared.description !== null && declared.description !== undefined) {
         process.stdout.write(`        ${declared.description}\n`);
@@ -344,6 +344,19 @@ function describe(failure: unknown): string {
   }
 
   return failure instanceof Error ? failure.message : String(failure);
+}
+
+/**
+ * A type as it should be read back.
+ *
+ * The server matches its own types case-insensitively, so they are shown in
+ * lower case whatever they were written as. A shape from `objects()` is not one
+ * of those: it is an identifier the plugin declared, matched exactly, and
+ * lowering `Issue` to `issue` would print a name that does not resolve.
+ */
+function typeName(written: string): string {
+  const lowered = written.trim().toLowerCase();
+  return (VALUE_TYPES as readonly string[]).includes(lowered) ? lowered : written.trim();
 }
 
 function size(bytes: number): string {

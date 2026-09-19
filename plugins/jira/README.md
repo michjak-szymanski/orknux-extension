@@ -12,7 +12,7 @@ behalf under `NETWORK_REQUEST` — the plugin never holds the token.
 | Function | |
 |----------|---|
 | `search(jql, limit)` | Jira's own query language: `project = PROJ AND status = "In Progress"`, `assignee = currentUser() ORDER BY updated DESC`. |
-| `openIssue(key)` | One issue whole, description included, as text. |
+| `openIssue(key)` | One issue whole, description included, as text. Answers the `Issue` shape below rather than a bare map. |
 | `comment(key, text)` | A comment, as plain text. |
 | `transition(key, to)` | Moves an issue — what dragging its card to another column does. |
 | `createIssue(project, type, summary, description)` | Raises a new one. |
@@ -22,6 +22,32 @@ capitals, because an id is a number out of somebody's workflow configuration
 that nobody knows. Which moves are possible depends on where the issue is right
 now, so the list is read at the moment of asking and a name that is not
 available is refused with the ones that are.
+
+## The shape it exports
+
+`objects()` declares **`Issue`**, which arrives in a workspace as `jira_Issue`.
+`openIssue` answers it instead of a `map`, so a workflow built against it knows
+that `status` is a string and `labels` is a list of them without reading this
+file to find out.
+
+| Field | | |
+|---|---|---|
+| `key` | string | `PROJ-123`, which every other call takes |
+| `summary` | string | the one-line title |
+| `description` | string | the body, as text — null from a search |
+| `status` | string | where it sits in its workflow |
+| `type` | string | Task, Bug, Story |
+| `priority` | string | null where the project does not use them |
+| `assignee` / `reporter` | string | display names |
+| `labels` | array of string | empty from a search |
+| `resolution` | string | why it closed, or null while open |
+| `created` / `updated` | string | ISO 8601, as Jira gives it |
+| `url` | string | the browse link |
+
+`search` still answers a `map` holding a list of these: it fills `description`,
+`labels` and `resolution` as null and empty rather than leaving them out, so
+one shape describes both calls and a caller reading `labels` gets a list either
+way.
 
 ## Setting one up
 
