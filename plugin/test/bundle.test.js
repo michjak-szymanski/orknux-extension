@@ -47,6 +47,8 @@ test('a plugin written against this package survives being bundled', async () =>
       required: false,
       secret: false,
       connectionType: null,
+      /* Present and null: a parameter that names no set of values. */
+      options: null,
     },
   ]);
   assert.deepEqual(inspected.permissions, ['INTL']);

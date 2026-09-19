@@ -106,3 +106,12 @@ test('a plugin that declares none of them says nothing about them', () => {
   assert.doesNotMatch(report, /It exports these shapes:/);
   assert.match(report, /markdown_toSlack/);
 });
+
+test('the report says which values a parameter takes, where it names them', () => {
+  const report = checked(shipped('web'));
+
+  /* The difference between a text box and a list nobody can mistype. */
+  assert.match(report, /backend: string — one of tavily, brave/);
+  /* A secret names no set, and is still marked as the secret it is. */
+  assert.match(report, /apiKey: string — secret/);
+});

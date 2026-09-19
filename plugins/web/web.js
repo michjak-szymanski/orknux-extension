@@ -171,9 +171,16 @@ export default class Web extends OrknuxPlugin {
     return [
       new OrknuxParameter({
         name: 'backend',
-        description: `Whose index answers a search: ${BACKENDS.join(' or ')}.`,
+        description: 'Whose index answers a search.',
         type: 'string',
         required: true,
+        /*
+         * The two this file knows how to ask, declared rather than described.
+         * A choice that cannot be typed cannot be mistyped — and where the
+         * settings page draws a picker for it, the refusal below stops being
+         * something anybody meets.
+         */
+        options: BACKENDS,
       }),
       new OrknuxParameter({
         name: 'apiKey',

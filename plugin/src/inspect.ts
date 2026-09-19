@@ -331,6 +331,14 @@ function readParameter(declared: Record<string, unknown>): DeclaredParameter {
     required: flag(declared, 'required', true),
     secret: flag(declared, 'secret', false),
     connectionType: text(declared, 'connectionType') ?? null,
+    /*
+     * Read, not judged: whether the list is a usable one — non-empty, no
+     * duplicates, not on a secret — is validation's question, and it needs
+     * the whole parameter to answer it.
+     */
+    options: Array.isArray(declared['options'])
+      ? (declared['options'] as unknown[]).map((one) => String(one))
+      : null,
   };
 }
 

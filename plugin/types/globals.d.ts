@@ -611,6 +611,18 @@ interface OrknuxParameterDeclared {
    * server makes the call.
    */
   connectionType?: ConnectionType;
+  /**
+   * The values this may take, where the plugin knows them all.
+   *
+   * What it replaces is a plugin checking the string itself and throwing a
+   * sentence that lists the choices — and a choice that cannot be typed cannot
+   * be mistyped. At most `MAX_OPTIONS` of them, no duplicates, none empty.
+   *
+   * Not on a `secret`: a secret cannot be one of a set somebody can read. Not
+   * on a `connection` either — that names a row the workspace has, and already
+   * has its own picker.
+   */
+  options?: readonly string[];
 }
 
 /**
@@ -839,4 +851,5 @@ declare class OrknuxParameter {
   readonly required: boolean;
   readonly secret: boolean;
   readonly connectionType: ConnectionType | null;
+  readonly options: readonly string[] | null;
 }

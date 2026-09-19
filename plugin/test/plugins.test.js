@@ -734,6 +734,18 @@ test('the web plugin declares what the server would accept', async () => {
     [true, true, false],
   );
 
+  /*
+   * The one parameter here that is a closed choice says so, rather than
+   * checking the string itself and throwing a sentence listing the two. The
+   * runtime refusal stays until a settings page draws the picker — a text box
+   * can still hold a typo, and falling through to the wrong backend silently
+   * would be worse than being told.
+   */
+  assert.deepEqual(inspected.parameters[0].options, ['tavily', 'brave']);
+  /* And nothing else names a set: a secret may not, and a key is not a choice. */
+  assert.equal(inspected.parameters[1].options, null);
+  assert.equal(inspected.parameters[2].options, null);
+
   /* Nothing of the language is needed — only the request and what came back. */
   assert.deepEqual(inspected.permissions, []);
   assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);

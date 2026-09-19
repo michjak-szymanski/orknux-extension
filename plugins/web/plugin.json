@@ -4,7 +4,7 @@
   "name": "Web Search",
   "author": "Orknux",
   "summary": "Search the web from a workflow or an agent, and read what comes back.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "icon": "icon.svg",
   "descriptionPath": "README.md"
 }

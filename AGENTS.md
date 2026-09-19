@@ -56,6 +56,23 @@ allowed, because it can only refuse something no plugin should be doing.
 Looser is not: the whole point is that a plugin which passes here is one the
 upload accepts.
 
+## A parameter that is a closed choice says so
+
+`options: ['tavily', 'brave']` on a plugin parameter replaces the plugin
+checking the string itself and throwing a sentence listing the choices — see
+`plugin/PARAMETERS.md`. Not on a `secret`, which cannot be one of a set
+somebody can read, and not on a `connection`, which already has its own picker.
+
+**The runtime check stays for now.** The server stores `options` but the
+settings page does not draw a picker yet, so a text box can still hold a typo —
+and falling through to the wrong backend silently is worse than being told. The
+check comes out when the picker lands.
+
+**`required` and `default` on a *function* parameter are proposed, not
+accepted.** `PARAMETERS.md` has the status table; a plugin declaring one today
+is refused. So the thirty-six "0 for the default" sentences stay until it says
+otherwise — do not pre-empt it.
+
 ## Conventions
 
 - **The main entry point must stay bundle-safe.** `src/index.ts` may import

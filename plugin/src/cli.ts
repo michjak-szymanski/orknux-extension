@@ -211,6 +211,14 @@ async function report(file: string): Promise<number> {
       const marks = [
         parameter.required === false ? 'optional' : undefined,
         parameter.secret === true ? 'secret' : undefined,
+        /*
+         * The values it takes, where it names them. Worth seeing before an
+         * upload for the same reason it is worth declaring: it is the
+         * difference between a text box and a list nobody can mistype.
+         */
+        parameter.options !== null && parameter.options !== undefined && parameter.options.length > 0
+          ? `one of ${parameter.options.join(', ')}`
+          : undefined,
       ].filter((mark) => mark !== undefined);
       process.stdout.write(
         `    ${parameter.name}: ${kind}${marks.length > 0 ? ` — ${marks.join(', ')}` : ''}\n`,
