@@ -1,3 +1,4 @@
+import { PROPERTY_KINDS } from './limits.js';
 import type {
   OrknuxCapability,
   OrknuxFunctionDeclaration,
@@ -5,11 +6,15 @@ import type {
   OrknuxFunctionToolDeclaration,
   OrknuxFunctionToolInstance,
   OrknuxHelpers,
+  OrknuxObjectDeclaration,
+  OrknuxObjectInstance,
   OrknuxParam,
   OrknuxParameterDeclaration,
   OrknuxParameterInstance,
   OrknuxPermission,
   OrknuxSettings,
+  OrknuxSkillDeclaration,
+  OrknuxSkillInstance,
   OrknuxToolDeclaration,
   OrknuxToolInstance,
   OrknuxValueType,
@@ -84,6 +89,93 @@ class OrknuxPluginFallback {
 
   libraries(): string[] {
     return [];
+  }
+
+  skills(): OrknuxSkillInstance[] {
+    return [];
+  }
+
+  objects(): OrknuxObjectInstance[] {
+    return [];
+  }
+}
+
+class OrknuxSkillFallback {
+  constructor(declared: unknown) {
+    if (declared === null || typeof declared !== 'object') {
+      throw new Error('an OrknuxSkill needs a declaration');
+    }
+
+    const source = declared as Record<string, unknown>;
+    const self = this as unknown as Record<string, unknown>;
+
+    self['name'] = source['name'];
+    self['description'] = source['description'] === undefined ? null : source['description'];
+    self['content'] = source['content'];
+
+    if (typeof self['name'] !== 'string' || self['name'].length === 0) {
+      throw new Error('an OrknuxSkill needs a name');
+    }
+    if (typeof self['content'] !== 'string' || self['content'].trim().length === 0) {
+      throw new Error(`${self['name']} needs content: the markdown an agent reads`);
+    }
+    if (self['description'] !== null && typeof self['description'] !== 'string') {
+      throw new Error(`${self['name']} has a description that is not text`);
+    }
+  }
+}
+
+class OrknuxObjectFallback {
+  constructor(declared: unknown) {
+    if (declared === null || typeof declared !== 'object') {
+      throw new Error('an OrknuxObject needs a declaration');
+    }
+
+    const source = declared as Record<string, unknown>;
+    const self = this as unknown as Record<string, unknown>;
+
+    self['name'] = source['name'];
+    self['description'] = source['description'] === undefined ? null : source['description'];
+    self['properties'] = source['properties'] === undefined ? [] : source['properties'];
+
+    if (typeof self['name'] !== 'string' || self['name'].length === 0) {
+      throw new Error('an OrknuxObject needs a name');
+    }
+    if (!Array.isArray(self['properties'])) {
+      throw new Error(`${self['name']} needs properties, as an array`);
+    }
+    /*
+     * Each field checked where it was written, so a shape with a typo in it
+     * fails on the line that declares it rather than on the way into a
+     * database. Whether an `of` names an object this plugin actually has is
+     * the loader's question - it is the one that can see the whole set.
+     */
+    for (const held of self['properties'] as Record<string, unknown>[]) {
+      if (held === null || typeof held !== 'object') {
+        throw new Error(`${self['name']} has a property that is not a declaration`);
+      }
+      if (typeof held['name'] !== 'string' || held['name'].length === 0) {
+        throw new Error(`${self['name']} has a property with no name`);
+      }
+      const kind = held['kind'];
+      if (typeof kind !== 'string' || !PROPERTY_KINDS.includes(kind)) {
+        throw new Error(
+          `${self['name']}'s ${held['name']} is a "${String(kind)}", which is not one of ` +
+            PROPERTY_KINDS.join(', '),
+        );
+      }
+      const points = kind === 'object' || kind === 'array';
+      const of = held['of'] === undefined ? null : held['of'];
+      if (points && (typeof of !== 'string' || of.length === 0)) {
+        throw new Error(
+          `${self['name']}'s ${held['name']} is ${kind === 'object' ? 'an object' : 'an array'}, ` +
+            `so it needs an \`of\`: ${kind === 'object' ? 'the object it points at' : 'what it holds'}`,
+        );
+      }
+      if (!points && of !== null) {
+        throw new Error(`${self['name']}'s ${held['name']} names an \`of\` but is a ${kind}`);
+      }
+    }
   }
 }
 
@@ -367,6 +459,42 @@ declare abstract class OrknuxPluginContract {
   libraries(): string[];
 
   /**
+   * The instruction sets this plugin brings: markdown an agent reads, never
+   * code it runs. Defaults to none.
+   *
+   * A third surface, and a third reader. `functions()` is called by a
+   * workflow and `tools()` by a model; a skill is neither called nor run - it
+   * is a page an agent reads to learn how this plugin's work is meant to be
+   * done. A plugin that offers a search tool can ship the skill saying when
+   * to reach for it, and the two travel together instead of the second being
+   * retyped into every workspace by hand.
+   *
+   * They arrive as a skill catalog named after the plugin's key, and an agent
+   * is granted that catalog the way it is granted any other. Nothing is
+   * automatic: a plugin loaded into an installation teaches nobody until
+   * somebody grants it.
+   */
+  skills(): OrknuxSkillInstance[];
+
+  /**
+   * The shapes this plugin exports, for its own functions and tools to pass
+   * around. Defaults to none.
+   *
+   * A plugin's functions belong to every workspace at once, which is why they
+   * may not name a workspace's own objects - there is no single workspace
+   * whose definitions they could mean, and `map` has been the answer. An
+   * object declared here is the better one: it belongs to the plugin, travels
+   * with it, and is available wherever the plugin is, under the plugin's
+   * key - `Issue` declared by `jira` arrives as `jira_Issue`.
+   *
+   * Inside the plugin, name them as you spelled them: a property whose `of`
+   * is `User` means the `User` this plugin declares, and a function returning
+   * `Issue` means this one. The loader rewrites the references when it stores
+   * them, and refuses a name that points at nothing.
+   */
+  objects(): OrknuxObjectInstance[];
+
+  /**
    * What a workspace set those parameters to, keyed by name.
    *
    * Frozen, and put there by the server for the length of one call. A parameter
@@ -426,12 +554,34 @@ export interface OrknuxParameterConstructor {
   new (declaration: OrknuxParameterDeclaration): OrknuxParameterInstance;
 }
 
+/**
+ * What each skill is wrapped in, checking as it builds for the same reason: a
+ * skill with no name or an empty body fails on the line that declares it.
+ */
+export interface OrknuxSkillConstructor {
+  new (declaration: OrknuxSkillDeclaration): OrknuxSkillInstance;
+}
+
+/**
+ * What each exported object is wrapped in.
+ *
+ * Checks every field as it builds - a kind that is not a kind, an `of` on
+ * something that cannot point at anything, an object that points at nothing.
+ * Whether an `of` names an object this plugin actually declares is decided by
+ * the loader, which is the one that can see the whole set.
+ */
+export interface OrknuxObjectConstructor {
+  new (declaration: OrknuxObjectDeclaration): OrknuxObjectInstance;
+}
+
 const scope = globalThis as unknown as {
   OrknuxPlugin?: unknown;
   OrknuxFunction?: unknown;
   OrknuxTool?: unknown;
   OrknuxFunctionTool?: unknown;
   OrknuxParameter?: unknown;
+  OrknuxSkill?: unknown;
+  OrknuxObject?: unknown;
   orknux?: unknown;
 };
 
@@ -440,6 +590,8 @@ scope.OrknuxFunction ??= OrknuxFunctionFallback;
 scope.OrknuxTool ??= OrknuxToolFallback;
 scope.OrknuxFunctionTool ??= OrknuxFunctionToolFallback;
 scope.OrknuxParameter ??= OrknuxParameterFallback;
+scope.OrknuxSkill ??= OrknuxSkillFallback;
+scope.OrknuxObject ??= OrknuxObjectFallback;
 scope.orknux ??= ungrantedHelpers();
 
 export const OrknuxPlugin = scope.OrknuxPlugin as typeof OrknuxPluginContract;
@@ -451,6 +603,10 @@ export const OrknuxTool = scope.OrknuxTool as OrknuxToolConstructor;
 export const OrknuxFunctionTool = scope.OrknuxFunctionTool as OrknuxFunctionToolConstructor;
 
 export const OrknuxParameter = scope.OrknuxParameter as OrknuxParameterConstructor;
+
+export const OrknuxSkill = scope.OrknuxSkill as OrknuxSkillConstructor;
+
+export const OrknuxObject = scope.OrknuxObject as OrknuxObjectConstructor;
 
 /**
  * What the server will do on a plugin's behalf: the Slack calls, one HTTP door,

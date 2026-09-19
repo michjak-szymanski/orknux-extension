@@ -174,6 +174,115 @@ has to return one of `string`, `number`, `boolean`, `map`, `array` — neither
 `none` nor `object` will do. An agent is granted a tool by its qualified name,
 `teammates_isTeammate`, under the same prefix rule the functions follow.
 
+## Skills, for agents to read
+
+A third surface, and a third reader. `functions()` is called by a workflow and
+`tools()` by a model; a skill is neither called nor run — it is a page of
+markdown an agent reads to learn how this plugin's work is meant to be done. A
+plugin that offers a search tool can ship the skill that says when to reach for
+it, and the two travel together instead of the second being retyped into every
+workspace by hand.
+
+```ts
+import { OrknuxPlugin, OrknuxSkill } from '@orknux/plugin';
+
+export default class Deploys extends OrknuxPlugin {
+  id() {
+    return 'deploys';
+  }
+  apiVersion() {
+    return 1;
+  }
+  skills() {
+    return [
+      new OrknuxSkill({
+        name: 'Rolling back a deploy',
+        description: 'What to do when a release is bad.',
+        content: '# Rolling back\n\n- Stop the rollout first.\n- Then page the on-call.',
+      }),
+    ];
+  }
+}
+```
+
+A skill's name is prose, not an identifier: nothing calls it, an agent reads
+it, so `Rolling back a deploy` is a better name than `rolling_back`. The
+description is what an agent chooses from before loading anything, so it earns
+its place — "What to do when a release is bad" tells a model when to reach for
+the page, and "Deploy skill" does not.
+
+A skill is stored with a `---` frontmatter block naming and describing it, the
+way a skill written in the interface is. You may write the block yourself; if
+you leave it out, the server writes one from the `name` and `description` above,
+because those are the same two facts and stating them twice is a trap. A block
+that opens and never closes is refused.
+
+They arrive in an installation as a **skill catalog named after the plugin's
+key**, and an agent is granted that catalog from the same field every other
+catalog is granted from. Nothing is automatic: a plugin loaded into an
+installation teaches nobody until somebody grants it. A workspace's own skill of
+the same name wins, the way its own tool wins over a plugin's. At most
+`MAX_SKILLS` of them, each at most `MAX_SKILL_CHARS` characters.
+
+## Objects, for shapes to pass around
+
+A plugin's functions belong to every workspace at once, which is why a
+parameter or a return may not be `object` — that names one of a *workspace's*
+definitions, and there is no single workspace whose definitions a plugin's
+functions could mean. `map` has been the answer, and it is a weak one: a map
+says nothing about what is in it.
+
+`objects()` is the better answer. A shape declared here belongs to the plugin,
+travels with it, and is available wherever the plugin is — under the plugin's
+key, so `Issue` declared by `jira` arrives as `jira_Issue`.
+
+```ts
+import { OrknuxObject, OrknuxPlugin } from '@orknux/plugin';
+
+export default class Jira extends OrknuxPlugin {
+  id() {
+    return 'jira';
+  }
+  apiVersion() {
+    return 1;
+  }
+  objects() {
+    return [
+      new OrknuxObject({
+        name: 'User',
+        properties: [{ name: 'email', kind: 'string', description: 'Who they are.' }],
+      }),
+      new OrknuxObject({
+        name: 'Issue',
+        description: 'One tracker issue.',
+        properties: [
+          { name: 'key', kind: 'string', description: 'ABC-1' },
+          { name: 'labels', kind: 'array', of: 'string' },
+          { name: 'reporter', kind: 'object', of: 'User' },
+          { name: 'watchers', kind: 'array', of: 'User' },
+        ],
+      }),
+    ];
+  }
+}
+```
+
+A field's `kind` is one of `string`, `number`, `boolean`, `object`, `array`.
+`of` is where a shape stops being flat: required for an `object`, where it names
+another of this plugin's objects, and for an `array`, where it is either a
+scalar kind or another object's name. It is refused on anything else, because
+there would be nothing for it to say. An array of arrays has no shape on this
+server.
+
+Inside the plugin, name them as you spelled them — a property whose `of` is
+`User` means the `User` *this plugin* declares, and so does a function that
+returns `Issue`. The loader rewrites the references when it stores them, and
+refuses a name that points at nothing. A `description` on a field is worth
+writing: a name says what a field is called and nothing about what belongs in
+it, and a model reads the same sentence a person does.
+
+At most `MAX_OBJECTS` shapes, each with at most `MAX_PROPERTIES` fields.
+
 ## Permissions
 
 The sandbox hands out very little JavaScript, on purpose, and a bundle written

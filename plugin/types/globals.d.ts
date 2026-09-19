@@ -569,6 +569,34 @@ declare abstract class OrknuxPlugin {
   libraries(): string[];
 
   /**
+   * The instruction sets this plugin brings: markdown an agent reads, never
+   * code it runs. Defaults to none.
+   *
+   * A third surface, and a third reader. `functions()` is called by a
+   * workflow and `tools()` by a model; a skill is neither called nor run — it
+   * is a page an agent reads to learn how this plugin's work is meant to be
+   * done. A plugin that offers a search tool can ship the skill saying when
+   * to reach for it, and the two travel together.
+   *
+   * They arrive as a skill catalog named after the plugin's key, granted the
+   * way any other catalog is. Nothing is automatic.
+   */
+  skills(): OrknuxSkill[];
+
+  /**
+   * The shapes this plugin exports, for its functions and tools to pass
+   * around. Defaults to none.
+   *
+   * A plugin's functions belong to every workspace at once, which is why they
+   * may not name a workspace's own objects — there is no single workspace
+   * whose definitions they could mean. An object declared here belongs to the
+   * plugin instead: it travels with it and is available wherever the plugin
+   * is, under the plugin's key, so `Issue` declared by `jira` arrives as
+   * `jira_Issue`. Inside the plugin, name them as you spelled them.
+   */
+  objects(): OrknuxObject[];
+
+  /**
    * What a workspace set those parameters to, keyed by name.
    *
    * Frozen, and put there by the server for the length of one call. A
@@ -625,6 +653,65 @@ declare class OrknuxFunctionTool {
   readonly proxyOf: string;
   readonly name: string;
   readonly description: string | null;
+}
+
+/**
+ * One instruction set this plugin brings.
+ *
+ * Nothing here runs. `content` is markdown an agent reads, opening with a
+ * `---` frontmatter block naming and describing the skill — leave the block
+ * out and the server writes one from the `name` and `description` here, which
+ * are the same two facts.
+ */
+declare class OrknuxSkill {
+  constructor(declaration: {
+    /** Prose, not an identifier: nothing calls a skill, an agent reads it. */
+    name: string;
+    /** One line on what it is for — this is what an agent chooses from. */
+    description?: string | null;
+    /** The markdown itself. */
+    content: string;
+  });
+
+  readonly name: string;
+  readonly description: string | null;
+  readonly content: string;
+}
+
+/** What one field of an exported object may be. */
+type OrknuxPropertyKind = 'string' | 'number' | 'boolean' | 'object' | 'array';
+
+/**
+ * A named shape this plugin exports.
+ *
+ * `of` is where a shape stops being flat: required for an `object` (it names
+ * another of this plugin's objects) and for an `array` (a scalar kind, or
+ * another object's name), and refused on anything else. A name that points at
+ * nothing this plugin declares is refused at load.
+ */
+declare class OrknuxObject {
+  constructor(declaration: {
+    /** An identifier, conventionally PascalCase: it reads as a type. */
+    name: string;
+    description?: string | null;
+    properties: readonly {
+      name: string;
+      kind: OrknuxPropertyKind;
+      /** The object it points at, or what the array holds. */
+      of?: string | null;
+      /** What the field means, for whoever — or whatever — reads it. */
+      description?: string | null;
+    }[];
+  });
+
+  readonly name: string;
+  readonly description: string | null;
+  readonly properties: readonly {
+    name: string;
+    kind: OrknuxPropertyKind;
+    of: string | null;
+    description: string | null;
+  }[];
 }
 
 /** What each declared parameter is wrapped in. */

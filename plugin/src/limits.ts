@@ -79,6 +79,46 @@ export const PLUGIN_ID = /^[A-Za-z_$][A-Za-z0-9_$]{0,31}$/;
 export const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/;
 
 /**
+ * More instruction sets than one plugin has to teach.
+ *
+ * A plugin that brings fifty skills is a workspace's skill catalog wearing a
+ * plugin's clothes. `MAX_SKILLS` in `PluginRunner`.
+ */
+export const MAX_SKILLS = 25;
+
+/**
+ * A skill is a page, not a manual. Generous enough for a long one and bounded,
+ * because it crosses out of the sandbox into a column.
+ * `MOST_SKILL_CHARS` in `PluginRunner`.
+ */
+export const MAX_SKILL_CHARS = 64 * 1024;
+
+/** What the `agent_skill` name column holds. `MOST_SKILL_NAME_CHARS` on the server. */
+export const MAX_SKILL_NAME_LENGTH = 120;
+
+/**
+ * More shapes than a plugin has any business exporting.
+ *
+ * Lower than the function bound: every one of these is a name that lands in
+ * every workspace at once, and a plugin bringing a hundred types is bringing a
+ * schema nobody asked for. `MAX_OBJECTS` in `PluginRunner`.
+ */
+export const MAX_OBJECTS = 50;
+
+/** Fields on one exported object. `MAX_PROPERTIES` in `PluginRunner`. */
+export const MAX_PROPERTIES = 100;
+
+/**
+ * What an exported object may be called: an identifier, conventionally
+ * PascalCase, because it reads as a type. Held to the same rule a workspace's
+ * own object names are, and prefixed with the plugin's key when it is stored.
+ */
+export const OBJECT_NAME = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/;
+
+/** What one field of an exported object may be. `PropertyKind` on the server. */
+export const PROPERTY_KINDS: readonly string[] = ['string', 'number', 'boolean', 'object', 'array'];
+
+/**
  * The types a value may have crossing between a workflow and a plugin.
  *
  * The server has two more. `none` means "answers nothing", which neither a

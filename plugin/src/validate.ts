@@ -7,12 +7,19 @@ import {
   MAX_FUNCTIONS,
   MAX_LIBRARIES,
   MAX_LIBRARY_PATH_LENGTH,
+  MAX_OBJECTS,
   MAX_PARAMETERS,
   MAX_PERMISSIONS,
+  MAX_PROPERTIES,
+  MAX_SKILLS,
+  MAX_SKILL_CHARS,
+  MAX_SKILL_NAME_LENGTH,
   MAX_TOOLS,
+  OBJECT_NAME,
   PARAMETER_TYPES,
   PERMISSIONS,
   PLUGIN_ID,
+  PROPERTY_KINDS,
   SUPPORTED_API_VERSIONS,
   VALUE_TYPES,
 } from './limits.js';
@@ -88,12 +95,49 @@ export interface Declaration {
   capabilities?: string[];
   /** The relative paths of the library files it ships with; optional for the same reason. */
   libraries?: string[];
+  /** The instruction sets it brings; optional for the same reason. */
+  skills?: DeclaredSkill[];
+  /** The shapes it exports; optional for the same reason. */
+  objects?: DeclaredObject[];
+}
+
+/** One instruction set a plugin brings, as it reaches the loader. */
+export interface DeclaredSkill {
+  name: string;
+  description?: string | null;
+  content: string;
+}
+
+/** One field of an exported object, as it reaches the loader. */
+export interface DeclaredProperty {
+  name: string;
+  kind: string;
+  /** The object it points at, or what the array holds. */
+  of?: string | null;
+  description?: string | null;
+}
+
+/** One shape a plugin exports, as it reaches the loader. */
+export interface DeclaredObject {
+  name: string;
+  description?: string | null;
+  properties: DeclaredProperty[];
 }
 
 /** Something that would stop this plugin being accepted. */
 export interface Problem {
   /** Which of the plugin's answers it came from, for grouping in a report. */
-  part: 'id' | 'apiVersion' | 'functions' | 'tools' | 'parameters' | 'permissions' | 'capabilities' | 'libraries';
+  part:
+    | 'id'
+    | 'apiVersion'
+    | 'functions'
+    | 'tools'
+    | 'parameters'
+    | 'permissions'
+    | 'capabilities'
+    | 'libraries'
+    | 'skills'
+    | 'objects';
   message: string;
 }
 
@@ -108,7 +152,149 @@ export function validate(declared: Declaration): Problem[] {
     ...validatePermissions(declared.permissions ?? []),
     ...validateCapabilities(declared.capabilities ?? []),
     ...validateLibraries(declared.libraries ?? []),
+    ...validateSkills(declared.skills ?? []),
+    ...validateObjects(declared.objects ?? []),
   ];
+}
+
+/**
+ * The skills, held to what the server holds them to.
+ *
+ * The frontmatter is deliberately not required here, because it is not
+ * required there: a plugin that wrote plain markdown and named the skill in
+ * its declaration has stated both facts once, and the server writes the block
+ * from them. What is checked is a block that *opens* and never closes, which
+ * is a mistake rather than an omission.
+ */
+export function validateSkills(declared: DeclaredSkill[]): Problem[] {
+  const problems: Problem[] = [];
+  const refuse = (message: string): void => {
+    problems.push({ part: 'skills', message });
+  };
+
+  if (declared.length > MAX_SKILLS) {
+    refuse(`skills() declared more than ${MAX_SKILLS} skills`);
+    return problems;
+  }
+
+  const seen = new Set<string>();
+  for (const skill of declared) {
+    const name = typeof skill?.name === 'string' ? skill.name.trim() : '';
+    if (name.length === 0) {
+      refuse('a skill has to have a name');
+      continue;
+    }
+    if (name.length > MAX_SKILL_NAME_LENGTH) {
+      refuse(`"${name.slice(0, 40)}…" is longer than a skill name can be (${MAX_SKILL_NAME_LENGTH})`);
+      continue;
+    }
+    if (seen.has(name.toLowerCase())) {
+      refuse(`skills() declares ${name} more than once`);
+    }
+    seen.add(name.toLowerCase());
+
+    const content = typeof skill.content === 'string' ? skill.content : '';
+    if (content.trim().length === 0) {
+      refuse(`the skill ${name} has no content: a skill is the markdown an agent reads`);
+      continue;
+    }
+    if (content.length > MAX_SKILL_CHARS) {
+      refuse(`the skill ${name} is ${content.length} characters, and a skill is at most ${MAX_SKILL_CHARS}`);
+      continue;
+    }
+
+    const lines = content.split('\n');
+    const first = lines.findIndex((line) => line.trim().length > 0);
+    if (first !== -1 && lines[first]?.trim() === '---') {
+      const closes = lines.slice(first + 1).some((line) => line.trim() === '---');
+      if (!closes) refuse(`the skill ${name} opens a frontmatter fence and never closes it`);
+    }
+  }
+  return problems;
+}
+
+/**
+ * The exported shapes, held to what the server holds them to.
+ *
+ * The part worth having locally is the last of them: an `of` naming an object
+ * the plugin does not declare. Every other check fires at the line that wrote
+ * it, but that one needs the whole set, so it is the one a plugin author
+ * otherwise learns about from a refused upload.
+ */
+export function validateObjects(declared: DeclaredObject[]): Problem[] {
+  const problems: Problem[] = [];
+  const refuse = (message: string): void => {
+    problems.push({ part: 'objects', message });
+  };
+
+  if (declared.length > MAX_OBJECTS) {
+    refuse(`objects() declared more than ${MAX_OBJECTS} objects`);
+    return problems;
+  }
+
+  const names = new Set<string>();
+  for (const object of declared) {
+    const name = typeof object?.name === 'string' ? object.name.trim() : '';
+    if (!OBJECT_NAME.test(name)) {
+      refuse(`"${name}" is not a usable object name`);
+      continue;
+    }
+    if (names.has(name)) refuse(`objects() declares ${name} more than once`);
+    names.add(name);
+  }
+
+  for (const object of declared) {
+    const name = typeof object?.name === 'string' ? object.name.trim() : '';
+    const properties = Array.isArray(object?.properties) ? object.properties : [];
+    if (properties.length > MAX_PROPERTIES) {
+      refuse(`${name} declares more than ${MAX_PROPERTIES} properties`);
+      continue;
+    }
+
+    const fields = new Set<string>();
+    for (const held of properties) {
+      const field = typeof held?.name === 'string' ? held.name.trim() : '';
+      if (!IDENTIFIER.test(field)) {
+        refuse(`${name} has a property called "${field}", which is not a usable name`);
+        continue;
+      }
+      if (fields.has(field)) refuse(`${name} declares ${field} twice`);
+      fields.add(field);
+
+      const kind = typeof held.kind === 'string' ? held.kind.trim().toLowerCase() : '';
+      if (!PROPERTY_KINDS.includes(kind)) {
+        refuse(`${name}'s ${field} is a "${held.kind}", which is not one of ${PROPERTY_KINDS.join(', ')}`);
+        continue;
+      }
+
+      const points = kind === 'object' || kind === 'array';
+      const of = typeof held.of === 'string' ? held.of.trim() : null;
+      if (points && (of === null || of.length === 0)) {
+        refuse(
+          `${name}'s ${field} is ${kind === 'object' ? 'an object' : 'an array'}, so it needs an "of": ` +
+            (kind === 'object' ? 'the object it points at' : 'what it holds'),
+        );
+        continue;
+      }
+      if (!points && of !== null) {
+        refuse(`${name}'s ${field} names an "of" but is a ${kind}`);
+        continue;
+      }
+      if (of === null) continue;
+
+      // An array of scalars says so with a kind; anything else names an object.
+      if (kind === 'array' && PROPERTY_KINDS.includes(of.toLowerCase()) && of.toLowerCase() !== 'object') {
+        if (of.toLowerCase() === 'array') {
+          refuse(`${name}'s ${field} is an array of arrays, which this server has no shape for`);
+        }
+        continue;
+      }
+      if (!names.has(of)) {
+        refuse(`${name}'s ${field} points at "${of}", which objects() does not declare`);
+      }
+    }
+  }
+  return problems;
 }
 
 /**

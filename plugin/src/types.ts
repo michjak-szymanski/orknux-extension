@@ -289,6 +289,103 @@ export interface OrknuxParameterInstance {
   readonly connectionType: string | null;
 }
 
+/**
+ * One instruction set a plugin brings.
+ *
+ * Neither called nor run: `content` is markdown an agent reads before doing
+ * something, so the knowledge of how this plugin's work is meant to be done
+ * travels with the code that does it.
+ */
+export interface OrknuxSkillDeclaration {
+  /**
+   * What the skill is called, and what an agent asks for by name.
+   *
+   * Prose rather than an identifier — nothing calls a skill, an agent reads
+   * it — so `Rolling back a deploy` is a better name than `rolling_back`.
+   * At most `MAX_SKILL_NAME_LENGTH` characters.
+   */
+  name: string;
+
+  /**
+   * One line on what it is for. This is what an agent chooses from before
+   * loading anything, so it earns its place: "What to do when a release is
+   * bad" tells a model when to reach for the page; "Deploy skill" does not.
+   */
+  description?: string | null;
+
+  /**
+   * The markdown itself, at most `MAX_SKILL_CHARS` characters.
+   *
+   * A skill opens with a `---` frontmatter block naming and describing it.
+   * Leave the block out and the server writes one from the `name` and
+   * `description` above — they are the same two facts, and stating them twice
+   * is a trap. A block that opens and never closes is your mistake, and is
+   * refused as one.
+   */
+  content: string;
+}
+
+/** What a skill is once the sandbox has checked it. */
+export interface OrknuxSkillInstance {
+  readonly name: string;
+  readonly description: string | null;
+  readonly content: string;
+}
+
+/** What one field of an exported object may be. */
+export type OrknuxPropertyKind = 'string' | 'number' | 'boolean' | 'object' | 'array';
+
+/**
+ * One field of an object a plugin exports.
+ *
+ * `of` is where a shape stops being flat: required for an `object` (it names
+ * another of this plugin's objects) and for an `array` (a scalar kind, or
+ * another object's name). Left off anything else, because there would be
+ * nothing for it to say.
+ */
+export interface OrknuxProperty {
+  name: string;
+  kind: OrknuxPropertyKind;
+  /** The object this points at, or what the array holds. */
+  of?: string | null;
+  /**
+   * What this field means, for whoever — or whatever — reads it. A name says
+   * what a field is called and nothing about what belongs in it.
+   */
+  description?: string | null;
+}
+
+/**
+ * A named shape a plugin exports, for its functions to pass around.
+ *
+ * A plugin's functions belong to every workspace at once, which is why they
+ * may not name a workspace's own objects — there is no single workspace whose
+ * definitions they could mean. An object declared here is the answer: it
+ * belongs to the plugin, travels with it, and is available wherever the
+ * plugin is, under the plugin's key — `Issue` declared by `jira` arrives as
+ * `jira_Issue`.
+ *
+ * Within the plugin, refer to them by the plugin's own spelling: a property
+ * whose `of` is `User` means the `User` this plugin declares, and the server
+ * rewrites the reference when it stores it.
+ */
+export interface OrknuxObjectDeclaration {
+  /**
+   * What the shape is called, unprefixed. An identifier, conventionally
+   * PascalCase — it reads as a type, because that is what it is.
+   */
+  name: string;
+  description?: string | null;
+  properties: readonly OrknuxProperty[];
+}
+
+/** What an object is once the sandbox has checked it. */
+export interface OrknuxObjectInstance {
+  readonly name: string;
+  readonly description: string | null;
+  readonly properties: readonly OrknuxProperty[];
+}
+
 /** What a plugin answers when the server asks it what it is. */
 export interface OrknuxPluginInstance {
   /** What this plugin calls itself, and the prefix on everything it declares. */
@@ -320,6 +417,22 @@ export interface OrknuxPluginInstance {
    * no `..`, no bare specifiers.
    */
   libraries(): string[];
+
+  /**
+   * The instruction sets it brings: markdown an agent reads, never code it
+   * runs. They arrive as a skill catalog named after the plugin's key and are
+   * granted like any other — nothing is automatic.
+   */
+  skills(): OrknuxSkillInstance[];
+
+  /**
+   * The shapes it exports, for its own functions and tools to pass around.
+   *
+   * Available wherever the plugin is, under the plugin's key: `Issue`
+   * declared by `jira` is `jira_Issue`. A function returning or taking one
+   * names it by the plugin's own spelling.
+   */
+  objects(): OrknuxObjectInstance[];
 
   /** What the workspace answered its parameters with, for the length of a call. */
   readonly settings: OrknuxSettings;
