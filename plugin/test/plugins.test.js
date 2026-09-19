@@ -63,20 +63,23 @@ test('the slack plugin declares what the server would accept', async () => {
     'SLACK_READ_MESSAGE',
     'SLACK_READ_USER',
     'SLACK_MENTION',
+    'SLACK_POST_MESSAGE',
+    'SLACK_ADD_REACTION',
   ]);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
-    ['isFirstReply', 'readMessage', 'whoIs', 'mention'],
+    ['isFirstReply', 'readMessage', 'whoIs', 'readThread', 'post', 'react', 'mention'],
   );
 
   /*
-   * The agents' surface: the three lookups, each an OrknuxFunctionTool the
-   * inspection resolved — so every tool carries its function's own params,
-   * return type and description, and `isFirstReply` stays a workflow's gate.
+   * The agents' surface: every call the plugin wraps, each an
+   * OrknuxFunctionTool the inspection resolved — so every tool carries its
+   * function's own params, return type and description, and `isFirstReply`
+   * stays a workflow's gate.
    */
   assert.deepEqual(
     inspected.tools.map((declared) => declared.name),
-    ['readMessage', 'whoIs', 'mention'],
+    ['readMessage', 'whoIs', 'mention', 'readThread', 'post', 'react'],
   );
   for (const declared of inspected.tools) {
     assert.equal(declared.proxyOf, declared.name);

@@ -16,19 +16,17 @@
  *
  * ## Setting one up
  *
- * 1. Load this plugin and accept `SLACK_READ_THREAD`.
+ * 1. Load this plugin and accept the capabilities it asks for.
  * 2. Point its `slack` parameter at the workspace's Slack connection.
  * 3. Use `slack_isFirstReply` as a function condition.
  *
- * Nothing here wraps `orknux.slack.thread` for the sake of it. That call is the
- * API and is available to any plugin granted the capability; a function that
- * only forwarded its arguments to it would be a name to look up in exchange for
- * nothing. What is here is what the call does not answer on its own - plus the
- * three lookups below, whose wrapping IS the point: `readMessage`, `whoIs` and
- * `mention` exist to be handed to agents, and `tools()` is where that happens.
- * Each is declared once as a function - workflows call those - and fronted for
- * agents by an `OrknuxFunctionTool`, so there is one implementation and two
- * surfaces. Their descriptions are written for the model that reads them.
+ * The `orknux.slack` calls are wrapped here on purpose: a workflow's condition
+ * and an agent's tool both call by NAME, and a name is exactly what a bare
+ * capability call does not have. So each call is declared once as a function -
+ * workflows call those - and fronted for agents by an `OrknuxFunctionTool` in
+ * `tools()`, one implementation under two surfaces, with descriptions written
+ * for the model that reads them. `isFirstReply` is the one thing here the raw
+ * API does not answer on its own.
  *
  * ## Why the connection is an argument and not just a setting
  *
@@ -75,7 +73,14 @@ export default class Slack extends OrknuxPlugin {
   }
 
   capabilities() {
-    return ['SLACK_READ_THREAD', 'SLACK_READ_MESSAGE', 'SLACK_READ_USER', 'SLACK_MENTION'];
+    return [
+      'SLACK_READ_THREAD',
+      'SLACK_READ_MESSAGE',
+      'SLACK_READ_USER',
+      'SLACK_MENTION',
+      'SLACK_POST_MESSAGE',
+      'SLACK_ADD_REACTION',
+    ];
   }
 
   /*
@@ -91,6 +96,9 @@ export default class Slack extends OrknuxPlugin {
       new OrknuxFunctionTool({ function: 'readMessage' }),
       new OrknuxFunctionTool({ function: 'whoIs' }),
       new OrknuxFunctionTool({ function: 'mention' }),
+      new OrknuxFunctionTool({ function: 'readThread' }),
+      new OrknuxFunctionTool({ function: 'post' }),
+      new OrknuxFunctionTool({ function: 'react' }),
     ];
   }
 
@@ -177,6 +185,74 @@ export default class Slack extends OrknuxPlugin {
             throw new Error(`could not look the user up: ${found.error}`);
           }
           return found;
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'readThread',
+        description:
+          'Reads a Slack thread: the messages under one parent, oldest first, and how many replies the ' +
+          'whole thread holds. Pass the channel id and the thread\'s ts (threadTs on an event; a message\'s ' +
+          'own ts when it is the parent). Pass the connection the event came in on, or an empty string to ' +
+          'use the configured one. limit caps how many messages come back; pass 0 for the default.',
+        params: [
+          { name: 'connection', type: 'string' },
+          { name: 'channel', type: 'string' },
+          { name: 'threadTs', type: 'string' },
+          { name: 'limit', type: 'number' },
+        ],
+        returnType: 'map',
+        run: (connection, channel, threadTs, limit) => {
+          const read = orknux.slack.thread(connection || this.settings.slack, channel, threadTs, limit || 20);
+          if (read.error !== undefined) {
+            throw new Error(`could not read the thread: ${read.error}`);
+          }
+          return read;
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'post',
+        description:
+          'Posts a message to a Slack channel. Pass the channel id (or a #name), what to say, and a ' +
+          'threadTs to reply inside a thread - or an empty threadTs to post to the channel itself. Pass ' +
+          'the connection the event came in on, or an empty string to use the configured one. Answers ' +
+          'the channel and the new message\'s ts.',
+        params: [
+          { name: 'connection', type: 'string' },
+          { name: 'channel', type: 'string' },
+          { name: 'text', type: 'string' },
+          { name: 'threadTs', type: 'string' },
+        ],
+        returnType: 'map',
+        run: (connection, channel, text, threadTs) => {
+          const posted = orknux.slack.post(connection || this.settings.slack, channel, text, threadTs || undefined);
+          if (posted.error !== undefined) {
+            throw new Error(`could not post the message: ${posted.error}`);
+          }
+          return posted;
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'react',
+        description:
+          'Adds an emoji reaction to a Slack message. Pass the channel id, the message\'s own ts, and the ' +
+          'emoji\'s short name with or without the colons. Already-reacted counts as done. Pass the ' +
+          'connection the event came in on, or an empty string to use the configured one.',
+        params: [
+          { name: 'connection', type: 'string' },
+          { name: 'channel', type: 'string' },
+          { name: 'ts', type: 'string' },
+          { name: 'emoji', type: 'string' },
+        ],
+        returnType: 'boolean',
+        run: (connection, channel, ts, emoji) => {
+          const done = orknux.slack.react(connection || this.settings.slack, channel, ts, emoji);
+          if (done.error !== undefined) {
+            throw new Error(`could not add the reaction: ${done.error}`);
+          }
+          return true;
         },
       }),
 
