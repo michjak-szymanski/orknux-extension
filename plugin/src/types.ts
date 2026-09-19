@@ -96,6 +96,37 @@ export interface OrknuxParam<
 > {
   readonly name: Name;
   readonly type: Type;
+
+  /**
+   * What this argument is, for whoever — or whatever — reads it.
+   *
+   * A tool's description is where a model looks first, and a name says what an
+   * argument is called and nothing about what belongs in it.
+   */
+  readonly description?: string | null;
+
+  /**
+   * Whether a call has to supply it. True unless a `default` says otherwise.
+   *
+   * Arguments are positional, so the ones that may be left out come last: a
+   * required parameter after an optional one is refused at load, because
+   * nothing downstream could tell which argument was missing.
+   */
+  readonly required?: boolean;
+
+  /**
+   * What arrives when a call leaves it out — and declaring one makes the
+   * parameter optional.
+   *
+   * This is what a sentinel was standing in for: `limit: 0` meaning "the
+   * default", explained in a sentence a model read on every call and sometimes
+   * got wrong. Say the value instead.
+   *
+   * Note what does *not* change: `run` still receives every argument, because
+   * the server puts the default in before the call. There is no `undefined` to
+   * guard against and no `limit || 20` left to write.
+   */
+  readonly default?: unknown;
 }
 
 /**

@@ -9,11 +9,10 @@ a plugin is currently writing by hand.
 |------|------------------|
 | `options` on a plugin parameter | **accepted** — declare it and it is stored |
 | a picker on the settings page | not drawn yet; the field is still a text box |
-| `required: false` and `default` on a *function* parameter | **not accepted** — do not ship one |
+| `required: false` and `default` on a *function* parameter | **accepted** |
 
-The third is the biggest of the three and is described here so it can be argued
-with before it is built, not so it can be used. A plugin declaring it today is
-refused.
+All three are live. The last of them took the longest because it had to mean
+the same thing to four readers at once — see below.
 
 ## 1. `options` on a plugin parameter
 
@@ -42,7 +41,7 @@ Rules, all refused at load:
 `required` still means what it meant. A parameter with options and
 `required: false` is one a workspace may leave alone.
 
-## 2. Optional function parameters — *proposed, not accepted*
+## 2. Optional function parameters
 
 The problem, in the words the plugins actually use:
 
@@ -70,17 +69,31 @@ params: [
 
 which would delete the sentinel, the `limit || 20` idiom, and the sentence.
 
-**Why it is not in yet.** A function's parameters are rows in a table and are
-read by four things: the workflow editor's argument form, the tool spec a model
-is given, the caller that positions the arguments, and the editor that lets
-somebody take a plugin function over. `required` and a default have to mean the
-same thing in all four, and a default that exists in the declaration but not in
-the stored row is a function that behaves differently depending on which of
-them called it. That is the work, and it is worth doing carefully rather than
-quickly.
+**What `run` sees does not change.** The server puts the default in before the
+call, so every argument still arrives — there is no `undefined` to guard
+against and no `limit || 20` left to write.
 
-Do not declare `required` or `default` on a function parameter until this table
-says accepted.
+**Two things are refused at load**, rather than at the call that would have
+found them:
+
+- a default that is not of the parameter's own type, which otherwise shows up
+  only when somebody leaves that argument out — months later, in somebody
+  else's workflow
+- an optional parameter before a required one. Arguments are positional, so
+  "may be left out" only means anything at the end; nothing downstream could
+  tell which argument was missing.
+
+A default also implies `required: false`. Writing one alongside
+`required: true` is refused rather than ignored: a default that can never apply
+is a mistake, not a preference.
+
+**What it took.** A function's parameters are rows read by four things — the
+workflow editor's argument form, the tool spec a model is given, the caller
+that positions the arguments, and the editor that lets somebody take a plugin
+function over. All four now agree, and the schema a model is given says
+`required` per parameter instead of true for everything, with the default named
+in the description: *"how many come back, 20 if not given"* answers the question
+the sentinel used to answer badly.
 
 ## 3. `definePlugin` takes `skills` and `objects` — accepted
 

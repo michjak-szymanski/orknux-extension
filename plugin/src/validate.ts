@@ -43,14 +43,17 @@ export interface DeclaredParam {
   name: string;
   type: string;
   /**
-   * Proposed, and refused until `plugin/PARAMETERS.md` says otherwise.
-   *
-   * Declared here so the check above can see one rather than ignore it: a
-   * field this file does not know about is a field it cannot refuse, and
-   * accepting something the upload rejects is the one way this package may
-   * not be wrong.
+   * Whether a call has to supply it; absent means it does, which is what every
+   * declaration written before this meant by saying nothing.
    */
   required?: boolean;
+  /**
+   * What arrives when a call leaves it out, and declaring one makes the
+   * parameter optional.
+   *
+   * `run` still receives every argument — the server puts the default in
+   * before the call — so there is no `undefined` to guard against.
+   */
   default?: unknown;
 }
 
@@ -152,6 +155,33 @@ export interface Problem {
     | 'skills'
     | 'objects';
   message: string;
+}
+
+/**
+ * Whether a default is of the type its parameter declared.
+ *
+ * Refused here rather than at the call it would apply to: a default of the
+ * wrong type only shows up when somebody leaves that argument out, which may
+ * be months later and in somebody else's workflow.
+ */
+function fitsType(type: string, value: unknown): boolean {
+  if (value === null) return true;
+  switch (type.trim().toLowerCase()) {
+    case 'string':
+      return typeof value === 'string';
+    case 'number':
+      return typeof value === 'number';
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'array':
+      return Array.isArray(value);
+    case 'map':
+      return typeof value === 'object' && !Array.isArray(value);
+    default:
+      // A shape the plugin exports, or a type this server does not have; the
+      // type itself is refused elsewhere, and guessing here would say so twice.
+      return true;
+  }
 }
 
 /** Everything wrong with what a plugin declared. Empty means the server would take it. */
@@ -458,6 +488,9 @@ export function validateFunctions(
     }
 
     const params = new Set<string>();
+    // Per declaration: the optional ones come last, and this is what remembers
+    // that one has been seen.
+    let optionalSeen = false;
     for (const param of declaration.params) {
       if (!IDENTIFIER.test(param.name)) {
         refuse(`${name} has a parameter called "${param.name}", which is not a usable name`);
@@ -466,25 +499,28 @@ export function validateFunctions(
         refuse(`${name} declares ${param.name} twice`);
       }
       /*
-       * Neither is accepted on a *function's* parameter, and the mirror has to
-       * say so — silence here is the one direction this package may not be
-       * wrong in. A plugin declaring a default passed `check` and was then
-       * refused by the upload, which is exactly the drift this file exists to
-       * prevent.
-       *
-       * They are proposed rather than absent: `plugin/PARAMETERS.md` has the
-       * status table and the reasoning. A function's parameters are rows read
-       * by four things — the argument form, the tool spec a model is given,
-       * the caller that positions the arguments, and the editor that lets
-       * somebody take a plugin function over — and a default that exists in
-       * the declaration but not in the stored row is a function that behaves
-       * differently depending on which of them called it. When that lands,
-       * this check comes out.
+       * What it says about being left out. A default implies optional, and one
+       * that could never apply is the trap this refuses rather than ignores.
        */
-      if (param.required !== undefined || param.default !== undefined) {
+      const optional = param.default !== undefined ? param.required !== true : param.required === false;
+      if (param.default !== undefined && param.required === true) {
         refuse(
-          `${name}'s ${param.name} declares ${param.required !== undefined ? 'required' : 'default'}, ` +
-            'which a function\'s parameter may not yet — see PARAMETERS.md',
+          `${name}'s ${param.name} has a default and is required, so the default can never apply`,
+        );
+      }
+      if (param.default !== undefined && !fitsType(param.type, param.default)) {
+        refuse(`${name}'s ${param.name} is a ${param.type.trim().toLowerCase()} and its default is not one`);
+      }
+      optionalSeen = optionalSeen || optional;
+      if (optionalSeen && !optional) {
+        /*
+         * Arguments are positional, so "may be left out" only means anything
+         * at the end: nothing downstream could tell which argument was
+         * missing if a required one followed an optional one.
+         */
+        refuse(
+          `${name} takes ${param.name} after one that may be left out. ` +
+            'Arguments are positional, so the optional ones come last.',
         );
       }
       params.add(param.name);
@@ -570,6 +606,9 @@ export function validateTools(
     }
 
     const params = new Set<string>();
+    // Per declaration: the optional ones come last, and this is what remembers
+    // that one has been seen.
+    let optionalSeen = false;
     for (const param of tool.params) {
       if (!IDENTIFIER.test(param.name)) {
         refuse(`the tool ${name} has a parameter called "${param.name}", which is not a usable name`);
@@ -577,27 +616,22 @@ export function validateTools(
       if (params.has(param.name)) {
         refuse(`the tool ${name} declares ${param.name} twice`);
       }
-      /*
-       * Neither is accepted on a *function's* parameter, and the mirror has to
-       * say so — silence here is the one direction this package may not be
-       * wrong in. A plugin declaring a default passed `check` and was then
-       * refused by the upload, which is exactly the drift this file exists to
-       * prevent.
-       *
-       * They are proposed rather than absent: `plugin/PARAMETERS.md` has the
-       * status table and the reasoning. A function's parameters are rows read
-       * by four things — the argument form, the tool spec a model is given,
-       * the caller that positions the arguments, and the editor that lets
-       * somebody take a plugin function over — and a default that exists in
-       * the declaration but not in the stored row is a function that behaves
-       * differently depending on which of them called it. When that lands,
-       * this check comes out.
-       */
-      if (param.required !== undefined || param.default !== undefined) {
+      const optional = param.default !== undefined ? param.required !== true : param.required === false;
+      if (param.default !== undefined && param.required === true) {
         refuse(
-          `the tool ${name}'s ${param.name} declares ` +
-            `${param.required !== undefined ? 'required' : 'default'}, which a parameter may not ` +
-            'yet — see PARAMETERS.md',
+          `the tool ${name}'s ${param.name} has a default and is required, so the default can never apply`,
+        );
+      }
+      if (param.default !== undefined && !fitsType(param.type, param.default)) {
+        refuse(
+          `the tool ${name}'s ${param.name} is a ${param.type.trim().toLowerCase()} and its default is not one`,
+        );
+      }
+      optionalSeen = optionalSeen || optional;
+      if (optionalSeen && !optional) {
+        refuse(
+          `the tool ${name} takes ${param.name} after one that may be left out. ` +
+            'Arguments are positional, so the optional ones come last.',
         );
       }
       params.add(param.name);

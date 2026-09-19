@@ -333,40 +333,79 @@ test('the bound is the server’s', () => {
 });
 
 /*
- * `required` and `default` on a *function's* parameter are proposed, not
- * accepted — `plugin/PARAMETERS.md` has the status table. The server refuses
- * one today, so this file has to as well.
+ * `required` and `default` on a function's parameter, which the server takes
+ * now — these tests used to assert the refusal that stood in for it.
  *
- * The bug this replaces is the one direction this package may not be wrong in:
- * validate simply ignored the fields, so a plugin declaring a default passed
- * `check` and was then refused by the upload. Stricter than the server is
- * allowed; looser is the whole promise broken.
+ * What they pin is the pair of mistakes worth catching where the plugin is
+ * written: a default of the wrong type, which otherwise shows up only on the
+ * call that leaves the argument out, and an optional parameter before a
+ * required one, which is a signature nothing downstream can read because the
+ * arguments are positional.
  */
 
-test('a function parameter may not yet declare required', () => {
-  const problems = validateFunctions([
-    { name: 'search', params: [{ name: 'limit', type: 'number', required: false }], returnType: 'map' },
-  ]);
-  assert.equal(problems.length, 1);
-  assert.match(problems[0].message, /declares required, which a function's parameter may not yet/);
-});
-
-test('a function parameter may not yet declare a default', () => {
-  const problems = validateFunctions([
-    { name: 'search', params: [{ name: 'limit', type: 'number', default: 20 }], returnType: 'map' },
-  ]);
-  assert.equal(problems.length, 1);
-  assert.match(problems[0].message, /declares default/);
-  /* The refusal says where the reasoning lives, so it can be argued with. */
-  assert.match(problems[0].message, /PARAMETERS\.md/);
-});
-
-test('a tool parameter may not either, and the refusal names the tool', () => {
-  const problems = validateTools(
-    [{ name: 'look', params: [{ name: 'limit', type: 'number', default: 20 }], returnType: 'map' }],
+test('a function parameter may be left out, with a default', () => {
+  assert.deepEqual(
+    validateFunctions([
+      {
+        name: 'search',
+        params: [
+          { name: 'query', type: 'string' },
+          { name: 'limit', type: 'number', default: 20 },
+        ],
+        returnType: 'map',
+      },
+    ]),
     [],
   );
-  assert.ok(problems.some((problem) => /the tool look's limit declares default/.test(problem.message)));
+});
+
+test('a default that is not the parameter’s type is refused', () => {
+  const problems = validateFunctions([
+    { name: 'search', params: [{ name: 'limit', type: 'number', default: 'twenty' }], returnType: 'map' },
+  ]);
+  assert.match(problems[0].message, /is a number and its default is not one/);
+});
+
+test('a default that can never apply is refused rather than ignored', () => {
+  const problems = validateFunctions([
+    {
+      name: 'search',
+      params: [{ name: 'limit', type: 'number', default: 20, required: true }],
+      returnType: 'map',
+    },
+  ]);
+  assert.match(problems[0].message, /can never apply/);
+});
+
+test('the ones that may be left out come last, because arguments are positional', () => {
+  const problems = validateFunctions([
+    {
+      name: 'search',
+      params: [
+        { name: 'limit', type: 'number', default: 20 },
+        { name: 'query', type: 'string' },
+      ],
+      returnType: 'map',
+    },
+  ]);
+  assert.match(problems[0].message, /Arguments are positional/);
+});
+
+test('and a tool is held to the same rules, named as the tool', () => {
+  const problems = validateTools(
+    [{ name: 'look', params: [{ name: 'limit', type: 'number', default: 'twenty' }], returnType: 'map' }],
+    [],
+  );
+  assert.ok(problems.some((problem) => /the tool look's limit/.test(problem.message)));
+});
+
+test('null is a default for anything, because it is what "nothing" was', () => {
+  assert.deepEqual(
+    validateFunctions([
+      { name: 'search', params: [{ name: 'limit', type: 'number', default: null }], returnType: 'map' },
+    ]),
+    [],
+  );
 });
 
 test('a parameter declaring neither is still fine, which is every one shipped', () => {
