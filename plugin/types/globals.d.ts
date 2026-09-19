@@ -39,6 +39,7 @@ type OrknuxCapability =
   | 'SLACK_READ_MESSAGE'
   | 'SLACK_READ_USER'
   | 'SLACK_MENTION'
+  | 'SLACK_SEARCH'
   | 'NETWORK_REQUEST';
 
 /** The kinds of connection a workspace can hold. */
@@ -139,6 +140,24 @@ type SlackUserInfo =
 type SlackMention =
   | { mention: string; id: string; label: string; error?: undefined }
   | { error: string; mention?: undefined };
+
+/** What a search of Slack's messages came to, or why it could not be run. */
+type SlackSearchResult =
+  | {
+      matches: {
+        channel: string | null;
+        channelName: string | null;
+        ts: string | null;
+        user: string | null;
+        text: string;
+        /** The way back to the message, for the thread around it. */
+        permalink: string | null;
+      }[];
+      /** How many the whole search holds, not how many came back. */
+      total: number;
+      error?: undefined;
+    }
+  | { error: string; matches?: undefined; total?: undefined };
 
 /**
  * What came back, or why nothing did.
@@ -258,6 +277,19 @@ declare const orknux: {
      *   `post`'s text as it is.
      */
     mention(connection: SlackConnection, name: string): SlackMention;
+
+    /**
+     * Search Slack's messages, the way the search box does.
+     *
+     * Needs the `SLACK_SEARCH` capability — and, from Slack's own side, a
+     * **user** token: `search.messages` refuses the usual bot token with
+     * `not_allowed_token_type`, and that refusal comes back as the error.
+     *
+     * @param query in Slack's search syntax — `in:#channel`, `from:@name`
+     *   and the rest work as they do in the box.
+     * @param limit how many matches to bring back; capped to one page.
+     */
+    search(connection: SlackConnection, query: string, limit?: number): SlackSearchResult;
   };
 
   http: {

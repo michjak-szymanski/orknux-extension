@@ -394,6 +394,24 @@ export type SlackMention =
   | { mention: string; id: string; label: string; error?: undefined }
   | { error: string; mention?: undefined };
 
+/** What a search of Slack's messages came to, or why it could not be run. */
+export type SlackSearchResult =
+  | {
+      matches: {
+        channel: string | null;
+        channelName: string | null;
+        ts: string | null;
+        user: string | null;
+        text: string;
+        /** The way back to the message, for the thread around it. */
+        permalink: string | null;
+      }[];
+      /** How many the whole search holds, not how many came back. */
+      total: number;
+      error?: undefined;
+    }
+  | { error: string; matches?: undefined; total?: undefined };
+
 /**
  * What came back from an HTTP request, or why nothing did.
  *
@@ -474,6 +492,14 @@ export interface OrknuxHelpers {
 
     /** The notation that pings somebody, from their name. Needs `SLACK_MENTION`. */
     mention(connection: SlackConnectionArgument, name: string): SlackMention;
+
+    /**
+     * Search Slack's messages, the way the search box does. Needs
+     * `SLACK_SEARCH` — and, from Slack's own side, a user token: bot tokens
+     * are refused with `not_allowed_token_type`, which comes back as the
+     * error.
+     */
+    search(connection: SlackConnectionArgument, query: string, limit?: number): SlackSearchResult;
   };
 
   http: {

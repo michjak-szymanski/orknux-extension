@@ -80,6 +80,7 @@ export default class Slack extends OrknuxPlugin {
       'SLACK_MENTION',
       'SLACK_POST_MESSAGE',
       'SLACK_ADD_REACTION',
+      'SLACK_SEARCH',
     ];
   }
 
@@ -99,6 +100,7 @@ export default class Slack extends OrknuxPlugin {
       new OrknuxFunctionTool({ function: 'readThread' }),
       new OrknuxFunctionTool({ function: 'post' }),
       new OrknuxFunctionTool({ function: 'react' }),
+      new OrknuxFunctionTool({ function: 'search' }),
     ];
   }
 
@@ -253,6 +255,29 @@ export default class Slack extends OrknuxPlugin {
             throw new Error(`could not add the reaction: ${done.error}`);
           }
           return true;
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'search',
+        description:
+          'Searches Slack messages the way the search box does. Slack\'s search syntax works: in:#channel, ' +
+          'from:@name, "an exact phrase". Answers the matches - channel, ts, user, text and a permalink ' +
+          'back to each - and how many the whole search holds. Pass the connection the event came in on, ' +
+          'or an empty string to use the configured one; limit caps the matches, 0 for the default. Note: ' +
+          'Slack answers search only for a user token, so the connection has to hold one.',
+        params: [
+          { name: 'connection', type: 'string' },
+          { name: 'query', type: 'string' },
+          { name: 'limit', type: 'number' },
+        ],
+        returnType: 'map',
+        run: (connection, query, limit) => {
+          const found = orknux.slack.search(connection || this.settings.slack, query, limit || 20);
+          if (found.error !== undefined) {
+            throw new Error(`could not search Slack: ${found.error}`);
+          }
+          return found;
         },
       }),
 

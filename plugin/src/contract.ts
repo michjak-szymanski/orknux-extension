@@ -258,6 +258,7 @@ function ungrantedHelpers(): OrknuxHelpers {
       message: refused('SLACK_READ_MESSAGE'),
       user: refused('SLACK_READ_USER'),
       mention: refused('SLACK_MENTION'),
+      search: refused('SLACK_SEARCH'),
     },
     http: {
       request: refused('NETWORK_REQUEST'),

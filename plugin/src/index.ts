@@ -76,6 +76,7 @@ export type {
   SlackMention,
   SlackPost,
   SlackReaction,
+  SlackSearchResult,
   SlackThread,
   SlackThreadMessage,
   SlackUserInfo,

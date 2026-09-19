@@ -65,10 +65,11 @@ test('the slack plugin declares what the server would accept', async () => {
     'SLACK_MENTION',
     'SLACK_POST_MESSAGE',
     'SLACK_ADD_REACTION',
+    'SLACK_SEARCH',
   ]);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
-    ['isFirstReply', 'readMessage', 'whoIs', 'readThread', 'post', 'react', 'mention'],
+    ['isFirstReply', 'readMessage', 'whoIs', 'readThread', 'post', 'react', 'search', 'mention'],
   );
 
   /*
@@ -79,7 +80,7 @@ test('the slack plugin declares what the server would accept', async () => {
    */
   assert.deepEqual(
     inspected.tools.map((declared) => declared.name),
-    ['readMessage', 'whoIs', 'mention', 'readThread', 'post', 'react'],
+    ['readMessage', 'whoIs', 'mention', 'readThread', 'post', 'react', 'search'],
   );
   for (const declared of inspected.tools) {
     assert.equal(declared.proxyOf, declared.name);
