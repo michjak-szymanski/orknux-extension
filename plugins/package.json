@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "build:icons": "node icons.mjs"
+    "build:icons": "node icons.mjs",
+    "pack": "node pack.mjs"
   },
   "devDependencies": {
     "beautiful-mermaid": "^1.1.3",

@@ -15,6 +15,15 @@ docker compose run --rm dev npm run typecheck
 docker compose run --rm dev npm run example
 docker compose run --rm dev npm run build:plugins   # the plugins that bundle libraries
 docker compose run --rm dev npm run build:icons --workspace @orknux/plugins
+docker compose run --rm dev npm run pack --workspace @orknux/plugins
+```
+
+`plugins/pack.sh` and `plugins/pack.ps1` wrap that last one for a POSIX shell
+and for PowerShell, so packing is one command from either:
+
+```
+plugins/pack.sh github        # or .\plugins\pack.ps1 github
+plugins/pack.sh               # every plugin
 ```
 
 `npm test` builds first on purpose: the tests import `dist/`, not `src/`, so what
@@ -113,6 +122,17 @@ code itself, in its sandbox, when somebody accepts them. The one claim checked
 is `key`, which must be what `id()` answers, because a listing keyed
 differently from the code is a listing that installs as something else. That
 check is the reason `manifests.test.js` exists.
+
+**Packing is driven by the manifest, never by walking the folder.**
+`plugins/pack.mjs` puts the plugin, its `plugin.json`, the README that manifest
+names, the icon and the libraries `libraries()` declares at a zip's top level —
+and nothing else. `src/` is excluded by construction rather than by a rule:
+shipping `src/mermaid.js` would ship a file full of bare imports that cannot
+load at all. Each plugin is inspected first, the way the server inspects it, so
+packing fails on something the server would refuse rather than producing a zip
+that fails at the upload. Zips land in `plugins/dist/`, which is ignored, and
+are deterministic — every entry carries a fixed 1980 timestamp, so the same
+input packs to the same bytes and a zip that differs is a plugin that changed.
 
 **A plugin that bundles a library is a build.** Its source lives in `src/` and
 the checked-in `<name>.js` beside it is the artifact — so the artifact is what
