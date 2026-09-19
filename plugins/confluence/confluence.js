@@ -174,6 +174,53 @@ export default class Confluence extends OrknuxPlugin {
     return ['NETWORK_REQUEST'];
   }
 
+  /* The two shapes this plugin answers. */
+  objects() {
+    return [
+      new OrknuxObject({
+        name: 'Match',
+        description: 'One page a search turned up.',
+        properties: [
+          { name: 'id', kind: 'string', description: 'The content id; openPage takes it.' },
+          { name: 'type', kind: 'string', description: 'page, blogpost, comment.' },
+          { name: 'title', kind: 'string', description: 'With the highlight markers taken out.' },
+          { name: 'space', kind: 'string', description: 'Which space it lives in.' },
+          { name: 'excerpt', kind: 'string', description: 'The passage around the match.' },
+          { name: 'updated', kind: 'string', description: 'When it last changed.' },
+          { name: 'url', kind: 'string', description: 'The link for a person to open.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Search',
+        description: 'What a search of the wiki came to.',
+        properties: [
+          { name: 'total', kind: 'number', description: 'How many the whole search holds, not how many came back.' },
+          { name: 'matches', kind: 'array', of: 'Match', description: 'Capped by limit.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Page',
+        description: 'One Confluence page, whole.',
+        properties: [
+          { name: 'id', kind: 'string', description: 'The content id.' },
+          { name: 'title', kind: 'string', description: 'The title.' },
+          { name: 'space', kind: 'string', description: 'The space key.' },
+          { name: 'version', kind: 'number', description: 'Which revision this is.' },
+          { name: 'updated', kind: 'string', description: 'When that revision was made.' },
+          { name: 'by', kind: 'string', description: 'Who made it.' },
+          {
+            name: 'body',
+            kind: 'string',
+            description: 'Confluence storage format, which is XHTML — read it as HTML.',
+          },
+          { name: 'url', kind: 'string', description: 'The link for a person to open.' },
+        ],
+      }),
+    ];
+  }
+
   /* The agents' surface: both calls, fronted. Proxies, so everything stays the functions' own. */
   tools() {
     return [
@@ -196,7 +243,7 @@ export default class Confluence extends OrknuxPlugin {
           { name: 'query', type: 'string' },
           { name: 'limit', type: 'number' },
         ],
-        returnType: 'map',
+        returnType: 'Search',
         run: (query, limit) => {
           const asked = typeof query === 'string' ? query.trim() : '';
           if (asked.length === 0) {
@@ -244,7 +291,7 @@ export default class Confluence extends OrknuxPlugin {
           'link or a Server ?pageId=123 one. The body is Confluence storage format, which is XHTML: ' +
           'read it as HTML.',
         params: [{ name: 'page', type: 'string' }],
-        returnType: 'map',
+        returnType: 'Page',
         run: (page) => {
           const id = pageId(page);
           const opened = read(

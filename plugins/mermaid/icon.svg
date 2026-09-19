@@ -1,7 +1,8 @@
 <!--
-  The Mermaid mark, from simple-icons (CC0-1.0): https://github.com/mermaid-js/mermaid/blob/f5bd1e08098fa688ef889e73c8b06696e75e62d8/docs/public/mermaid-logo.svg
+  The Mermaid mark: https://github.com/mermaid-js/mermaid/blob/f5bd1e08098fa688ef889e73c8b06696e75e62d8/docs/public/mermaid-logo.svg
   The trademark remains Mermaid's own, shown here to say what this
-  plugin works with. Regenerate with plugins/icons.mjs; do not hand-edit.
+  plugin works with.
+  Regenerate with plugins/icons.mjs; do not hand-edit.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="currentColor" role="img">
   <title>Mermaid</title>

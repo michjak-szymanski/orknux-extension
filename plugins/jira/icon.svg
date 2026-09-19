@@ -1,7 +1,8 @@
 <!--
-  The Jira mark, from simple-icons (CC0-1.0): https://atlassian.design/resources/logo-library
+  The Jira mark: https://atlassian.design/resources/logo-library
   The trademark remains Jira's own, shown here to say what this
-  plugin works with. Regenerate with plugins/icons.mjs; do not hand-edit.
+  plugin works with.
+  Regenerate with plugins/icons.mjs; do not hand-edit.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="currentColor" role="img">
   <title>Jira</title>

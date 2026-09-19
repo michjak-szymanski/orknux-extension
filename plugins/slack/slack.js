@@ -224,6 +224,167 @@ export default class Slack extends OrknuxPlugin {
   }
 
   /*
+   * The shapes these answers have.
+   *
+   * Most of them are the server's, not this plugin's: `readThread` hands back
+   * what the SLACK_READ_THREAD capability answered, and declaring it here is
+   * writing down a shape the server already guarantees rather than inventing
+   * one. That is worth doing anyway — a caller should not have to read this
+   * file to learn that `replies` counts the whole thread and `messages` only
+   * the page that came back.
+   */
+  objects() {
+    return [
+      new OrknuxObject({
+        name: 'Message',
+        description: 'One message in a thread.',
+        properties: [
+          { name: 'ts', kind: 'string', description: "Slack's timestamp, which is also the message's id." },
+          { name: 'user', kind: 'string', description: 'Who wrote it, or null where Slack said neither.' },
+          { name: 'text', kind: 'string', description: 'What it says, in mrkdwn.' },
+          {
+            name: 'parent',
+            kind: 'boolean',
+            description: 'Whether this is the message the thread hangs under, rather than a reply.',
+          },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Thread',
+        description: 'The messages under one parent, oldest first.',
+        properties: [
+          { name: 'messages', kind: 'array', of: 'Message', description: 'The page that came back, capped by limit.' },
+          {
+            name: 'replies',
+            kind: 'number',
+            description: "Slack's own count of the whole thread, not of this page. replies === 1 is the first reply.",
+          },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'LinkedMessage',
+        description: 'The one message a permalink points at.',
+        properties: [
+          { name: 'channel', kind: 'string', description: 'The channel id it lives in.' },
+          { name: 'ts', kind: 'string', description: 'Its own timestamp.' },
+          { name: 'user', kind: 'string', description: 'Who wrote it, or null.' },
+          { name: 'text', kind: 'string', description: 'What it says.' },
+          { name: 'threadTs', kind: 'string', description: "The thread's parent ts, or null outside a thread." },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'User',
+        description: 'Who a Slack user id belongs to.',
+        properties: [
+          { name: 'id', kind: 'string', description: 'The U… id itself.' },
+          { name: 'name', kind: 'string', description: 'The username.' },
+          { name: 'realName', kind: 'string', description: 'Their actual name, where they set one.' },
+          { name: 'displayName', kind: 'string', description: 'What Slack shows in a channel.' },
+          { name: 'bot', kind: 'boolean', description: 'Whether this is an app rather than a person.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'SearchMatch',
+        description: 'One message a search matched.',
+        properties: [
+          { name: 'channel', kind: 'string', description: 'The channel id.' },
+          { name: 'channelName', kind: 'string', description: 'Its name, without the hash.' },
+          { name: 'ts', kind: 'string', description: 'The message timestamp.' },
+          { name: 'user', kind: 'string', description: 'Who wrote it.' },
+          { name: 'text', kind: 'string', description: 'What it says.' },
+          { name: 'permalink', kind: 'string', description: 'The way back to it — readMessage takes this.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'SearchResult',
+        description: 'What a search of Slack came to.',
+        properties: [
+          { name: 'matches', kind: 'array', of: 'SearchMatch', description: 'Capped by limit.' },
+          { name: 'total', kind: 'number', description: 'How many the whole search holds, not how many came back.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Posted',
+        description: 'A message that was posted.',
+        properties: [
+          { name: 'channel', kind: 'string', description: 'Where it landed — resolved, if a #name was passed.' },
+          {
+            name: 'ts',
+            kind: 'string',
+            description: 'Its own timestamp: what react hangs on, and what a reply threads onto.',
+          },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'HostedFile',
+        description: 'A file now on Slack, however it got there.',
+        properties: [
+          { name: 'id', kind: 'string', description: 'The F… id; readAttachment takes it.' },
+          {
+            name: 'permalink',
+            kind: 'string',
+            description: "The link to it. Put this in a later post's attachments to show it again.",
+          },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Attachment',
+        description: 'A file hanging on a message, as a listing describes it.',
+        properties: [
+          { name: 'id', kind: 'string', description: 'What readAttachment takes.' },
+          { name: 'name', kind: 'string', description: 'The filename.' },
+          { name: 'title', kind: 'string', description: 'What Slack shows above it.' },
+          { name: 'filetype', kind: 'string', description: "Slack's own short kind: pdf, png, csv." },
+          { name: 'mimetype', kind: 'string', description: 'What decides whether readAttachment answers text or bytes.' },
+          { name: 'size', kind: 'number', description: 'In bytes.' },
+          { name: 'permalink', kind: 'string', description: 'The link for a person to open.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Attachments',
+        description: 'The files hanging on one message.',
+        properties: [
+          {
+            name: 'files',
+            kind: 'array',
+            of: 'Attachment',
+            description: 'Empty where the message carried none.',
+          },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'AttachmentContent',
+        description: 'One attachment read back — text as text, binary as bytes.',
+        properties: [
+          { name: 'name', kind: 'string', description: 'The filename.' },
+          { name: 'mimetype', kind: 'string', description: 'What it claims to be.' },
+          { name: 'size', kind: 'number', description: 'In bytes.' },
+          {
+            name: 'content',
+            kind: 'string',
+            description: 'The text, where it is a text file. Null for anything binary.',
+          },
+          {
+            name: 'base64',
+            kind: 'string',
+            description: 'The bytes, where it is binary. Null for a text file. Exactly one of these two is set.',
+          },
+        ],
+      }),
+    ];
+  }
+
+  /*
    * What the tool descriptions cannot carry: the half-dozen small habits that
    * separate a message people read from one they scroll past. Each is cheap,
    * none is discoverable from a function signature, and getting them wrong is
@@ -378,7 +539,7 @@ adding a message to anybody's unread count.`,
           { name: 'connection', type: 'string' },
           { name: 'link', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'LinkedMessage',
         run: (connection, link) => {
           const read = orknux.slack.message(connection || this.settings.slack, link);
           if (read.error !== undefined) {
@@ -399,7 +560,7 @@ adding a message to anybody's unread count.`,
           { name: 'connection', type: 'string' },
           { name: 'userId', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'User',
         run: (connection, userId) => {
           const found = orknux.slack.user(connection || this.settings.slack, userId);
           if (found.error !== undefined) {
@@ -422,7 +583,7 @@ adding a message to anybody's unread count.`,
           { name: 'threadTs', type: 'string' },
           { name: 'limit', type: 'number' },
         ],
-        returnType: 'map',
+        returnType: 'Thread',
         run: (connection, channel, threadTs, limit) => {
           const read = orknux.slack.thread(connection || this.settings.slack, channel, threadTs, limit || 20);
           if (read.error !== undefined) {
@@ -448,7 +609,7 @@ adding a message to anybody's unread count.`,
           { name: 'threadTs', type: 'string' },
           { name: 'attachments', type: 'array' },
         ],
-        returnType: 'map',
+        returnType: 'Posted',
         run: (connection, channel, text, threadTs, attachments) => {
           /*
            * Slack attaches a hosted file to a message when the message carries
@@ -507,7 +668,7 @@ adding a message to anybody's unread count.`,
           { name: 'query', type: 'string' },
           { name: 'limit', type: 'number' },
         ],
-        returnType: 'map',
+        returnType: 'SearchResult',
         run: (connection, query, limit) => {
           const found = orknux.slack.search(connection || this.settings.slack, query, limit || 20);
           if (found.error !== undefined) {
@@ -557,7 +718,7 @@ adding a message to anybody's unread count.`,
           { name: 'comment', type: 'string' },
           { name: 'threadTs', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'HostedFile',
         run: (channel, filename, content, comment, threadTs) => {
           if (typeof filename !== 'string' || filename.length === 0) {
             throw new Error('an upload needs a filename');
@@ -610,7 +771,7 @@ adding a message to anybody's unread count.`,
           { name: 'comment', type: 'string' },
           { name: 'threadTs', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'HostedFile',
         run: (channel, filename, base64, comment, threadTs) => {
           if (typeof filename !== 'string' || filename.length === 0) {
             throw new Error('an upload needs a filename');
@@ -659,7 +820,7 @@ adding a message to anybody's unread count.`,
           { name: 'comment', type: 'string' },
           { name: 'threadTs', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'HostedFile',
         run: (channel, url, filename, comment, threadTs) => {
           if (typeof url !== 'string' || !/^https?:\/\//.test(url)) {
             throw new Error('a file is fetched by its http(s) url, and none was passed');
@@ -711,7 +872,7 @@ adding a message to anybody's unread count.`,
           { name: 'title', type: 'string' },
           { name: 'filetype', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'HostedFile',
         run: (channel, url, title, filetype) => {
           if (typeof url !== 'string' || !/^https?:\/\//.test(url)) {
             throw new Error('a remote file needs the http(s) url it lives at');
@@ -750,7 +911,7 @@ adding a message to anybody's unread count.`,
           { name: 'channel', type: 'string' },
           { name: 'ts', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'Attachments',
         run: (channel, ts) => {
           if (typeof ts !== 'string' || ts.length === 0) {
             throw new Error('a message is named by its ts, and none was passed');
@@ -806,7 +967,7 @@ adding a message to anybody's unread count.`,
           'to 5 MB. Answers the file\'s name, mimetype, size, and exactly one of content or base64, ' +
           'the other null. Needs the botToken parameter, with files:read.',
         params: [{ name: 'file', type: 'string' }],
-        returnType: 'map',
+        returnType: 'AttachmentContent',
         run: (file) => {
           const token = tokenOf(this.settings);
           const described = at(slackApi(this.settings, 'files.info', { file: file }), 'file');

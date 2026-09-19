@@ -1,7 +1,8 @@
 <!--
-  The Markdown mark, from simple-icons (CC0-1.0): https://github.com/dcurtis/markdown-mark/tree/360a3657fef7f6ad0b303296a95ad52985caa0d3
+  The Markdown mark: https://github.com/dcurtis/markdown-mark/tree/360a3657fef7f6ad0b303296a95ad52985caa0d3
   The trademark remains Markdown's own, shown here to say what this
-  plugin works with. Regenerate with plugins/icons.mjs; do not hand-edit.
+  plugin works with.
+  Regenerate with plugins/icons.mjs; do not hand-edit.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="currentColor" role="img">
   <title>Markdown</title>

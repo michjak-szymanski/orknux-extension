@@ -177,6 +177,44 @@ that the list is visible.`,
     ];
   }
 
+  /* The list, and one task of it. */
+  objects() {
+    return [
+      new OrknuxObject({
+        name: 'Task',
+        description: 'One item on the list.',
+        properties: [
+          {
+            name: 'id',
+            kind: 'number',
+            description: 'Assigned once and never changed — reordering does not renumber anything.',
+          },
+          { name: 'title', kind: 'string', description: 'The outcome, not the activity.' },
+          { name: 'done', kind: 'boolean', description: 'Whether it has been completed.' },
+          {
+            name: 'notes',
+            kind: 'array',
+            of: 'string',
+            description: 'Findings, decisions and blockers, oldest first. Nothing is ever overwritten.',
+          },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'List',
+        description: 'The whole list as it stands.',
+        properties: [
+          { name: 'tasks', kind: 'array', of: 'Task', description: 'In working order.' },
+          {
+            name: 'remaining',
+            kind: 'number',
+            description: 'How many are not done. Above zero means the job is not finished.',
+          },
+        ],
+      }),
+    ];
+  }
+
   /* The agents' surface, which is the whole point of this plugin: all five verbs, fronted. */
   tools() {
     return [
@@ -200,7 +238,7 @@ that the list is visible.`,
           'go; call again whenever new work surfaces mid-job. Answers the whole list with each ' +
           'task\'s id.',
         params: [{ name: 'titles', type: 'array' }],
-        returnType: 'map',
+        returnType: 'List',
         run: (titles) => {
           const named = (Array.isArray(titles) ? titles : [])
             .filter((one) => typeof one === 'string')
@@ -228,7 +266,7 @@ that the list is visible.`,
           'before declaring the work finished - a remaining count above zero is unfinished work. ' +
           'Empty when nothing was ever added.',
         params: [],
-        returnType: 'map',
+        returnType: 'List',
         run: () => answered(loaded()),
       }),
 
@@ -239,7 +277,7 @@ that the list is visible.`,
           'go; tasks left unmentioned keep their order after the ones named - so moving one urgent ' +
           'task to the front is passing just its id. Answers the whole list, reordered.',
         params: [{ name: 'order', type: 'array' }],
-        returnType: 'map',
+        returnType: 'List',
         run: (order) => {
           const asked = Array.isArray(order) ? order : [];
           if (asked.length === 0) {
@@ -271,7 +309,7 @@ that the list is visible.`,
           { name: 'task', type: 'number' },
           { name: 'text', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'Task',
         run: (task, text) => {
           const said = typeof text === 'string' ? text.trim() : '';
           if (said.length === 0) {
@@ -293,7 +331,7 @@ that the list is visible.`,
           'remaining count is how the state of the job is read. Where the outcome is worth keeping, ' +
           'add a note first. Already-done counts as done. Answers the whole list.',
         params: [{ name: 'task', type: 'number' }],
-        returnType: 'map',
+        returnType: 'List',
         run: (task) => {
           const list = loaded();
           taskOf(list, task).done = true;

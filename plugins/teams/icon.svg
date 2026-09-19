@@ -1,7 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-  <title>Two people, one behind the other</title>
-  <circle cx="9" cy="8.5" r="3.25"/>
-  <path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/>
-  <circle cx="17.5" cy="10" r="2.5"/>
-  <path d="M16.5 15.2a4.5 4.5 0 0 1 4 4.3"/>
+<!--
+  The Microsoft mark: https://fontawesome.com/icons/microsoft?f=brands
+  The trademark remains Microsoft's own, shown here to say what this
+  plugin works with.
+  Font Awesome Free (https://fontawesome.com) — icons licensed CC BY 4.0.
+  Regenerate with plugins/icons.mjs; do not hand-edit.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" width="24" height="24" fill="currentColor" role="img">
+  <title>Microsoft</title>
+  <path d="M0 32l214.6 0 0 214.6-214.6 0 0-214.6zm233.4 0l214.6 0 0 214.6-214.6 0 0-214.6zM0 265.4l214.6 0 0 214.6-214.6 0 0-214.6zm233.4 0l214.6 0 0 214.6-214.6 0 0-214.6z"/>
 </svg>

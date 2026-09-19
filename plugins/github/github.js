@@ -177,6 +177,279 @@ export default class Github extends OrknuxPlugin {
   }
 
   /*
+   * The shapes these answers actually have.
+   *
+   * `map` says a structure came back and nothing about what is in it, so every
+   * caller reads this file — or guesses — to learn that `patch` can be null
+   * and `checks` is a list. Declared here, each travels with the plugin and
+   * arrives in a workspace under its key: `github_PullRequest`.
+   *
+   * One thing deliberately stays a map. `agentTask` passes GitHub's own answer
+   * through because that API is in public preview and its shape still moves —
+   * a shape declared here would be a promise this file cannot keep.
+   */
+  objects() {
+    return [
+      new OrknuxObject({
+        name: 'Delivery',
+        description: "What one webhook delivery is about, flattened so a condition can read it.",
+        properties: [
+          { name: 'event', kind: 'string', description: "GitHub's own event name, from the header." },
+          { name: 'delivery', kind: 'string', description: 'The delivery id, for finding it in the log.' },
+          {
+            name: 'kind',
+            kind: 'string',
+            description: 'pull_request, review_comment, push, or other for anything else.',
+          },
+          { name: 'action', kind: 'string', description: 'opened, closed, synchronize… Null on a push.' },
+          { name: 'repository', kind: 'string', description: 'owner/name.' },
+          { name: 'actor', kind: 'string', description: 'The login that caused it.' },
+          { name: 'title', kind: 'string', description: 'The PR title, the comment body, or the head commit message.' },
+          { name: 'url', kind: 'string', description: 'Where to read whatever this is about.' },
+          { name: 'number', kind: 'number', description: 'The PR number, where there is one.' },
+          { name: 'ref', kind: 'string', description: 'The branch pushed to. Null unless this is a push.' },
+          { name: 'commits', kind: 'number', description: 'How many a push carried. Null unless this is a push.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'ChangedFile',
+        description: 'One file a pull request or a commit touched.',
+        properties: [
+          { name: 'path', kind: 'string', description: 'Where it sits in the repository.' },
+          { name: 'status', kind: 'string', description: 'added, modified, removed, renamed.' },
+          { name: 'additions', kind: 'number', description: 'Lines added.' },
+          { name: 'deletions', kind: 'number', description: 'Lines taken out.' },
+          {
+            name: 'patch',
+            kind: 'string',
+            description: 'The diff GitHub shows. Null for a binary file, or one too large to diff.',
+          },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'PullRequest',
+        description: 'One pull request, whole, with the diff that makes it.',
+        properties: [
+          { name: 'number', kind: 'number', description: 'What it is called on the site.' },
+          { name: 'title', kind: 'string', description: 'The one-line title.' },
+          { name: 'body', kind: 'string', description: 'The description, as GitHub markdown.' },
+          { name: 'state', kind: 'string', description: 'open or closed — merged is its own field.' },
+          { name: 'draft', kind: 'boolean', description: 'Whether it is still marked draft.' },
+          { name: 'merged', kind: 'boolean', description: 'Closed and merged, rather than closed and dropped.' },
+          { name: 'author', kind: 'string', description: 'The login that opened it.' },
+          { name: 'baseRef', kind: 'string', description: 'The branch it would merge into.' },
+          { name: 'headRef', kind: 'string', description: 'The branch it is on.' },
+          { name: 'headSha', kind: 'string', description: 'What buildStatus and reviewComment anchor to.' },
+          { name: 'mergeable', kind: 'boolean', description: 'Null while GitHub is still working it out.' },
+          { name: 'additions', kind: 'number', description: 'Lines added across every file.' },
+          { name: 'deletions', kind: 'number', description: 'Lines taken out across every file.' },
+          { name: 'url', kind: 'string', description: 'The link for a person to open.' },
+          { name: 'files', kind: 'array', of: 'ChangedFile', description: 'Every file it touches, with patches.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Commit',
+        description: 'One commit, whole, with the diff that makes it.',
+        properties: [
+          { name: 'sha', kind: 'string', description: 'The full forty-character sha.' },
+          { name: 'message', kind: 'string', description: 'The whole message, subject and body.' },
+          { name: 'author', kind: 'string', description: 'The name in the commit itself.' },
+          { name: 'login', kind: 'string', description: 'The GitHub account, where one is matched.' },
+          { name: 'date', kind: 'string', description: 'When it was authored, ISO 8601.' },
+          { name: 'parents', kind: 'array', of: 'string', description: 'Parent shas — two for a merge.' },
+          { name: 'additions', kind: 'number', description: 'Lines added.' },
+          { name: 'deletions', kind: 'number', description: 'Lines taken out.' },
+          { name: 'url', kind: 'string', description: 'The link for a person to open.' },
+          { name: 'files', kind: 'array', of: 'ChangedFile', description: 'Every file it touches, with patches.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'CommitSummary',
+        description: 'A commit as a list answers it, without the diff.',
+        properties: [
+          { name: 'sha', kind: 'string', description: 'The full sha; openCommit takes it.' },
+          { name: 'message', kind: 'string', description: 'The whole message.' },
+          { name: 'author', kind: 'string', description: 'The name in the commit itself.' },
+          { name: 'date', kind: 'string', description: 'ISO 8601.' },
+          { name: 'url', kind: 'string', description: 'The link for a person to open.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Reporter',
+        description: 'One thing that reported on a commit — a status context, or a check run.',
+        properties: [
+          { name: 'name', kind: 'string', description: 'What the check calls itself.' },
+          { name: 'state', kind: 'string', description: 'A commit status: success, failure, pending, error.' },
+          { name: 'status', kind: 'string', description: 'A check run: queued, in_progress, completed.' },
+          { name: 'conclusion', kind: 'string', description: 'A finished check: success, failure, cancelled…' },
+          { name: 'description', kind: 'string', description: 'What it said, where it said anything.' },
+          { name: 'url', kind: 'string', description: 'Where to read the run.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'BuildStatus',
+        description: 'What every build said about one commit, both reporting schemes together.',
+        properties: [
+          {
+            name: 'overall',
+            kind: 'string',
+            description: 'failure, pending, success, or none where nothing has reported.',
+          },
+          { name: 'sha', kind: 'string', description: 'The commit this is about.' },
+          { name: 'statuses', kind: 'array', of: 'Reporter', description: 'From the commit status API.' },
+          { name: 'checks', kind: 'array', of: 'Reporter', description: 'From check runs — Actions, and apps.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Repo',
+        description: 'One repository, as a list answers it.',
+        properties: [
+          { name: 'name', kind: 'string', description: 'Without the owner.' },
+          { name: 'fullName', kind: 'string', description: 'owner/name, which every call here takes.' },
+          { name: 'description', kind: 'string', description: 'Its one-line description, or null.' },
+          { name: 'defaultBranch', kind: 'string', description: 'What an empty ref means.' },
+          { name: 'private', kind: 'boolean', description: 'Whether the token is seeing it privately.' },
+          { name: 'pushed', kind: 'string', description: 'When it last changed, ISO 8601.' },
+          { name: 'url', kind: 'string', description: 'The link for a person to open.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'PullMatch',
+        description: 'A pull request as a search answers it.',
+        properties: [
+          { name: 'number', kind: 'number', description: 'openPull takes it.' },
+          { name: 'title', kind: 'string', description: 'The one-line title.' },
+          { name: 'state', kind: 'string', description: 'open or closed.' },
+          { name: 'draft', kind: 'boolean', description: 'Whether it is still marked draft.' },
+          { name: 'repository', kind: 'string', description: 'owner/name.' },
+          { name: 'author', kind: 'string', description: 'The login that opened it.' },
+          { name: 'updated', kind: 'string', description: 'ISO 8601.' },
+          { name: 'url', kind: 'string', description: 'The link for a person to open.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'CodeMatch',
+        description: 'A file a code search matched, with the passages that matched.',
+        properties: [
+          { name: 'repository', kind: 'string', description: 'owner/name.' },
+          { name: 'path', kind: 'string', description: 'From the repository root; openFile takes it.' },
+          { name: 'url', kind: 'string', description: 'The link for a person to open.' },
+          {
+            name: 'fragments',
+            kind: 'array',
+            of: 'string',
+            description: 'The matching passages — the half of a code search worth reading.',
+          },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'CommitMatch',
+        description: 'A commit a message search matched.',
+        properties: [
+          { name: 'repository', kind: 'string', description: 'owner/name.' },
+          { name: 'sha', kind: 'string', description: 'openCommit takes it.' },
+          { name: 'message', kind: 'string', description: 'The whole message.' },
+          { name: 'author', kind: 'string', description: 'The name in the commit itself.' },
+          { name: 'date', kind: 'string', description: 'ISO 8601.' },
+          { name: 'url', kind: 'string', description: 'The link for a person to open.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'PullSearch',
+        description: 'What a pull request search came to.',
+        properties: [
+          {
+            name: 'total',
+            kind: 'number',
+            description: 'How many the whole search holds, not how many came back.',
+          },
+          { name: 'matches', kind: 'array', of: 'PullMatch', description: 'Capped by limit.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'CodeSearch',
+        description: 'What a code search came to.',
+        properties: [
+          { name: 'total', kind: 'number', description: 'How many the whole search holds.' },
+          { name: 'matches', kind: 'array', of: 'CodeMatch', description: 'Capped by limit.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'CommitSearch',
+        description: 'What a commit search came to.',
+        properties: [
+          { name: 'total', kind: 'number', description: 'How many the whole search holds.' },
+          { name: 'matches', kind: 'array', of: 'CommitMatch', description: 'Capped by limit.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'RepoList',
+        description: 'The repositories an owner has, most recently pushed first.',
+        properties: [{ name: 'repos', kind: 'array', of: 'Repo', description: 'Capped by limit.' }],
+      }),
+
+      new OrknuxObject({
+        name: 'FileList',
+        description: 'Every file path in a repository at one ref, from its git tree.',
+        properties: [
+          {
+            name: 'ref',
+            kind: 'string',
+            description: 'What was actually read — the default branch, where none was named.',
+          },
+          { name: 'files', kind: 'array', of: 'string', description: 'Paths from the repository root.' },
+          { name: 'count', kind: 'number', description: 'How many paths came back.' },
+          {
+            name: 'truncated',
+            kind: 'boolean',
+            description: 'True where the tree was too large for GitHub to give whole, so files is incomplete.',
+          },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'FileHistory',
+        description: 'The commits that touched one file, newest first.',
+        properties: [{ name: 'commits', kind: 'array', of: 'CommitSummary', description: 'Capped by limit.' }],
+      }),
+
+      new OrknuxObject({
+        name: 'AgentTask',
+        description: 'A Copilot cloud agent task as it was started.',
+        properties: [
+          { name: 'id', kind: 'string', description: 'What agentTask takes to follow it.' },
+          { name: 'state', kind: 'string', description: 'queued, in_progress, completed, failed…' },
+          { name: 'url', kind: 'string', description: 'Where to watch it.' },
+          { name: 'created', kind: 'string', description: 'ISO 8601.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Comment',
+        description: 'A comment that was posted.',
+        properties: [
+          { name: 'id', kind: 'number', description: 'What replyToComment takes to thread onto it.' },
+          { name: 'url', kind: 'string', description: 'The link for a person to open.' },
+        ],
+      }),
+    ];
+  }
+
+  /*
    * Two pages, because there are two jobs here that go wrong in different
    * ways. Reviewing is a reading discipline; driving the Copilot agent is an
    * asynchronous protocol with a steering mechanism nobody guesses.
@@ -363,7 +636,7 @@ not obviously say so.`,
           { name: 'headers', type: 'map' },
           { name: 'body', type: 'map' },
         ],
-        returnType: 'map',
+        returnType: 'Delivery',
 
         /*
          * One answer for the three events the webhook is set up to send, so a
@@ -432,7 +705,7 @@ not obviously say so.`,
           { name: 'query', type: 'string' },
           { name: 'limit', type: 'number' },
         ],
-        returnType: 'map',
+        returnType: 'PullSearch',
         run: (query, limit) => {
           const asked = `${scoped(this.settings, query)} is:pr`;
           const found = read(this.settings, {
@@ -465,7 +738,7 @@ not obviously say so.`,
           { name: 'owner', type: 'string' },
           { name: 'limit', type: 'number' },
         ],
-        returnType: 'map',
+        returnType: 'RepoList',
         run: (owner, limit) => {
           const query = `per_page=${pageSize(limit, 30)}&sort=pushed`;
           const fallback = this.settings.organization;
@@ -518,7 +791,7 @@ not obviously say so.`,
           { name: 'repo', type: 'string' },
           { name: 'ref', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'FileList',
         run: (owner, repo, ref) => {
           const base = repoPath(this.settings, owner, repo);
           let marked = ref;
@@ -547,7 +820,7 @@ not obviously say so.`,
           { name: 'repo', type: 'string' },
           { name: 'number', type: 'number' },
         ],
-        returnType: 'map',
+        returnType: 'PullRequest',
         run: (owner, repo, number) => {
           const base = repoPath(this.settings, owner, repo);
           const pull = read(this.settings, { path: `${base}/pulls/${number}` }).json;
@@ -583,7 +856,7 @@ not obviously say so.`,
           { name: 'query', type: 'string' },
           { name: 'limit', type: 'number' },
         ],
-        returnType: 'map',
+        returnType: 'CodeSearch',
         run: (query, limit) => {
           const found = read(this.settings, {
             path: `/search/code?q=${encodeURIComponent(scoped(this.settings, query))}&per_page=${pageSize(limit, 20)}`,
@@ -614,7 +887,7 @@ not obviously say so.`,
           { name: 'query', type: 'string' },
           { name: 'limit', type: 'number' },
         ],
-        returnType: 'map',
+        returnType: 'CommitSearch',
         run: (query, limit) => {
           const found = read(this.settings, {
             path: `/search/commits?q=${encodeURIComponent(scoped(this.settings, query))}&per_page=${pageSize(limit, 20)}`,
@@ -645,7 +918,7 @@ not obviously say so.`,
           { name: 'repo', type: 'string' },
           { name: 'sha', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'Commit',
         run: (owner, repo, sha) => {
           const base = repoPath(this.settings, owner, repo);
           const commit = read(this.settings, {
@@ -678,7 +951,7 @@ not obviously say so.`,
           { name: 'repo', type: 'string' },
           { name: 'ref', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'BuildStatus',
         run: (owner, repo, ref) => {
           const base = repoPath(this.settings, owner, repo);
           const marked = encodeURIComponent(ref);
@@ -763,7 +1036,7 @@ not obviously say so.`,
           { name: 'path', type: 'string' },
           { name: 'limit', type: 'number' },
         ],
-        returnType: 'map',
+        returnType: 'FileHistory',
         run: (owner, repo, path, limit) => {
           const base = repoPath(this.settings, owner, repo);
           const commits = read(this.settings, {
@@ -795,7 +1068,7 @@ not obviously say so.`,
           { name: 'prompt', type: 'string' },
           { name: 'baseRef', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'AgentTask',
         run: (owner, repo, prompt, baseRef) => {
           if (typeof prompt !== 'string' || prompt.trim().length === 0) {
             throw new Error('an agent task needs a prompt saying what to do');
@@ -869,7 +1142,7 @@ not obviously say so.`,
           { name: 'pullNumber', type: 'number' },
           { name: 'message', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'Comment',
         run: (owner, repo, pullNumber, message) => {
           const base = repoPath(this.settings, owner, repo);
           /*
@@ -900,7 +1173,7 @@ not obviously say so.`,
           { name: 'number', type: 'number' },
           { name: 'text', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'Comment',
         run: (owner, repo, number, text) => {
           const base = repoPath(this.settings, owner, repo);
           const made = read(this.settings, {
@@ -928,7 +1201,7 @@ not obviously say so.`,
           { name: 'line', type: 'number' },
           { name: 'text', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'Comment',
         run: (owner, repo, number, path, line, text) => {
           const base = repoPath(this.settings, owner, repo);
           /*
@@ -967,7 +1240,7 @@ not obviously say so.`,
           { name: 'commentId', type: 'number' },
           { name: 'text', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'Comment',
         run: (owner, repo, number, commentId, text) => {
           const base = repoPath(this.settings, owner, repo);
           const made = read(this.settings, {

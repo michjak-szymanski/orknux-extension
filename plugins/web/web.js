@@ -207,6 +207,42 @@ export default class Web extends OrknuxPlugin {
     return ['NETWORK_REQUEST'];
   }
 
+  /* The shapes a search answers, so a caller need not read this file to know them. */
+  objects() {
+    return [
+      new OrknuxObject({
+        name: 'Result',
+        description: 'One page a search turned up.',
+        properties: [
+          { name: 'title', kind: 'string', description: 'The title, as the index has it.' },
+          { name: 'url', kind: 'string', description: 'Cite this rather than answering from memory.' },
+          { name: 'snippet', kind: 'string', description: 'A readable passage from the page.' },
+          {
+            name: 'score',
+            kind: 'number',
+            description: 'How well it matched, where the backend says so. Null from Brave.',
+          },
+          { name: 'published', kind: 'string', description: 'When the page is dated, where that is known.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Search',
+        description: 'What one web search came to.',
+        properties: [
+          { name: 'backend', kind: 'string', description: 'Which index answered: tavily or brave.' },
+          { name: 'query', kind: 'string', description: 'What was actually searched for.' },
+          {
+            name: 'answer',
+            kind: 'string',
+            description: 'A summary composed over the results, where the workspace turned that on.',
+          },
+          { name: 'results', kind: 'array', of: 'Result', description: 'Best first, capped by limit.' },
+        ],
+      }),
+    ];
+  }
+
   /* The agents' surface: the one call, fronted. A proxy, so everything stays the function's own. */
   tools() {
     return [new OrknuxFunctionTool({ function: 'search' })];
@@ -227,7 +263,7 @@ export default class Web extends OrknuxPlugin {
           { name: 'query', type: 'string' },
           { name: 'limit', type: 'number' },
         ],
-        returnType: 'map',
+        returnType: 'Search',
         run: (query, limit) => {
           const asked = typeof query === 'string' ? query.trim() : '';
           if (asked.length === 0) {

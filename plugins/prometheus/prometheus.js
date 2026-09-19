@@ -147,6 +147,28 @@ export default class Prometheus extends OrknuxPlugin {
     return ['NETWORK_REQUEST'];
   }
 
+  /*
+   * One shape, and one deliberate absence.
+   *
+   * `query` keeps answering a map because its result genuinely has no fixed
+   * form: a vector element carries `metric` keyed by whatever labels the
+   * series happens to have, and an array here needs an `of` that nothing
+   * could supply. Prometheus's own shape, passed through, is the honest
+   * answer — and it is the one every PromQL reader already knows.
+   */
+  objects() {
+    return [
+      new OrknuxObject({
+        name: 'Metrics',
+        description: 'The metric names a server knows — the vocabulary a query is written in.',
+        properties: [
+          { name: 'metrics', kind: 'array', of: 'string', description: 'Alphabetical, capped by limit.' },
+          { name: 'count', kind: 'number', description: 'How many there were before limit capped them.' },
+        ],
+      }),
+    ];
+  }
+
   /* The agents' surface: both calls, fronted. Proxies, so everything stays the functions' own. */
   tools() {
     return [
@@ -168,7 +190,7 @@ export default class Prometheus extends OrknuxPlugin {
           { name: 'match', type: 'string' },
           { name: 'limit', type: 'number' },
         ],
-        returnType: 'map',
+        returnType: 'Metrics',
         run: (match, limit) => {
           let path = '/api/v1/label/__name__/values';
           if (typeof match === 'string' && match.length > 0) {

@@ -294,9 +294,9 @@ test('the jira plugin declares what the server would accept', async () => {
    */
   assert.deepEqual(
     inspected.objects.map((shape) => shape.name),
-    ['Issue'],
+    ['Search', 'Comment', 'Moved', 'Raised', 'Issue'],
   );
-  const issue = inspected.objects[0];
+  const issue = inspected.objects.find((shape) => shape.name === 'Issue');
   assert.equal(issue.properties.length, 13);
   /* `of` is what stops a shape being flat, and labels is the one that has it. */
   const labels = issue.properties.find((property) => property.name === 'labels');
@@ -310,14 +310,20 @@ test('the jira plugin declares what the server would accept', async () => {
     );
   }
 
-  assert.equal(
-    inspected.functions.find((one) => one.name === 'openIssue').returnType,
-    'Issue',
+  assert.deepEqual(
+    inspected.functions.map((one) => one.returnType),
+    ['Search', 'Issue', 'Comment', 'Moved', 'Raised'],
   );
-  assert.equal(
-    inspected.tools.find((one) => one.name === 'openIssue').returnType,
-    'Issue',
+  /* A proxy carries its function's own return, so the tools agree by construction. */
+  assert.deepEqual(
+    inspected.tools.map((one) => one.returnType),
+    ['Search', 'Issue', 'Comment', 'Moved', 'Raised'],
   );
+  /* `Search` holds the same shape `openIssue` answers, rather than a second one. */
+  const search = inspected.objects.find((shape) => shape.name === 'Search');
+  const issues = search.properties.find((property) => property.name === 'issues');
+  assert.equal(issues.kind, 'array');
+  assert.equal(issues.of, 'Issue');
 });
 
 test('a jira call says what is missing, and picks its search endpoint by deployment', async () => {

@@ -239,6 +239,40 @@ export default class OrknuxDate extends OrknuxPlugin {
     return [];
   }
 
+  /* The account this plugin gives of one moment. */
+  objects() {
+    return [
+      new OrknuxObject({
+        name: 'Moment',
+        description: 'One instant, as the working calendar reads it.',
+        properties: [
+          { name: 'iso', kind: 'string', description: 'The whole instant, carrying the zone offset.' },
+          { name: 'date', kind: 'string', description: 'YYYY-MM-DD in the working timezone.' },
+          { name: 'time', kind: 'string', description: 'HH:MM in the working timezone.' },
+          { name: 'timezone', kind: 'string', description: 'Which zone the fields above are read in.' },
+          {
+            name: 'offsetMinutes',
+            kind: 'number',
+            description: 'How far ahead of UTC that zone is at this instant — it moves with the season.',
+          },
+          { name: 'weekday', kind: 'string', description: 'monday through sunday, in lower case.' },
+          { name: 'weekdayNumber', kind: 'number', description: '0 for Sunday, as getUTCDay counts.' },
+          { name: 'week', kind: 'number', description: 'The ISO-8601 week number.' },
+          { name: 'month', kind: 'number', description: '1 through 12.' },
+          { name: 'quarter', kind: 'number', description: '1 through 4.' },
+          { name: 'year', kind: 'number', description: 'The calendar year.' },
+          { name: 'weekend', kind: 'boolean', description: 'By the workspace weekend setting, not by assumption.' },
+          { name: 'holiday', kind: 'boolean', description: 'Whether this date is in the configured holidays.' },
+          {
+            name: 'businessDay',
+            kind: 'boolean',
+            description: 'Neither a weekend nor a holiday — what the business-day arithmetic counts.',
+          },
+        ],
+      }),
+    ];
+  }
+
   /* The agents' surface: all of it. Date arithmetic is exactly what a model should not do in its head. */
   tools() {
     return [
@@ -372,7 +406,7 @@ export default class OrknuxDate extends OrknuxPlugin {
           'date, time, weekday, week, quarter, year, and whether today is a weekend, a holiday or a ' +
           'business day. Ask this rather than assuming what day it is.',
         params: [{ name: 'timezone', type: 'string' }],
-        returnType: 'map',
+        returnType: 'Moment',
         run: (timezone) => {
           const zone = this.zoneOf(timezone);
           return this.described(new Date(), zone);
@@ -390,7 +424,7 @@ export default class OrknuxDate extends OrknuxPlugin {
           { name: 'when', type: 'string' },
           { name: 'timezone', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'Moment',
         run: (when, timezone) => {
           const zone = this.zoneOf(timezone);
           return this.described(this.instantOf(when, zone, 'when'), zone);

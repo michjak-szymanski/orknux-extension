@@ -292,6 +292,30 @@ export default class Teams extends OrknuxPlugin {
     ];
   }
 
+  /* The one shape this plugin answers; everything else here is a string. */
+  objects() {
+    return [
+      new OrknuxObject({
+        name: 'Sender',
+        description: 'Who said it and where — the fields a reply has to be addressed with.',
+        properties: [
+          { name: 'user', kind: 'string', description: 'Their display name.' },
+          {
+            name: 'userId',
+            kind: 'string',
+            description: 'The id Teams knows them by, which a mention in a reply must name.',
+          },
+          { name: 'aadObjectId', kind: 'string', description: 'Their directory object id, where Teams sent one.' },
+          { name: 'conversationId', kind: 'string', description: 'The conversation the activity arrived in.' },
+          { name: 'teamId', kind: 'string', description: 'What channelUrl and replyUrl take.' },
+          { name: 'channelId', kind: 'string', description: 'What channelUrl and replyUrl take.' },
+          { name: 'tenantId', kind: 'string', description: 'Which tenant it came from.' },
+          { name: 'messageId', kind: 'string', description: 'What replyUrl threads a reply onto.' },
+        ],
+      }),
+    ];
+  }
+
   functions() {
     return [
       new OrknuxFunction({
@@ -356,7 +380,7 @@ export default class Teams extends OrknuxPlugin {
         name: 'sender',
         description: 'Who said it and where, as the fields a reply has to be addressed with.',
         params: [{ name: 'activity', type: 'map' }],
-        returnType: 'map',
+        returnType: 'Sender',
         run: (activity) => {
           const channelData = field(activity, 'channelData');
           return {

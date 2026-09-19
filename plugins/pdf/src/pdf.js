@@ -574,6 +574,25 @@ export default class Pdf extends OrknuxPlugin {
     return [];
   }
 
+  /* What a written document comes back as. */
+  objects() {
+    return [
+      new OrknuxObject({
+        name: 'Document',
+        description: 'A PDF that was written.',
+        properties: [
+          {
+            name: 'base64',
+            kind: 'string',
+            description: 'The file itself. Hand it to slack_uploadBinary with a .pdf filename.',
+          },
+          { name: 'pages', kind: 'number', description: 'How many pages it came to.' },
+          { name: 'bytes', kind: 'number', description: 'How large the file is, before base64.' },
+        ],
+      }),
+    ];
+  }
+
   /* The agents' surface: the one call, fronted. A proxy, so everything stays the function's own. */
   tools() {
     return [new OrknuxFunctionTool({ function: 'fromHtml' })];
@@ -595,7 +614,7 @@ export default class Pdf extends OrknuxPlugin {
           { name: 'html', type: 'string' },
           { name: 'title', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'Document',
         run: (html, title) => {
           if (typeof html !== 'string' || html.trim().length === 0) {
             throw new Error('there is no html to lay out');

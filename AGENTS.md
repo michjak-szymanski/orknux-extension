@@ -85,37 +85,34 @@ Every directory under `plugins/` holds the same four things, and
 | `icon.svg` | the face beside the name, drawn in `currentColor` so one file suits a light listing and a dark one |
 | `lib/`, `src/` | libraries it ships with, or the source a built plugin is bundled from |
 
-Four of the icons are the real marks — GitHub, Confluence, Prometheus, Mermaid
-— written by `plugins/icons.mjs` out of [simple-icons], which is CC0 while each
-trademark stays its owner's. Using one to say what a plugin works with is the
-use trademark law has always allowed, and `npm run build:icons` regenerates
-them; do not hand-edit those four.
+Eight of the icons are the real marks, from two collections, and
+`plugins/icons.mjs` writes them all — `npm run build:icons` regenerates them,
+so do not hand-edit those eight.
 
-**Slack's and Microsoft's are not there, and that is not an oversight.**
-simple-icons does not ship either — Slack's is tracked under a *permission
-required* label — but the decisive reason is Slack's own brand terms rather
-than anybody else's policy. Two lines of them rule this out:
+Six come from [simple-icons], which is CC0 while each trademark stays its
+owner's. **Slack's and Microsoft's come from [Font Awesome Free] instead**,
+which is CC BY 4.0 — so those two files carry the attribution the licence asks
+for, in a comment. simple-icons will not carry either mark: Slack asked for
+theirs to be removed and Microsoft's went the same way. What Font Awesome
+publishes is its own monochrome rendering of each, under a licence that permits
+redistributing it, and the difference from the vendors' own artwork is worth
+stating rather than glossing. Anyone wanting the exact assets should take them
+from those brand portals under those companies' terms and drop them in over the
+file; the manifest already points at `icon.svg`. `teams` wears the Microsoft
+mark because no Teams-specific glyph is published.
 
-- *"Most uses require a specific written license"*, which redistributing the
-  mark in a public Apache-2.0 repository is not covered by; and
-- *"Don't modify the marks"*, spelled out to include changing their colours —
-  which is exactly what the `currentColor` treatment below does to every icon
-  here.
+`pdf`, `todo`, `date` and `web` front no service and have no mark to use.
+`markdown` is branded for a plainer reason: its mark is public domain, not a
+trademark anybody holds.
 
-So the second point would bite even with a licence: an official Slack mark
-could not join this set on the set's own terms. It would have to ship
-unmodified and full-colour, as a deliberate exception, from
-[Slack's brand portal](https://brand.slackhq.com/logo) — and the
-`currentColor` assertion in `manifests.test.js` would need to make room for it.
-Microsoft's guidelines are the same shape. Until somebody takes that on,
-`slack` and `teams` wear drawn glyphs. `pdf`, `todo`, `date` and `web` front no
-service and never had a mark to use.
+All twelve are drawn in `currentColor` so one file suits a light listing and a
+dark one — half these marks are near-black and would vanish on a dark page.
+Both collections publish monochrome single-path glyphs, so this uses them as
+published rather than recolouring a full-colour mark. A fill attribute also
+survives the sanitizing a marketplace does to uploaded markup, where a
+`<style>` block carrying a media query might not.
 
-All eight are drawn in `currentColor` rather than a brand hex: half the marks
-are near-black and would vanish on a dark listing, and a fill attribute
-survives the sanitizing a marketplace does to uploaded markup where a `<style>`
-block carrying a media query might not.
-
+[Font Awesome Free]: https://fontawesome.com
 [simple-icons]: https://simpleicons.org
 
 `plugin.json` is the marketplace's file, not ours: its shape is

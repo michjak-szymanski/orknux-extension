@@ -84,6 +84,35 @@ export default class Mermaid extends OrknuxPlugin {
     return [];
   }
 
+  /* What a drawing comes back as, and what a link to one looks like. */
+  objects() {
+    return [
+      new OrknuxObject({
+        name: 'Drawing',
+        description: 'A diagram rendered here, in the sandbox.',
+        properties: [
+          {
+            name: 'svg',
+            kind: 'string',
+            description: 'The SVG itself. Upload it with a .svg filename and it shows as an image.',
+          },
+          { name: 'bytes', kind: 'number', description: 'How long that text is.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Links',
+        description: 'Urls that render a diagram elsewhere, carrying its source inside them.',
+        properties: [
+          { name: 'image', kind: 'string', description: 'A PNG from mermaid.ink.' },
+          { name: 'svg', kind: 'string', description: 'The same as SVG.' },
+          { name: 'editor', kind: 'string', description: 'Opens the source in the mermaid live editor.' },
+          { name: 'markdown', kind: 'string', description: 'The image, ready to paste into a GitHub comment.' },
+        ],
+      }),
+    ];
+  }
+
   /* The agents' surface: both calls, fronted. Proxies, so everything stays the functions' own. */
   tools() {
     return [
@@ -108,7 +137,7 @@ export default class Mermaid extends OrknuxPlugin {
           { name: 'source', type: 'string' },
           { name: 'theme', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'Drawing',
         run: (source, theme) => {
           if (typeof source !== 'string' || source.trim().length === 0) {
             throw new Error('there is no diagram source to render');
@@ -156,7 +185,7 @@ export default class Mermaid extends OrknuxPlugin {
           { name: 'source', type: 'string' },
           { name: 'theme', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'Links',
         run: (source, theme) => {
           if (typeof source !== 'string' || source.trim().length === 0) {
             throw new Error('there is no diagram source to link');

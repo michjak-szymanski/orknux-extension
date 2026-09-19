@@ -278,6 +278,47 @@ export default class Jira extends OrknuxPlugin {
   objects() {
     return [
       new OrknuxObject({
+        name: 'Search',
+        description: 'What a JQL search came to.',
+        properties: [
+          {
+            name: 'total',
+            kind: 'number',
+            description: 'How many the whole search holds. Null on Cloud, which no longer says.',
+          },
+          { name: 'issues', kind: 'array', of: 'Issue', description: 'Capped by limit.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Comment',
+        description: 'A comment that was added to an issue.',
+        properties: [
+          { name: 'id', kind: 'string', description: 'What Jira calls it.' },
+          { name: 'url', kind: 'string', description: 'A link that opens the issue at this comment.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Moved',
+        description: 'An issue after it was transitioned.',
+        properties: [
+          { name: 'key', kind: 'string', description: 'The issue that moved.' },
+          { name: 'status', kind: 'string', description: 'Where it ended up.' },
+          { name: 'url', kind: 'string', description: 'The link for a person to open.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Raised',
+        description: 'An issue that was just created.',
+        properties: [
+          { name: 'key', kind: 'string', description: 'PROJ-123, which every other call takes.' },
+          { name: 'url', kind: 'string', description: 'The link for a person to open.' },
+        ],
+      }),
+
+      new OrknuxObject({
         name: 'Issue',
         description: 'One Jira issue, as this plugin answers it.',
         properties: [
@@ -408,7 +449,7 @@ what happened, what was expected, and how to see it — in that order.`,
           { name: 'jql', type: 'string' },
           { name: 'limit', type: 'number' },
         ],
-        returnType: 'map',
+        returnType: 'Search',
         run: (jql, limit) => {
           const asked = typeof jql === 'string' ? jql.trim() : '';
           if (asked.length === 0) {
@@ -479,7 +520,7 @@ what happened, what was expected, and how to see it — in that order.`,
           { name: 'key', type: 'string' },
           { name: 'text', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'Comment',
         run: (key, text) => {
           const named = typeof key === 'string' ? key.trim() : '';
           const said = typeof text === 'string' ? text.trim() : '';
@@ -513,7 +554,7 @@ what happened, what was expected, and how to see it — in that order.`,
           { name: 'key', type: 'string' },
           { name: 'to', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'Moved',
         run: (key, to) => {
           const named = typeof key === 'string' ? key.trim() : '';
           const wanted = typeof to === 'string' ? to.trim().toLowerCase() : '';
@@ -574,7 +615,7 @@ what happened, what was expected, and how to see it — in that order.`,
           { name: 'summary', type: 'string' },
           { name: 'description', type: 'string' },
         ],
-        returnType: 'map',
+        returnType: 'Raised',
         run: (project, type, summary, description) => {
           const said = typeof summary === 'string' ? summary.trim() : '';
           if (said.length === 0) {
