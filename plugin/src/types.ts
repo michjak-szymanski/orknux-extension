@@ -312,6 +312,15 @@ export interface OrknuxPluginInstance {
   /** What it asks the server to do on its behalf. */
   capabilities(): OrknuxCapability[];
 
+  /**
+   * The library files it ships with, as paths relative to its own file:
+   * `lib/util.js` or `./lib/util.js`. The complete list — every shipped file
+   * is declared, every relative import resolves within it, and whoever loads
+   * the plugin is shown it and has to allow it. No absolute paths, no URLs,
+   * no `..`, no bare specifiers.
+   */
+  libraries(): string[];
+
   /** What the workspace answered its parameters with, for the length of a call. */
   readonly settings: OrknuxSettings;
 }
@@ -437,6 +446,34 @@ export type OrknuxResponse =
     };
 
 /**
+ * A binary answer: the bytes as base64, and what they claim to be. Base64 is
+ * the one shape bytes have in a sandbox where everything crosses as text.
+ */
+export type OrknuxBinaryResponse =
+  | {
+      status: number;
+      headers: Record<string, string>;
+      /** The answer's bytes, base64-encoded. */
+      base64: string;
+      /** How many bytes that decodes to. */
+      size: number;
+      /** The answer's own content-type header, or null where it sent none. */
+      contentType: string | null;
+      error?: undefined;
+    }
+  | {
+      error: string;
+      status?: undefined;
+      headers?: undefined;
+      base64?: undefined;
+      size?: undefined;
+      contentType?: undefined;
+    };
+
+/** What `orknux.session.store.put` answered: stored, or refused in a sentence. */
+export type OrknuxStorePut = { ok: true; error?: undefined } | { error: string; ok?: undefined };
+
+/**
  * A connection argument as the Slack helpers take it: the handle out of
  * `settings`, or a bare id where that is what a trigger handed over. The helper
  * reads the id off an object and passes anything else through, so
@@ -495,9 +532,10 @@ export interface OrknuxHelpers {
 
     /**
      * Search Slack's messages, the way the search box does. Needs
-     * `SLACK_SEARCH` — and, from Slack's own side, a user token: bot tokens
-     * are refused with `not_allowed_token_type`, which comes back as the
-     * error.
+     * `SLACK_SEARCH` — and, from Slack's own side, a user token: the
+     * connection's User Token field is what a search runs on, and one
+     * without it falls back to the bot token, whose `not_allowed_token_type`
+     * comes back as the error.
      */
     search(connection: SlackConnectionArgument, query: string, limit?: number): SlackSearchResult;
   };
@@ -521,6 +559,10 @@ export interface OrknuxHelpers {
             method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD';
             headers?: Record<string, string>;
             body?: string | Record<string, unknown> | readonly unknown[];
+            /** Base64 whose decoded bytes are the body; wins over `body`. */
+            bodyBase64?: string;
+            /** Bring the answer's bytes back as `base64` instead of `body`. */
+            binary?: boolean;
           },
     ): OrknuxResponse;
 
@@ -533,6 +575,50 @@ export interface OrknuxHelpers {
       body?: string | Record<string, unknown> | readonly unknown[],
       headers?: Record<string, string>,
     ): OrknuxResponse;
+
+    /**
+     * Sends bytes — a file — given as base64, which is the one shape binary
+     * has on this side of the sandbox. Sent as an octet stream unless
+     * `contentType` or a header says what it is; POST, and capped at 10 MB of
+     * decoded bytes. Needs `NETWORK_REQUEST` like every other request.
+     */
+    upload(
+      url: string,
+      base64: string,
+      contentType?: string,
+      headers?: Record<string, string>,
+    ): OrknuxResponse;
+
+    /**
+     * Fetches binary content — an image, a PDF — and answers `base64`,
+     * `contentType` and `size` instead of `body`, because a PNG does not
+     * survive being read as a string. Capped at 5 MB of bytes.
+     */
+    download(url: string, headers?: Record<string, string>): OrknuxBinaryResponse;
+  };
+
+  /**
+   * The AI session's own store, for a plugin that has to keep its place
+   * between the calls of one conversation.
+   *
+   * What one tool call puts, a later one gets, for as long as the session
+   * lives — and no other session ever sees it. Not a capability: nothing
+   * outside the session is reached by it. The doors only exist where the call
+   * was made inside an AI session; anywhere else `put` answers `{ error }`
+   * saying so and `get` answers null.
+   */
+  session: {
+    store: {
+      /**
+       * Stores one value under a key, replacing what was there. The value
+       * makes the trip as JSON, so what comes back out is a copy — and
+       * anything JSON cannot say (a function, undefined) does not survive.
+       */
+      put(key: string, value: unknown): OrknuxStorePut;
+
+      /** What the key holds, parsed, or null where nothing does. */
+      get(key: string): unknown;
+    };
   };
 
   /**

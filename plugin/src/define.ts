@@ -127,6 +127,15 @@ export interface OrknuxPluginSpec {
    * outside the sandbox where a permission does not.
    */
   capabilities?: readonly OrknuxCapability[];
+
+  /**
+   * The library files it ships with, as paths relative to its own file:
+   * `lib/util.js` or `./lib/util.js`. The complete list — every shipped file
+   * declared, every relative import resolving within it — and whoever loads
+   * the plugin is shown it and has to allow it. Leave it out for a
+   * single-file plugin, which is the common case.
+   */
+  libraries?: readonly string[];
 }
 
 /**
@@ -160,6 +169,7 @@ export function definePlugin(spec: OrknuxPluginSpec): OrknuxPluginConstructor {
   const wanted = spec.parameters === undefined ? [] : [...spec.parameters];
   const asked = spec.permissions === undefined ? [] : [...spec.permissions];
   const askedOf = spec.capabilities === undefined ? [] : [...spec.capabilities];
+  const shipped = spec.libraries === undefined ? [] : [...spec.libraries];
 
   /*
    * Checked here rather than left to the upload: a plugin that declares one name
@@ -229,6 +239,10 @@ export function definePlugin(spec: OrknuxPluginSpec): OrknuxPluginConstructor {
 
     override capabilities(): OrknuxCapability[] {
       return askedOf.slice();
+    }
+
+    override libraries(): string[] {
+      return shipped.slice();
     }
   };
 }

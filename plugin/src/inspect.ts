@@ -45,6 +45,7 @@ export interface Inspection extends Declaration {
   parameters: DeclaredParameter[];
   permissions: string[];
   capabilities: string[];
+  libraries: string[];
   file: string;
   bytes: number;
   /** The digest the server will store, so the two can be compared. */
@@ -171,6 +172,24 @@ export async function inspect(file: string): Promise<Inspection> {
     return one;
   });
 
+  /*
+   * The files it says it ships with. Guarded the same way: a plugin with no
+   * `libraries` member ships none. Whether each path is one the server would
+   * take is validation's judgement, not a load failure — but a non-string in
+   * the list is not a path at all.
+   */
+  const libraryMember = (plugin as unknown as Record<string, unknown>)['libraries'];
+  const shipped = typeof libraryMember === 'function' ? answer('libraries') : [];
+  if (!Array.isArray(shipped)) {
+    throw new NotAPluginError('libraries() did not answer with an array');
+  }
+  const libraries = shipped.map((one) => {
+    if (typeof one !== 'string') {
+      throw new NotAPluginError('libraries() answered with something that is not a path');
+    }
+    return one;
+  });
+
   return {
     id: id.trim(),
     apiVersion,
@@ -179,6 +198,7 @@ export async function inspect(file: string): Promise<Inspection> {
     parameters,
     permissions,
     capabilities,
+    libraries,
     file,
     bytes: source.byteLength,
     sha256,

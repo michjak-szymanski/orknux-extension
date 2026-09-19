@@ -34,6 +34,27 @@ export const MAX_TOOLS = MAX_FUNCTIONS;
 export const MAX_PARAMETERS = 50;
 
 /**
+ * More library files than a plugin has any business shipping.
+ *
+ * Every one of these is a file somebody loading the plugin is shown and has
+ * to allow, and a list too long to read is a list nobody reads.
+ * `MAX_LIBRARIES` in `PluginLibraries` on the server.
+ */
+export const MAX_LIBRARIES = 50;
+
+/**
+ * The shape of one library path: relative segments joined by `/`, an optional
+ * leading `./`, ending in `.js`. What it rules out is the point — nothing
+ * absolute, no URL, no `..`, no backslashes, no bare specifier — so a declared
+ * path can only ever name a file that travels with the plugin.
+ * `LIBRARY_PATH` in `PluginLibraries` on the server.
+ */
+export const LIBRARY_PATH = /^(\.\/)?(?!\.)[A-Za-z0-9_\-.]+(\/(?!\.)[A-Za-z0-9_\-.]+)*\.js$/;
+
+/** Longer than any sensible relative path; the column the server keeps it in. */
+export const MAX_LIBRARY_PATH_LENGTH = 200;
+
+/**
  * More than there are permissions to ask for.
  *
  * A bound on the answer rather than a rule about plugins: what is actually
@@ -43,7 +64,7 @@ export const MAX_PARAMETERS = 50;
 export const MAX_PERMISSIONS = 32;
 
 /** A plugin is one bundled file, and the row it is stored in has a size. */
-export const MAX_SOURCE_BYTES = 2 * 1024 * 1024;
+export const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 
 /**
  * What a plugin may call itself.

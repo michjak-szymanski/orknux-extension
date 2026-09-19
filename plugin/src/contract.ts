@@ -81,6 +81,10 @@ class OrknuxPluginFallback {
   capabilities(): OrknuxCapability[] {
     return [];
   }
+
+  libraries(): string[] {
+    return [];
+  }
 }
 
 class OrknuxFunctionFallback {
@@ -264,6 +268,21 @@ function ungrantedHelpers(): OrknuxHelpers {
       request: refused('NETWORK_REQUEST'),
       get: refused('NETWORK_REQUEST'),
       post: refused('NETWORK_REQUEST'),
+      upload: refused('NETWORK_REQUEST'),
+      download: refused('NETWORK_REQUEST'),
+    },
+    /*
+     * Outside the sandbox there is no session, and the sandbox's own answer
+     * to that is the one copied here: put refuses in the sentence the server
+     * uses, and get answers null the way a key nothing holds does.
+     */
+    session: {
+      store: {
+        put: (): { error: string } => ({
+          error: 'there is no session store here: only a call made inside an AI session carries one',
+        }),
+        get: (): null => null,
+      },
     },
     log: {
       debug: say('debug'),
@@ -330,6 +349,22 @@ declare abstract class OrknuxPluginContract {
    * apart to whoever accepts the plugin.
    */
   capabilities(): OrknuxCapability[];
+
+  /**
+   * The library files this plugin ships with, as paths relative to its own
+   * file: `lib/util.js` or `./lib/util.js`. Defaults to none.
+   *
+   * This is the complete list — every file that arrives beside the plugin is
+   * declared here, and every relative `import` in the plugin or in one of the
+   * libraries has to resolve to a declared path. Nothing else is allowed in a
+   * path: no absolute paths, no URLs, no `..`, no bare specifiers — an npm
+   * dependency is still bundled in, not declared.
+   *
+   * Whoever loads the plugin is shown this list and has to allow it. A zip's
+   * contents are checked against it; a load from a URL fetches these files,
+   * resolved against the plugin's URL, and only these.
+   */
+  libraries(): string[];
 
   /**
    * What a workspace set those parameters to, keyed by name.

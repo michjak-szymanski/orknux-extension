@@ -184,6 +184,34 @@ type OrknuxResponse =
     };
 
 /**
+ * A binary answer: the bytes as base64, and what they claim to be. Base64 is
+ * the one shape bytes have in a sandbox where everything crosses as text.
+ */
+type OrknuxBinaryResponse =
+  | {
+      status: number;
+      headers: Record<string, string>;
+      /** The answer's bytes, base64-encoded. */
+      base64: string;
+      /** How many bytes that decodes to. */
+      size: number;
+      /** The answer's own content-type header, or null where it sent none. */
+      contentType: string | null;
+      error?: undefined;
+    }
+  | {
+      error: string;
+      status?: undefined;
+      headers?: undefined;
+      base64?: undefined;
+      size?: undefined;
+      contentType?: undefined;
+    };
+
+/** What `orknux.session.store.put` answered: stored, or refused in a sentence. */
+type OrknuxStorePut = { ok: true; error?: undefined } | { error: string; ok?: undefined };
+
+/**
  * What the server will do on a plugin's behalf.
  *
  * A plugin has no network and no way to ask for one, so the calls that have to
@@ -330,6 +358,50 @@ declare const orknux: {
       body?: string | Record<string, unknown> | readonly unknown[],
       headers?: Record<string, string>,
     ): OrknuxResponse;
+
+    /**
+     * Sends bytes — a file — given as base64, which is the one shape binary
+     * has here. Sent as an octet stream unless `contentType` or a header says
+     * what it is; POST, capped at 10 MB of decoded bytes. Needs
+     * `NETWORK_REQUEST` like every other request.
+     */
+    upload(
+      url: string,
+      base64: string,
+      contentType?: string,
+      headers?: Record<string, string>,
+    ): OrknuxResponse;
+
+    /**
+     * Fetches binary content — an image, a PDF — and answers `base64`,
+     * `contentType` and `size` instead of `body`, because a PNG does not
+     * survive being read as a string. Capped at 5 MB of bytes.
+     */
+    download(url: string, headers?: Record<string, string>): OrknuxBinaryResponse;
+  };
+
+  /**
+   * The AI session's own store, for a plugin that has to keep its place
+   * between the calls of one conversation.
+   *
+   * What one tool call puts, a later one gets, for as long as the session
+   * lives — and no other session ever sees it. Not a capability: nothing
+   * outside the session is reached by it. The doors only exist where the call
+   * was made inside an AI session; anywhere else `put` answers `{ error }`
+   * saying so and `get` answers null.
+   */
+  session: {
+    store: {
+      /**
+       * Stores one value under a key, replacing what was there. The value
+       * makes the trip as JSON, so what comes back out is a copy — and
+       * anything JSON cannot say (a function, undefined) does not survive.
+       */
+      put(key: string, value: unknown): OrknuxStorePut;
+
+      /** What the key holds, parsed, or null where nothing does. */
+      get(key: string): unknown;
+    };
   };
 
   /**
@@ -480,6 +552,21 @@ declare abstract class OrknuxPlugin {
    * and shown apart to whoever accepts the plugin.
    */
   capabilities(): OrknuxCapability[];
+
+  /**
+   * The library files this plugin ships with, as paths relative to its own
+   * file: `lib/util.js` or `./lib/util.js`. Defaults to none.
+   *
+   * The complete list — every file that arrives beside the plugin is declared
+   * here, and every relative `import` in the plugin or in a library resolves
+   * to a declared path. No absolute paths, no URLs, no `..`, no bare
+   * specifiers — an npm dependency is still bundled in, not declared.
+   *
+   * Whoever loads the plugin is shown this list and has to allow it. A zip's
+   * contents are checked against it; a load from a URL fetches these files,
+   * resolved against the plugin's URL, and only these.
+   */
+  libraries(): string[];
 
   /**
    * What a workspace set those parameters to, keyed by name.

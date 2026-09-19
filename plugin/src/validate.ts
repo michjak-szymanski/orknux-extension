@@ -3,7 +3,10 @@ import {
   CONNECTION,
   CONNECTION_TYPES,
   IDENTIFIER,
+  LIBRARY_PATH,
   MAX_FUNCTIONS,
+  MAX_LIBRARIES,
+  MAX_LIBRARY_PATH_LENGTH,
   MAX_PARAMETERS,
   MAX_PERMISSIONS,
   MAX_TOOLS,
@@ -83,12 +86,14 @@ export interface Declaration {
   parameters?: DeclaredParameter[];
   permissions?: string[];
   capabilities?: string[];
+  /** The relative paths of the library files it ships with; optional for the same reason. */
+  libraries?: string[];
 }
 
 /** Something that would stop this plugin being accepted. */
 export interface Problem {
   /** Which of the plugin's answers it came from, for grouping in a report. */
-  part: 'id' | 'apiVersion' | 'functions' | 'tools' | 'parameters' | 'permissions' | 'capabilities';
+  part: 'id' | 'apiVersion' | 'functions' | 'tools' | 'parameters' | 'permissions' | 'capabilities' | 'libraries';
   message: string;
 }
 
@@ -102,7 +107,55 @@ export function validate(declared: Declaration): Problem[] {
     ...validateParameters(declared.parameters ?? []),
     ...validatePermissions(declared.permissions ?? []),
     ...validateCapabilities(declared.capabilities ?? []),
+    ...validateLibraries(declared.libraries ?? []),
   ];
+}
+
+/**
+ * The library paths, held to the shape the server holds them to: relative,
+ * `/`-joined, ending in `.js`, nothing that could name a file outside what
+ * travels with the plugin. What this cannot check — that every relative import
+ * resolves within the declared set — the server checks against the files it
+ * actually receives.
+ */
+export function validateLibraries(declared: string[]): Problem[] {
+  const problems: Problem[] = [];
+  const refuse = (message: string): void => {
+    problems.push({ part: 'libraries', message });
+  };
+
+  if (declared.length > MAX_LIBRARIES) {
+    refuse(`libraries() declared more than ${MAX_LIBRARIES} files`);
+    return problems;
+  }
+
+  const seen = new Set<string>();
+  for (const path of declared) {
+    if (typeof path !== 'string' || path.trim().length === 0) {
+      refuse('a library path has to be a non-empty string');
+      continue;
+    }
+    const held = path.trim();
+    if (held.length > MAX_LIBRARY_PATH_LENGTH) {
+      refuse(`"${held.slice(0, 40)}…" is longer than a library path can be (${MAX_LIBRARY_PATH_LENGTH})`);
+      continue;
+    }
+    if (!LIBRARY_PATH.test(held)) {
+      refuse(
+        `"${held}" is not a usable library path: relative, /-joined and ending in .js — ` +
+          'no absolute paths, no URLs, no .., no bare specifiers',
+      );
+      continue;
+    }
+    // The same file spelled with and without './' is one file; the server
+    // stores it without, so it is compared without.
+    const bare = held.replace(/^\.\//, '');
+    if (seen.has(bare)) {
+      refuse(`libraries() declares ${bare} more than once`);
+    }
+    seen.add(bare);
+  }
+  return problems;
 }
 
 export function validateId(id: string): Problem[] {
