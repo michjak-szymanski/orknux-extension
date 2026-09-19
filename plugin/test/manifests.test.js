@@ -28,8 +28,18 @@ import { inspect } from '../dist/tooling.js';
 
 const root = fileURLToPath(new URL('../../plugins/', import.meta.url));
 
-/** Every directory under `plugins/` is a plugin; the loose files beside them are not. */
+/**
+ * Every directory under `plugins/` is a plugin; the loose files beside them
+ * are not, and neither is `dist/` — that is where `pack.mjs` writes the zips,
+ * it is ignored by git, and it is only there at all on a machine that has
+ * packed something.
+ */
+const BUILT_OUTPUT = 'dist';
+
 const shipped = readdirSync(root).filter((name) => {
+  if (name === BUILT_OUTPUT) {
+    return false;
+  }
   try {
     return statSync(root + name).isDirectory();
   } catch {

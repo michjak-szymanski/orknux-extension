@@ -1,5 +1,10 @@
 node_modules/
+
+# Every build output: the library's compiled dist/, the plugin bundles, and
+# the zips plugins/pack.mjs writes into plugins/dist/. All of it is made from
+# what is checked in, and none of it belongs in a commit.
 dist/
+*.zip
 *.tsbuildinfo
 
 # IntelliJ generates these per machine; nothing here needs them checked in.
