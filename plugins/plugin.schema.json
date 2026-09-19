@@ -2,67 +2,61 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://orknux.ai/marketplace/plugin.schema.json",
   "title": "An uploaded plugin's manifest",
-
   "description": "What a plugin uploaded to the Orknux marketplace says about itself.\n\nThe upload is a .js file or a .zip of one and the libraries beside it. A zip may carry this manifest at its top level, as `plugin.json` -- and where it does, the publish form is filled in from it rather than retyped. That name and no variation of it: a publisher should not have to guess which spelling gets read, and a zip carrying two of them would be a plugin describing itself twice with nobody able to say which won. It is the same file the orknux-extension repository keeps beside each of its own plugins, so a plugin's folder zipped straight out of that repository needs nothing typed at all -- and it is the only place a plugin is described. There is no catalog above it listing the offerings a second time: what is on offer is whatever carries one of these, which is one thing to write and one thing that can be wrong.\n\nThis is prose and nothing more. The marketplace does not read what a plugin will ask to be allowed and does not vouch for it: permissions, capabilities and the libraries it ships with are discovered by the installing server from the code itself, in its sandbox, at the moment somebody accepts them. The one claim checked here is `key`, because a listing keyed differently from what the code answers is a listing that installs as something else.",
-
   "type": "object",
-  "required": ["key", "name", "summary", "version"],
+  "required": [
+    "key",
+    "name",
+    "summary",
+    "version"
+  ],
   "additionalProperties": true,
-
   "properties": {
     "key": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]{1,63}$",
       "description": "The plugin's own id -- what `id()` answers. It is the address on this site, and what ties the listing to an installed row on the server that takes it, so it never changes once published. Checked against the source: where `id()` can be read out of the uploaded file and disagrees with this, the upload is refused rather than listed under a name it will not install as."
     },
-
     "name": {
       "type": "string",
       "minLength": 1,
       "maxLength": 120,
       "description": "The human name, for the list."
     },
-
     "summary": {
       "type": "string",
       "minLength": 1,
       "maxLength": 300,
       "description": "One line, shown beside the name. Not the first line of the description: this is read in a list of twenty things."
     },
-
     "version": {
       "type": "string",
       "minLength": 1,
       "maxLength": 32,
       "description": "The offering's own string. The marketplace neither parses nor compares these -- a server that wants to say 'update available' compares against what it recorded at install. Publishing the same key again with a new version replaces the file and moves the listing back to the top of 'newest first'; republishing the same version leaves its place alone, so fixing a typo in the summary is not an announcement."
     },
-
     "author": {
       "type": "string",
       "maxLength": 120,
       "description": "Who wrote it, for display. Advisory only: the listing's author is the account that published it, which is the one thing here nobody can type."
     },
-
     "icon": {
       "type": "string",
       "maxLength": 400,
-      "description": "The face beside the name: an emoji standing as itself, the URL of a small image, or the path of an SVG in the archive relative to the plugin's own folder -- `icon.svg`, beside the plugin the way its README is. Absent is no icon, and whoever shows the listing draws its own placeholder.\n\nAn SVG carried this way is somebody else's markup from an upload, so the shower sanitizes it as it does the description -- and one drawn in `currentColor` takes the colour of the list it is shown in, which is the only way a single file looks right on both a light and a dark page."
+      "description": "The face beside the name: an emoji standing as itself, the URL of a small image, or the path of an SVG in the archive relative to the plugin's own folder -- `icon.svg`, beside the plugin the way its README is. Absent is no icon, and whoever shows the listing draws its own placeholder.\n\nAn SVG named here is the one for a **light** ground. Where a file of the same name with a `-white` suffix sits beside it -- `icon.svg` and `icon-white.svg` -- that second one is the same glyph in white, and whoever renders the listing picks whichever suits the theme it is drawn on. Only the first is named here; the other is found by that suffix, so a plugin shipping one icon needs to say nothing and a plugin shipping both needs to say nothing either.\n\nGive each a real colour on a fill or a stroke. `currentColor` looks tempting and does not work: an SVG loaded through `<img>` is its own document, inherits no colour from the page, and resolves `currentColor` to black -- which is an empty square on a dark listing. That is the whole reason there are two files rather than one clever one.\n\nAn SVG carried this way is somebody else's markup from an upload, so the shower sanitizes it as it does the description."
     },
-
     "descriptionPath": {
       "type": "string",
       "maxLength": 400,
       "default": "README.md",
       "description": "Which file in the archive holds the long description, as markdown, relative to the plugin's own folder. Defaults to `README.md`, which is where every plugin in the extension repository keeps it. The markdown is passed through as written and rendered by whoever shows it -- somebody else's prose from an upload, so the shower sanitizes."
     },
-
     "path": {
       "type": "string",
       "maxLength": 400,
       "description": "Which file in the archive is the plugin itself, relative to its own folder -- `greeter.js`. Only needed where the archive has more than one .js at its top level, which is otherwise refused as a guess nobody could check. A single-file upload is its own answer."
     }
   },
-
   "examples": [
     {
       "key": "greeter",
@@ -70,7 +64,7 @@
       "summary": "Says hello, and says it in the language the workflow asked for.",
       "version": "1.0.0",
       "author": "Somebody",
-      "icon": "👋",
+      "icon": "icon.svg",
       "descriptionPath": "README.md",
       "path": "greeter.js"
     }

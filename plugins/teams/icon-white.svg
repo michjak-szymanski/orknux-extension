@@ -1,5 +1,5 @@
 <!--
-  The Microsoft mark, for a light listing: https://fontawesome.com/icons/microsoft?f=brands
+  The Microsoft mark, for a dark listing: https://fontawesome.com/icons/microsoft?f=brands
   The trademark remains Microsoft's own, shown here to say what this
   plugin works with.
   Font Awesome Free (https://fontawesome.com) — icons licensed CC BY 4.0.
@@ -7,5 +7,5 @@
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" width="24" height="24" role="img">
   <title>Microsoft</title>
-  <path fill="#1E232B" d="M0 32l214.6 0 0 214.6-214.6 0 0-214.6zm233.4 0l214.6 0 0 214.6-214.6 0 0-214.6zM0 265.4l214.6 0 0 214.6-214.6 0 0-214.6zm233.4 0l214.6 0 0 214.6-214.6 0 0-214.6z"/>
+  <path fill="#FFFFFF" d="M0 32l214.6 0 0 214.6-214.6 0 0-214.6zm233.4 0l214.6 0 0 214.6-214.6 0 0-214.6zM0 265.4l214.6 0 0 214.6-214.6 0 0-214.6zm233.4 0l214.6 0 0 214.6-214.6 0 0-214.6z"/>
 </svg>

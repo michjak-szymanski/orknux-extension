@@ -1,12 +1,10 @@
 {
   "$schema": "https://orknux.ai/marketplace/plugin.schema.json",
-
   "key": "greeter",
   "name": "Greeter",
   "summary": "Says hello, and says it in the language the workflow asked for.",
   "version": "1.0.0",
   "author": "Somebody",
-  "icon": "👋",
-
+  "icon": "icon.svg",
   "descriptionPath": "README.md"
 }

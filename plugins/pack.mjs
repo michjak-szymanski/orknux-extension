@@ -47,7 +47,7 @@
  */
 
 import { deflateRawSync } from 'node:zlib';
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { inspect } from '../plugin/dist/tooling.js';
@@ -205,6 +205,16 @@ async function packed(key) {
   const icon = manifest.icon;
   if (typeof icon === 'string' && icon.endsWith('.svg') && !/^(https?|data):/.test(icon)) {
     wanted.push(icon);
+    /*
+     * And its white twin, where there is one. The manifest names only the
+     * light glyph — the other is found by the `-white` suffix, which is the
+     * convention the marketplace resolves a dark listing with, so a zip that
+     * carried only the named one would arrive half-dressed.
+     */
+    const white = icon.replace(/\.svg$/, '-white.svg');
+    if (existsSync(folder + white)) {
+      wanted.push(white);
+    }
   }
   /* And the files the plugin says travel with it, spelled as it declares them. */
   for (const library of inspected.libraries) {

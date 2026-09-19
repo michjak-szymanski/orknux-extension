@@ -105,12 +105,20 @@ mark because no Teams-specific glyph is published.
 `markdown` is branded for a plainer reason: its mark is public domain, not a
 trademark anybody holds.
 
-All twelve are drawn in `currentColor` so one file suits a light listing and a
-dark one — half these marks are near-black and would vanish on a dark page.
-Both collections publish monochrome single-path glyphs, so this uses them as
-published rather than recolouring a full-colour mark. A fill attribute also
-survives the sanitizing a marketplace does to uploaded markup, where a
-`<style>` block carrying a media query might not.
+**Every plugin ships two icons, and that is not decoration.** `icon.svg` is
+the dark glyph for a light listing — what the manifest names — and
+`icon-white.svg` is the same glyph in white for a dark one. The marketplace
+finds the second by that suffix; only the first is ever named.
+
+They carry a real colour on a fill or a stroke, never `currentColor`. That was
+the first attempt and it is wrong: a marketplace renders an icon with `<img
+src="icon.svg">`, and an SVG loaded that way is its own document — it inherits
+no `color`, resolves `currentColor` to black, and shows an empty square on a
+dark listing. It only ever looked right because the page it was checked on
+inlined the markup.
+
+`manifests.test.js` holds both halves: both files must exist, neither may
+mention `currentColor`, and each must declare a colour of its own.
 
 [Font Awesome Free]: https://fontawesome.com
 [simple-icons]: https://simpleicons.org

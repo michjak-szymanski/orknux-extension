@@ -141,19 +141,31 @@ for (const name of shipped) {
 
     /*
      * An icon may be an emoji standing as itself, a URL, or an SVG in the
-     * archive — and where it is the third, it has to be a file that is there
-     * and an SVG that is one. Drawn in `currentColor`, because a listing is
-     * shown on a light page and a dark one and a single file has to suit
-     * both; a hard-coded colour is only right on one of them.
+     * archive — and where it is the third, there are two of them: the named
+     * one for a light ground and a `-white` twin for a dark one. The
+     * marketplace finds the second by that suffix, so a plugin shipping only
+     * the first would go dark-listed in black.
      */
     const icon = manifest.icon;
     if (typeof icon === 'string') {
       assert.ok(icon.length <= 400, 'icon is longer than the schema allows');
       if (icon.endsWith('.svg') && !/^(https?|data):/.test(icon)) {
+        const white = icon.replace(/\.svg$/, '-white.svg');
         assert.ok(held.includes(icon), `${icon} is named but not there`);
-        const drawn = readFileSync(`${root}${name}/${icon}`, 'utf8');
-        assert.match(drawn, /<svg[\s>]/, `${icon} is not an svg`);
-        assert.match(drawn, /currentColor/, `${icon} does not take the colour of the list`);
+        assert.ok(held.includes(white), `${name} has no ${white} for a dark listing`);
+
+        for (const each of [icon, white]) {
+          const drawn = readFileSync(`${root}${name}/${each}`, 'utf8');
+          assert.match(drawn, /<svg[\s>]/, `${each} is not an svg`);
+          /*
+           * A real colour, never `currentColor`. An SVG loaded through an
+           * `<img>` is its own document and inherits none, so `currentColor`
+           * resolves to black — which is an empty square on a dark listing,
+           * and is exactly why there are two files.
+           */
+          assert.doesNotMatch(drawn, /currentColor/, `${each} relies on currentColor, which <img> does not give it`);
+          assert.match(drawn, /(fill|stroke)="#[0-9A-Fa-f]{3,8}"/, `${each} declares no colour of its own`);
+        }
       }
     }
   });
