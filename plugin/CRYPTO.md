@@ -47,24 +47,26 @@ is data a plugin can act on, never a throw.
 const { base64, error } = orknux.crypto.hash('sha256', { text: 'hello' });
 ```
 
-## The surface
+## You will need `orknux.encoding` first
 
-### `encodeBase64(input)` and `decodeBase64(base64)`
+Writing bytes down is not cryptography, so it lives next door:
 
 ```js
-orknux.crypto.encodeBase64('hello')    → { base64: 'aGVsbG8=' }
-orknux.crypto.decodeBase64('aGVsbG8=') → { text: 'hello' }
+orknux.encoding.encodeBase64('hello')    → { base64: 'aGVsbG8=' }
+orknux.encoding.decodeBase64('aGVsbG8=') → { text: 'hello' }
 ```
 
-First because without them the rest is unreachable. The sandbox has no
-`TextEncoder` unless somebody granted `TEXT_ENCODING`, so a plugin holding a
-string has no way to make the bytes every call below takes, and no way to read
-the bytes they answer with.
+Mentioned here because without it none of the below is reachable. The sandbox
+has no `TextEncoder` unless somebody granted `TEXT_ENCODING`, so a plugin
+holding a string has no way to make the bytes these calls take, and no way to
+read the bytes they answer with.
 
-`decodeBase64` is the one conversion here that can fail: base64 is bytes and
-text is characters, and not every sequence of bytes is a sequence of
-characters. A plugin decoding a digest expecting to read it gets a sentence
-saying so rather than a string of replacement marks that looks like data.
+`decodeBase64` is the one conversion that can fail: base64 is bytes and text is
+characters, and not every sequence of bytes is a sequence of characters. A
+plugin decoding a digest expecting to read it gets a sentence saying so rather
+than a string of replacement marks that looks like data.
+
+## The surface
 
 ### `hash(algorithm, input)`
 
