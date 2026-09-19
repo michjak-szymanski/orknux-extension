@@ -1,0 +1,144 @@
+name: Plugins
+
+# Packs every plugin and attaches the zips to a GitHub release.
+#
+# A separate tag namespace from `v*` on purpose. `v*` is the version of
+# @orknux/plugin, the library — it moves when the library does. The plugins
+# have their own versions, in their own `plugin.json` files, and they change far
+# more often than the library does. Tagging the library to ship a fix to the
+# slack plugin would say something untrue.
+#
+#     git tag plugins-v2026.09.19 && git push origin plugins-v2026.09.19
+#
+# The tag name is only a label for the release; what a zip is called comes from
+# the plugin's own key and version. `workflow_dispatch` runs the same thing by
+# hand from the Actions tab and makes no release — for checking that the pack
+# still works.
+#
+# The zips are not in the repository, deliberately: they hold only files that
+# are already committed, in a form git cannot delta, and `pdf` alone is 1.6 MB
+# that would be rewritten whole on every rebuild. A release is where a built
+# artifact belongs.
+on:
+  push:
+    tags: ['plugins-v*']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pack:
+    name: Pack and release
+    runs-on: ubuntu-latest
+    permissions:
+      # `gh release create` writes to the repository. Nothing else here does,
+      # and the default token is otherwise read-only.
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # What the compose service runs, so a green run here means the same
+          # thing it means on a development machine.
+          node-version: '22'
+          cache: npm
+
+      # `prepare` builds the library on the way through, which is what
+      # `pack.mjs` imports `inspect` from.
+      - name: Install
+        run: npm ci
+
+      # Nothing ships that has not been through the suite.
+      - name: Test
+        run: npm test
+
+      # A zip is built from the checked-in artifact, not from `src/`, so an
+      # artifact that no longer matches the source it came from would ship
+      # silently. Rebuilding and looking for a diff catches that: the bundler is
+      # pinned by package-lock, so the same source gives the same bytes, and any
+      # difference means somebody edited a source without rebuilding.
+      - name: Check the built plugins are up to date
+        run: |
+          npm run build:plugins
+          npm run build:icons --workspace @orknux/plugins
+          if ! git diff --quiet -- plugins/; then
+            echo '::error::A built plugin or icon does not match its source'
+            echo 'Rebuild and commit:' >&2
+            echo '  npm run build:plugins' >&2
+            echo '  npm run build:icons --workspace @orknux/plugins' >&2
+            git diff --stat -- plugins/ >&2
+            exit 1
+          fi
+
+      - name: Pack
+        run: npm run pack --workspace @orknux/plugins
+
+      # Every zip is opened and the plugin inside is asked what it is, by the
+      # same CLI an author runs before uploading. A zip holding something the
+      # server would refuse fails here rather than on somebody's installation —
+      # which is the point of doing it before the release exists.
+      - name: Check what is in the zips
+        run: |
+          set -euo pipefail
+          for zip in plugins/dist/*.zip; do
+            where="$(mktemp -d)"
+            unzip -qq "$zip" -d "$where"
+            file="$(node -p "const m = require('$where/plugin.json'); m.path || m.key + '.js'")"
+            # The whole report only on a refusal: it runs to a hundred lines a
+            # plugin, and twelve of those would bury the one that failed.
+            if ! npx orknux-plugin check "$where/$file" > check.log 2>&1; then
+              echo "::error::$(basename "$zip") holds something the server would refuse"
+              cat check.log
+              exit 1
+            fi
+            echo "$(basename "$zip") — $(sed -n '2p' check.log | tr -s ' ')"
+          done
+
+      # The tag is a label; the table is what somebody reading the release
+      # actually needs — which plugin, which version, and how big.
+      - name: Write the release notes
+        if: startsWith(github.ref, 'refs/tags/plugins-v')
+        run: |
+          set -euo pipefail
+          {
+            echo 'Each zip holds one plugin: the plugin itself, its `plugin.json`, the'
+            echo '`README.md` that manifest names, its icon, and any libraries it declares.'
+            echo 'Upload one to a marketplace — or load a single-file plugin straight from its'
+            echo 'raw URL in this repository without downloading anything at all.'
+            echo
+            echo '| Plugin | Version | Zip |'
+            echo '|---|---|---|'
+            for zip in plugins/dist/*.zip; do
+              name="$(basename "$zip" .zip)"
+              echo "| \`${name%-*}\` | ${name##*-} | $(du -h "$zip" | cut -f1) |"
+            done
+            echo
+            echo 'Packing is deterministic — every entry carries a fixed timestamp — so'
+            echo 'repacking this tag gives byte-identical zips.'
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/plugins-v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          --title "Plugins $GITHUB_REF_NAME"
+          --notes-file release-notes.md
+          plugins/dist/*.zip
+
+      # On a manual run there is no tag and no release, so the zips go up as a
+      # build artifact instead — which is what somebody clicking "Run workflow"
+      # to check the pack still works actually wants to see.
+      - name: Keep the zips for a manual run
+        if: ${{ !startsWith(github.ref, 'refs/tags/plugins-v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugins
+          path: plugins/dist/*.zip
+          retention-days: 14

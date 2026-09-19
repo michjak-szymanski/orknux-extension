@@ -182,6 +182,32 @@ loads, `fixtures/shaped.js` proves that something merely shaped like a plugin is
 refused, and `fixtures/reaching.js` proves that a plugin reaching for Node fails
 the build rather than the server.
 
+## Releasing the plugins
+
+A `plugins-v*` tag packs every plugin and attaches the zips to a GitHub
+release — `.github/workflows/plugins.yml`. A separate namespace from `v*`,
+which is the *library's* version: the plugins carry their own versions in their
+own `plugin.json` files and change far more often, so tagging the library to
+ship a slack fix would say something untrue.
+
+```
+git tag plugins-v2026.09.19 && git push origin plugins-v2026.09.19
+```
+
+Running it from the Actions tab instead makes no release and leaves the zips as
+a build artifact, which is what checking the pack still works wants.
+
+Two guards run before anything is published. The **rebuild check** runs
+`build:plugins` and `build:icons` and fails on any diff — a zip is packed from
+the checked-in artifact, so an artifact that no longer matches its source would
+otherwise ship silently. The **zip check** opens each zip and runs the CLI's
+`check` on the plugin inside, so a zip holding something the server would refuse
+fails before the release exists rather than on somebody's installation.
+
+The zips stay out of the repository on purpose: they hold only files that are
+already committed, in a form git cannot delta, and `pdf` alone is 1.6 MB that
+would be rewritten whole every time it is rebuilt.
+
 ## Releasing
 
 The version in `plugin/package.json` is the one published, and a `v*` tag is what
