@@ -1,0 +1,12 @@
+{
+  "$schema": "https://orknux.ai/marketplace/plugin.schema.json",
+
+  "key": "slack",
+  "name": "Slack",
+  "summary": "Answers what a Slack payload alone cannot — what is in this thread, who a user id is, what a permalink points at — posts, reacts, searches, and carries files both ways.",
+  "version": "1.0.0",
+  "author": "Michał Szymański",
+  "icon": "icon.svg",
+
+  "descriptionPath": "README.md"
+}

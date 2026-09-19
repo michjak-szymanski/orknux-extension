@@ -13,6 +13,8 @@ docker compose run --rm dev npm install
 docker compose run --rm dev npm test          # builds, then node --test
 docker compose run --rm dev npm run typecheck
 docker compose run --rm dev npm run example
+docker compose run --rm dev npm run build:plugins   # the plugins that bundle libraries
+docker compose run --rm dev npm run build:icons --workspace @orknux/plugins
 ```
 
 `npm test` builds first on purpose: the tests import `dist/`, not `src/`, so what
@@ -60,6 +62,60 @@ upload accepts.
 - No dependencies but esbuild, and it is only reached from the tooling entry
   point. A plugin toolchain that pulled in an argument parser would be a
   dependency in every plugin project for the sake of three flags.
+
+## What a plugin's folder carries
+
+Every directory under `plugins/` holds the same four things, and
+`manifests.test.js` checks that it does:
+
+| file | |
+|------|---|
+| `<name>.js` | the plugin, as the server loads it — one file, no imports it cannot resolve |
+| `plugin.json` | the marketplace manifest |
+| `README.md` | the long description, as markdown, which the manifest names |
+| `icon.svg` | the face beside the name, drawn in `currentColor` so one file suits a light listing and a dark one |
+| `lib/`, `src/` | libraries it ships with, or the source a built plugin is bundled from |
+
+Four of the icons are the real marks — GitHub, Confluence, Prometheus, Mermaid
+— written by `plugins/icons.mjs` out of [simple-icons], which is CC0 while each
+trademark stays its owner's. Using one to say what a plugin works with is the
+use trademark law has always allowed, and `npm run build:icons` regenerates
+them; do not hand-edit those four.
+
+**Slack's and Microsoft's are not there, and that is not an oversight.** Both
+were removed from simple-icons at the brand owners' request, which is those
+owners saying they do not want their marks redistributed this way — so `slack`
+and `teams` wear drawn glyphs, and only somebody taking the assets from Slack's
+own media kit or Microsoft's brand centre, under those companies' terms, should
+change that. `pdf` and `todo` front no service and never had a mark to use.
+
+All eight are drawn in `currentColor` rather than a brand hex: half the marks
+are near-black and would vanish on a dark listing, and a fill attribute
+survives the sanitizing a marketplace does to uploaded markup where a `<style>`
+block carrying a media query might not.
+
+[simple-icons]: https://simpleicons.org
+
+`plugin.json` is the marketplace's file, not ours: its shape is
+`plugins/plugin.schema.json`, copied from that service so editors validate
+against it and so the test can. `plugins/plugin.example.json` is a filled-in
+one to copy when writing a new plugin.
+
+The manifest is prose, with one exception. The marketplace does not read what a
+plugin will ask to be allowed and does not vouch for it — permissions,
+capabilities and libraries are discovered by the installing server from the
+code itself, in its sandbox, when somebody accepts them. The one claim checked
+is `key`, which must be what `id()` answers, because a listing keyed
+differently from the code is a listing that installs as something else. That
+check is the reason `manifests.test.js` exists.
+
+**A plugin that bundles a library is a build.** Its source lives in `src/` and
+the checked-in `<name>.js` beside it is the artifact — so the artifact is what
+the tests load, what a URL serves, and what the manifest's `path` names.
+Editing the artifact by hand is editing a bundle. `plugins/build.mjs` mirrors
+the tooling's own bundler settings; where it differs — minification, the
+`browser` exports condition, the `.ttf` loader, the `fs`/`path` stubs — the
+comment there says why.
 
 ## Tests
 

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://orknux.ai/marketplace/plugin.schema.json",
+
+  "key": "confluence",
+  "name": "Confluence",
+  "summary": "Searches Confluence — plain words or CQL — and opens a page whole: title, space, version and body.",
+  "version": "1.0.0",
+  "author": "Michał Szymański",
+  "icon": "icon.svg",
+
+  "descriptionPath": "README.md"
+}

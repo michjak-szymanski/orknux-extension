@@ -1,0 +1,12 @@
+{
+  "$schema": "https://orknux.ai/marketplace/plugin.schema.json",
+
+  "key": "teams",
+  "name": "Microsoft Teams",
+  "summary": "Receives a Teams outgoing webhook — verifying the HMAC signature Teams sends with every request — and builds the Graph bodies and addresses a reply is sent with.",
+  "version": "1.0.0",
+  "author": "Michał Szymański",
+  "icon": "icon.svg",
+
+  "descriptionPath": "README.md"
+}

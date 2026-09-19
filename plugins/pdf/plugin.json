@@ -1,0 +1,14 @@
+{
+  "$schema": "https://orknux.ai/marketplace/plugin.schema.json",
+
+  "key": "pdf",
+  "name": "PDF",
+  "summary": "Lays HTML out as a PDF on A4 — full Unicode text, and mermaid diagrams drawn into the page as vectors. Writer, fonts and renderer all bundled in; nothing is fetched.",
+  "version": "1.0.0",
+  "author": "Michał Szymański",
+  "icon": "icon.svg",
+
+  "descriptionPath": "README.md",
+
+  "path": "pdf.js"
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://orknux.ai/marketplace/plugin.schema.json",
+
+  "key": "prometheus",
+  "name": "Prometheus",
+  "summary": "Lists the metric names a Prometheus knows, and executes PromQL against it — the question a workflow's condition asks about the running system.",
+  "version": "1.0.0",
+  "author": "Michał Szymański",
+  "icon": "icon.svg",
+
+  "descriptionPath": "README.md"
+}

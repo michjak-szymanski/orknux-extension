@@ -12,7 +12,7 @@ file the server takes.
 
 ```
 plugin/              @orknux/plugin — the library and the orknux-plugin CLI
-plugins/             the production plugins: github, slack, teams
+plugins/             the production plugins, each with its marketplace manifest
 examples/teammates/  a plugin that builds, in the style the server's template uses
 ```
 
@@ -52,6 +52,39 @@ and the text off an activity, and builds the Graph request bodies and addresses
 a reply is sent with.
 
     https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/teams/teams.js
+
+**[confluence](plugins/confluence/confluence.js)** searches the wiki — plain
+words or CQL — and opens a page whole: title, space, version and body.
+
+    https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/confluence/confluence.js
+
+**[prometheus](plugins/prometheus/prometheus.js)** lists the metric names a
+Prometheus knows and executes PromQL against it, so a condition can ask what the
+running system is doing.
+
+    https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/prometheus/prometheus.js
+
+**[mermaid](plugins/mermaid/mermaid.js)** renders mermaid diagrams to SVG inside
+the sandbox — no browser, no DOM, nothing fetched — and links to the live editor
+for the diagram kinds it does not draw.
+
+    https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/mermaid/mermaid.js
+
+**[pdf](plugins/pdf/pdf.js)** lays HTML out as a PDF on A4, mermaid diagrams
+drawn into the page as vectors. Writer, fonts and renderer are all bundled in.
+
+    https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/pdf/pdf.js
+
+**[todo](plugins/todo/todo.js)** gives an agent a todo list for the length of one
+conversation, so a request too complex to hold in one step is split, worked and
+checked off. It asks the platform for nothing at all.
+
+    https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/todo/todo.js
+
+Each folder holds the plugin, its `plugin.json` marketplace manifest and the
+`README.md` that manifest names. `mermaid` and `pdf` bundle libraries, so their
+source is in `src/` and the file above is the build —
+[AGENTS.md](AGENTS.md) has the details.
 
 ## Working here
 
