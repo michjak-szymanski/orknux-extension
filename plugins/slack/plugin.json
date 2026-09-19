@@ -3,7 +3,7 @@
   "key": "slack",
   "name": "Slack",
   "author": "Orknux",
-  "summary": "Read, post, react and search Slack from workflows and agents.",
+  "summary": "Read threads, messages and users, post, react and search — and carry files both ways, text or binary.",
   "version": "1.0.0",
   "icon": "icon.svg",
   "descriptionPath": "README.md"
