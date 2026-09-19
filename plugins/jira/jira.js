@@ -47,16 +47,9 @@
  * 4. Set `project` to the key new issues belong to unless a call says
  *    otherwise — optional, and one fewer thing to wire.
  *
- * Base64 is written out longhand below because Basic authentication is base64
- * and the sandbox has no `btoa`, on purpose. That is what "a plugin declares
- * the JavaScript it needs" means.
- *
  * Licensed under the Apache License, Version 2.0.
  * SPDX-License-Identifier: Apache-2.0
  */
-
-/** The alphabet of RFC 4648's base64, in order. */
-const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 /** The fields a search asks for, because the Cloud endpoint insists on a list. */
 const SEARCH_FIELDS = [
@@ -69,20 +62,6 @@ const SEARCH_FIELDS = [
   'updated',
   'created',
 ];
-
-/** Base64 of some bytes — the sandbox has no btoa. */
-function base64(bytes) {
-  let written = '';
-  for (let index = 0; index < bytes.length; index += 3) {
-    const one = bytes[index];
-    const two = index + 1 < bytes.length ? bytes[index + 1] : 0;
-    const three = index + 2 < bytes.length ? bytes[index + 2] : 0;
-    written += BASE64[one >> 2] + BASE64[((one & 3) << 4) | (two >> 4)];
-    written += index + 1 < bytes.length ? BASE64[((two & 15) << 2) | (three >> 6)] : '=';
-    written += index + 2 < bytes.length ? BASE64[three & 63] : '=';
-  }
-  return written;
-}
 
 /** A nested field, or null rather than a thrown error on the way down. */
 function at(holder, name) {
@@ -147,7 +126,16 @@ function authorization(settings) {
     throw new Error("the plugin's token parameter is not set, and every Jira call needs it");
   }
   if (isCloud(settings)) {
-    return 'Basic ' + base64(new TextEncoder().encode(`${settings.email}:${token}`));
+    /*
+     * `orknux.encoding` rather than a hand-rolled alphabet and a TextEncoder:
+     * the server does the UTF-8 and the base64, so this plugin needs no
+     * permission to turn a string into its own bytes.
+     */
+    const pair = orknux.encoding.encodeBase64(`${settings.email}:${token}`);
+    if (pair.error !== undefined) {
+      throw new Error(`could not encode the credential: ${pair.error}`);
+    }
+    return 'Basic ' + pair.base64;
   }
   return 'Bearer ' + token;
 }
@@ -251,8 +239,9 @@ export default class Jira extends OrknuxPlugin {
   }
 
   permissions() {
-    // TextEncoder, for turning `email:token` into the bytes base64 works on.
-    return ['TEXT_ENCODING'];
+    // None. Turning `email:token` into base64 is `orknux.encoding`'s job now,
+    // and that is ungranted — it reaches nothing, the way a digest does not.
+    return [];
   }
 
   capabilities() {

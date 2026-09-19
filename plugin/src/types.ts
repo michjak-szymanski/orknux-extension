@@ -613,6 +613,9 @@ export type OrknuxComparison =
   | { equal: boolean; error?: undefined }
   | { error: string; equal?: undefined };
 
+/** What `decodeBase64` came to: the text those bytes spell, or why they spell none. */
+export type OrknuxText = { text: string; error?: undefined } | { error: string; text?: undefined };
+
 /** The digests `orknux.crypto` will compute. */
 export type OrknuxDigestAlgorithm = 'sha256' | 'sha384' | 'sha512' | 'sha1' | 'md5';
 
@@ -791,6 +794,36 @@ export interface OrknuxHelpers {
      * JIT has looked at it.
      */
     timingSafeEqual(a: OrknuxCryptoInput, b: OrknuxCryptoInput): OrknuxComparison;
+  };
+
+  /**
+   * Turning one representation into another. Not cryptography, and kept apart
+   * from it on purpose.
+   *
+   * Base64 is an encoding: nothing about it is secret, keyed or one-way. Under
+   * `crypto` it would teach the misconception that causes real incidents — that
+   * base64 is a kind of protection — so it lives where it belongs, beside the
+   * other conversions rather than beside the digests.
+   *
+   * Ungranted for the same reason `crypto` is: it reaches nothing, sends
+   * nothing and learns nothing. That matters practically as well as tidily —
+   * every `crypto` call takes bytes, and without an ungranted way to make bytes
+   * from a string an ungranted API would be unreachable to a plugin that never
+   * asked for `TEXT_ENCODING`.
+   */
+  encoding: {
+    /** Text as the base64 of its UTF-8 bytes. */
+    encodeBase64(text: string): OrknuxDigest;
+
+    /**
+     * Base64 back to the text it spells, or a sentence saying it spells none.
+     *
+     * The one conversion here that can fail. Base64 is bytes and text is
+     * characters, and not every sequence of bytes is a sequence of characters
+     * — a plugin decoding a digest expecting to read it gets told so, rather
+     * than a string of replacement marks that looks like data.
+     */
+    decodeBase64(base64: string): OrknuxText;
   };
 
   /**

@@ -223,7 +223,8 @@ test('the confluence plugin declares what the server would accept', async () => 
     [true, false, true],
   );
 
-  assert.deepEqual(inspected.permissions, ['TEXT_ENCODING']);
+  /* None: `orknux.encoding` turns the credential into base64, and is ungranted. */
+  assert.deepEqual(inspected.permissions, []);
   assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
@@ -276,7 +277,8 @@ test('the jira plugin declares what the server would accept', async () => {
     [true, false, true, false],
   );
 
-  assert.deepEqual(inspected.permissions, ['TEXT_ENCODING']);
+  /* None: `orknux.encoding` turns the credential into base64, and is ungranted. */
+  assert.deepEqual(inspected.permissions, []);
   assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
@@ -413,7 +415,8 @@ test('the prometheus plugin declares what the server would accept', async () => 
     ['url', 'username', 'token'],
   );
   assert.equal(inspected.parameters[2].secret, true);
-  assert.deepEqual(inspected.permissions, ['TEXT_ENCODING']);
+  /* None: `orknux.encoding` turns the credential into base64, and is ungranted. */
+  assert.deepEqual(inspected.permissions, []);
   assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),

@@ -383,6 +383,11 @@ function ungrantedHelpers(): OrknuxHelpers {
         error: 'there is no crypto here: only a call made inside the sandbox can compute one',
       }),
     },
+    /* Not cryptography, so not beside it — and ungranted for the same reason. */
+    encoding: {
+      encodeBase64: refusedHere,
+      decodeBase64: refusedHere,
+    },
     /*
      * Outside the sandbox there is no session, and the sandbox's own answer
      * to that is the one copied here: put refuses in the sentence the server

@@ -18,30 +18,9 @@
  *    as a Bearer token on its own, or as Basic `username:token` when `username`
  *    is set, which is how a Grafana Cloud endpoint is spoken to.
  *
- * Base64 is written out longhand below for the Basic case: the sandbox hands
- * out language builtins and nothing else — no `btoa`, on purpose — which is
- * exactly what "a plugin declares the JavaScript it needs" means.
- *
  * Licensed under the Apache License, Version 2.0.
  * SPDX-License-Identifier: Apache-2.0
  */
-
-/** The alphabet of RFC 4648's base64, in order. */
-const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-/** Base64 of some bytes — the sandbox has no btoa. */
-function base64(bytes) {
-  let written = '';
-  for (let index = 0; index < bytes.length; index += 3) {
-    const one = bytes[index];
-    const two = index + 1 < bytes.length ? bytes[index + 1] : 0;
-    const three = index + 2 < bytes.length ? bytes[index + 2] : 0;
-    written += BASE64[one >> 2] + BASE64[((one & 3) << 4) | (two >> 4)];
-    written += index + 1 < bytes.length ? BASE64[((two & 15) << 2) | (three >> 6)] : '=';
-    written += index + 2 < bytes.length ? BASE64[three & 63] : '=';
-  }
-  return written;
-}
 
 /** A nested field, or null rather than a thrown error on the way down. */
 function at(holder, name) {
@@ -70,7 +49,11 @@ function headers(settings) {
     if (typeof token !== 'string' || token.length === 0) {
       throw new Error('a username is set but no token to go with it');
     }
-    built.authorization = 'Basic ' + base64(new TextEncoder().encode(`${username}:${token}`));
+    const pair = orknux.encoding.encodeBase64(`${username}:${token}`);
+    if (pair.error !== undefined) {
+      throw new Error(`could not encode the credential: ${pair.error}`);
+    }
+    built.authorization = 'Basic ' + pair.base64;
   } else if (typeof token === 'string' && token.length > 0) {
     built.authorization = 'Bearer ' + token;
   }
@@ -137,8 +120,9 @@ export default class Prometheus extends OrknuxPlugin {
   }
 
   permissions() {
-    // TextEncoder, for turning `username:token` into the bytes base64 works on.
-    return ['TEXT_ENCODING'];
+    // None. Turning `username:token` into base64 is `orknux.encoding`'s job now,
+    // and that is ungranted — it reaches nothing, the way a digest does not.
+    return [];
   }
 
   capabilities() {

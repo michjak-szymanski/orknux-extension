@@ -84,6 +84,15 @@ Everything crosses as base64, or as `{ text }` for a plugin that would rather
 not ask for `TEXT_ENCODING`. Every call answers `{ base64 }` or `{ error }` —
 a refusal is data, never a throw.
 
+**`orknux.encoding` is next door, and deliberately not part of it.**
+`encodeBase64` and `decodeBase64` are an encoding, not cryptography: nothing
+about base64 is secret, keyed or one-way, and filed beside the digests it would
+teach the misconception that base64 is a kind of protection. Ungranted for the
+same reason crypto is — and that is what let confluence, jira and prometheus
+drop their hand-rolled alphabets **and** stop declaring `TEXT_ENCODING`
+entirely, because building a Basic credential is now one ungranted call. Seven
+of the twelve plugins now ask for no permission at all.
+
 **It replaced two hand-written SHA-256 implementations**, in github and teams,
 and took four hundred lines with it. That is not only less code: hashing by
 hand cost roughly a thousand statements per 64 bytes, so a large webhook

@@ -7,7 +7,7 @@ import {
   MAX_DERIVED_BYTES,
   MAX_PBKDF2_ITERATIONS,
 } from './limits.js';
-import type { OrknuxComparison, OrknuxCryptoInput, OrknuxDigest } from './types.js';
+import type { OrknuxComparison, OrknuxCryptoInput, OrknuxDigest, OrknuxText } from './types.js';
 
 /**
  * `orknux.crypto`, computed by Node, for everywhere that is not the sandbox.
@@ -77,7 +77,48 @@ function named(algorithm: string): string | { error: string } {
  * `inspect` and the suite see it.
  */
 export function hostCrypto(): void {
-  const helpers = orknux as unknown as { crypto: Record<string, unknown> };
+  const helpers = orknux as unknown as {
+    crypto: Record<string, unknown>;
+    encoding: Record<string, unknown>;
+  };
+
+  /*
+   * Not cryptography; see the note on the namespace in types.ts. The size
+   * bound is `crypto`'s because the server has one bound for both — a
+   * conversion and a digest cost the same to hold twice in memory.
+   */
+  helpers.encoding = {
+    encodeBase64(text: string): OrknuxDigest {
+      if (typeof text !== 'string') {
+        return refuse('encodeBase64 takes a string');
+      }
+      const bytes = Buffer.from(text, 'utf8');
+      if (bytes.byteLength > MAX_CRYPTO_INPUT_BYTES) {
+        return refuse(`the input is larger than ${MAX_CRYPTO_INPUT_BYTES} bytes`);
+      }
+      return { base64: bytes.toString('base64') };
+    },
+
+    decodeBase64(base64: string): OrknuxText {
+      if (typeof base64 !== 'string') {
+        return refuse('decodeBase64 takes a string');
+      }
+      const bytes = Buffer.from(base64, 'base64');
+      if (bytes.byteLength > MAX_CRYPTO_INPUT_BYTES) {
+        return refuse(`the input is larger than ${MAX_CRYPTO_INPUT_BYTES} bytes`);
+      }
+      /*
+       * Bytes that spell no text are a refusal rather than a string of
+       * replacement marks. Node substitutes U+FFFD silently, so the way to
+       * find out is to encode the answer back and see whether it survived.
+       */
+      const text = bytes.toString('utf8');
+      if (!Buffer.from(text, 'utf8').equals(bytes)) {
+        return refuse('those bytes are not text');
+      }
+      return { text };
+    },
+  };
 
   helpers.crypto = {
     hash(algorithm: string, input: OrknuxCryptoInput): OrknuxDigest {

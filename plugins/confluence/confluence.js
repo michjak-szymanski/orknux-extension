@@ -34,23 +34,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/** The alphabet of RFC 4648's base64, in order. */
-const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-/** Base64 of some bytes — the sandbox has no btoa. */
-function base64(bytes) {
-  let written = '';
-  for (let index = 0; index < bytes.length; index += 3) {
-    const one = bytes[index];
-    const two = index + 1 < bytes.length ? bytes[index + 1] : 0;
-    const three = index + 2 < bytes.length ? bytes[index + 2] : 0;
-    written += BASE64[one >> 2] + BASE64[((one & 3) << 4) | (two >> 4)];
-    written += index + 1 < bytes.length ? BASE64[((two & 15) << 2) | (three >> 6)] : '=';
-    written += index + 2 < bytes.length ? BASE64[three & 63] : '=';
-  }
-  return written;
-}
-
 /** A nested field, or null rather than a thrown error on the way down. */
 function at(holder, name) {
   if (holder === null || typeof holder !== 'object') {
@@ -77,7 +60,16 @@ function authorization(settings) {
   }
   const email = settings.email;
   if (typeof email === 'string' && email.length > 0) {
-    return 'Basic ' + base64(new TextEncoder().encode(`${email}:${token}`));
+    /*
+     * `orknux.encoding` rather than a hand-rolled alphabet and a TextEncoder:
+     * the server does the UTF-8 and the base64, so this plugin needs no
+     * permission to turn a string into its own bytes.
+     */
+    const pair = orknux.encoding.encodeBase64(`${email}:${token}`);
+    if (pair.error !== undefined) {
+      throw new Error(`could not encode the credential: ${pair.error}`);
+    }
+    return 'Basic ' + pair.base64;
   }
   return 'Bearer ' + token;
 }
@@ -164,8 +156,9 @@ export default class Confluence extends OrknuxPlugin {
   }
 
   permissions() {
-    // TextEncoder, for turning `email:token` into the bytes base64 works on.
-    return ['TEXT_ENCODING'];
+    // None. Turning `email:token` into base64 is `orknux.encoding`'s job now,
+    // and that is ungranted — it reaches nothing, the way a digest does not.
+    return [];
   }
 
   capabilities() {
