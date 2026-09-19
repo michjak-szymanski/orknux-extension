@@ -98,6 +98,85 @@ export default class Todo extends OrknuxPlugin {
     return [];
   }
 
+  /*
+   * The page that says when to reach for the list at all.
+   *
+   * The tool descriptions can say what each verb does; they are read one at a
+   * time, at the moment of calling, by a model that has already decided to
+   * call something. The decision this plugin exists to change happens earlier
+   * than that — before the first step, when a request has just arrived and is
+   * about to be answered in one go — and a skill is the only surface that is
+   * read then.
+   */
+  skills() {
+    return [
+      new OrknuxSkill({
+        name: 'Planning work before starting it',
+        description:
+          'When a request is too big to hold in your head, and what to do about it before you begin.',
+        content: `# Planning work before starting it
+
+Long jobs fail in a particular way. Not at the hard step — at the fourth easy
+one, where the plan you were holding has quietly lost an item, and nobody
+notices because the answer still reads as confident.
+
+The fix is the one people use: write the list down first.
+
+## When to write one
+
+Write a list **before the first step** when any of these is true:
+
+- the request has more than one deliverable in it
+- you cannot say, in one sentence, what "done" means
+- it will take more than a couple of tool calls
+- you are about to change several files, several tickets, or several places
+- somebody asked for "everything" of something, or for an audit, or a sweep
+
+If none of those hold, do not write a list. A two-step job with a list is
+ceremony, and ceremony teaches whoever reads the transcript to skim.
+
+## How to write one
+
+\`todo_add(titles)\` takes an array, in the order the work should go. Titles are
+outcomes, not activities: *"Slack plugin uploads a PDF"* is checkable and
+*"look at the Slack plugin"* is not.
+
+Split by what could fail separately. Three tasks that must all succeed or all
+be undone are one task. One task you would report on separately is one task.
+
+## How to work one
+
+Work the list top to bottom, and one at a time. Between steps:
+
+- **\`todo_note(task, text)\`** when you learn something the next person needs —
+  a decision and why, a blocker, the reason an obvious approach does not work.
+  Notes accumulate; you are writing to whoever picks this up, which is usually
+  a later you with less context.
+- **\`todo_complete(task)\`** the moment a task is actually finished, not in a
+  batch at the end. The remaining count is how anybody reads the state of the
+  job, including you.
+- **\`todo_add\`** again when new work surfaces. It usually does. Adding it is
+  not an admission of a bad plan; not adding it is how things get dropped.
+- **\`todo_reorder(order)\`** when something becomes urgent. Passing one id
+  moves that task to the front and leaves everything else in order.
+
+## Before you say you are done
+
+Call \`todo_list()\` and look at \`remaining\`. If it is above zero, the work is
+not finished, whatever the last thing you did felt like. Either finish those
+tasks or say plainly which ones you are not doing and why.
+
+## What this list is not
+
+It is yours, not the user's. It is the plan you would otherwise hold in your
+head, and it lives exactly as long as this conversation. Do not put the user's
+own todos in it, do not use it to take notes that belong in your answer, and do
+not narrate it step by step — the point is that the work comes out right, not
+that the list is visible.`,
+      }),
+    ];
+  }
+
   /* The agents' surface, which is the whole point of this plugin: all five verbs, fronted. */
   tools() {
     return [

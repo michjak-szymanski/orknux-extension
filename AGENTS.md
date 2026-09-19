@@ -123,6 +123,19 @@ is `key`, which must be what `id()` answers, because a listing keyed
 differently from the code is a listing that installs as something else. That
 check is the reason `manifests.test.js` exists.
 
+**A plugin that knows how its work should be done says so in `skills()`.**
+A tool description is read one at a time, at the moment of calling, by a model
+that has already decided to call something. The decisions worth changing happen
+earlier — before the first step, or in the gap between two calls — and a skill
+is the only surface read then. So the rule of thumb: if the guidance is *what
+this argument means*, it belongs in the tool description; if it is *when to
+reach for this at all*, or *what to check first*, it is a skill.
+
+Write the description as the line a model chooses from with the page still
+closed — "What to do when a release is bad" earns the click and "Deploy skill"
+does not — and leave the frontmatter out, because the server writes it from the
+name and description and stating the same two facts twice is how they drift.
+
 **Packing is driven by the manifest, never by walking the folder.**
 `plugins/pack.mjs` puts the plugin, its `plugin.json`, the README that manifest
 names, the icon and the libraries `libraries()` declares at a zip's top level —

@@ -177,6 +177,113 @@ export default class Github extends OrknuxPlugin {
   }
 
   /*
+   * Two pages, because there are two jobs here that go wrong in different
+   * ways. Reviewing is a reading discipline; driving the Copilot agent is an
+   * asynchronous protocol with a steering mechanism nobody guesses.
+   */
+  skills() {
+    return [
+      new OrknuxSkill({
+        name: 'Reviewing a pull request',
+        description: 'How to read a PR properly before saying anything about it.',
+        content: `# Reviewing a pull request
+
+## Read the whole thing first
+
+\`github_openPull\` answers the description *and* every changed file with its
+patch. Read all of it before forming a view. A review written from the title
+and the first file is the kind that asks for a change the fourth file already
+made.
+
+Then \`github_buildStatus\` on the head sha. It reads both reporting schemes —
+the commit status API and check runs — because CI uses both, and reading only
+one says "green" about a commit the other knows is red. If it is failing, that
+is the review: say which check and stop.
+
+## Where a comment goes
+
+Three doors, and picking wrong is most of what makes review comments
+annoying:
+
+- **\`github_reviewComment\`** — about a specific line. Pass the path and the
+  line in the new version. This is where nearly everything belongs: a comment
+  anchored to the code needs no explanation of where it is about.
+- **\`github_comment\`** — about the change as a whole. The summary, the
+  verdict, a question about the approach. One of these per review, not five.
+- **\`github_replyToComment\`** — answering an existing thread. Use it rather
+  than starting a parallel thread saying the same thing.
+
+## What to say
+
+Lead with whether it is correct. Style is worth mentioning once and never
+twice. If something is wrong, say what input makes it wrong — a failure the
+author can reproduce is a fix; "this looks fragile" is a conversation.
+
+Look things up rather than assuming: \`github_openFile\` at the PR's head sha
+shows what a function actually does now, and \`github_fileHistory\` shows
+whether the line you are about to question was deliberate.
+
+## Searching first
+
+\`github_searchCode\` before claiming something is unused, duplicated or
+missing. "There is no test for this" is embarrassing when there is, in a file
+you did not open.`,
+      }),
+
+      new OrknuxSkill({
+        name: 'Working with the Copilot coding agent',
+        description: 'Starting a GitHub agent task, following it, and steering it without losing it.',
+        content: `# Working with the Copilot coding agent
+
+\`github_createAgentTask\` hands a prompt to GitHub's Copilot cloud agent. It
+works in its own branch and opens a draft pull request. This is asynchronous:
+the call returns immediately and the work is not done.
+
+## Write the prompt like a ticket
+
+The agent cannot ask you a question. Everything it needs is in the prompt, so
+say which files if you know them, what "done" looks like, and what must not
+change. A vague prompt comes back as a vague diff an hour later.
+
+## Following it
+
+\`github_agentTask\` answers the current state — \`queued\`, \`in_progress\`,
+\`completed\`, \`failed\`, \`waiting_for_user\` — along with its pull request and
+its sessions. **Do not poll it in a loop.** Check it when there is a reason
+to; a workflow on a schedule is the right shape for waiting, not a tight loop
+burning your own budget.
+
+\`github_agentTaskLogs\` takes a session id and answers the agent's own account
+of what it read and decided. Read that before concluding the agent did
+something stupid — it usually explains itself, and the explanation is often
+that your prompt was ambiguous.
+
+## Steering it
+
+\`github_messageAgentTask\` is how you change course. It takes the **pull
+request number**, not the task id, because the mechanism is GitHub's own: a
+comment on the PR mentioning \`@copilot\`. The agent reads it and continues.
+
+Use it for "use the existing helper in lib/ rather than writing a new one" or
+"the tests fail, look at the timezone handling". One clear instruction at a
+time; a comment containing five requests gets partially done.
+
+## Before you accept it
+
+It opened a draft PR, which means review it like any other — the previous
+skill applies unchanged. \`github_buildStatus\` on its head sha, read the whole
+diff, and remember the agent had no more context than your prompt gave it.
+
+## One limit worth knowing
+
+The agent-task API answers a **user** token only. A GitHub App installation
+token is refused by GitHub itself, not by this plugin, and the refusal will
+not obviously say so.`,
+      }),
+    ];
+  }
+
+  /*
    * The agents' surface: every API function, fronted. Proxies rather than
    * copies, so the params, return types and implementations stay the
    * functions' own. `verify` and `describe` are deliberately not here — they

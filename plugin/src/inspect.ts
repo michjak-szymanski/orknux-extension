@@ -6,8 +6,11 @@ import { OrknuxPlugin } from './contract.js';
 import { MAX_SOURCE_BYTES } from './limits.js';
 import type {
   DeclaredFunction,
+  DeclaredObject,
   DeclaredParam,
   DeclaredParameter,
+  DeclaredProperty,
+  DeclaredSkill,
   DeclaredTool,
   Declaration,
 } from './validate.js';
@@ -46,6 +49,8 @@ export interface Inspection extends Declaration {
   permissions: string[];
   capabilities: string[];
   libraries: string[];
+  skills: DeclaredSkill[];
+  objects: DeclaredObject[];
   file: string;
   bytes: number;
   /** The digest the server will store, so the two can be compared. */
@@ -190,6 +195,27 @@ export async function inspect(file: string): Promise<Inspection> {
     return one;
   });
 
+  /*
+   * The two surfaces that are neither called nor run: the pages an agent
+   * reads, and the shapes the plugin exports. Guarded the same way — a plugin
+   * with no `skills` member brings none — and read rather than judged, because
+   * whether a skill is too long or an `of` points at nothing is validation's
+   * question and it needs the whole set to answer it.
+   */
+  const held = (plugin as unknown as Record<string, unknown>);
+
+  const taught = typeof held['skills'] === 'function' ? answer('skills') : [];
+  if (!Array.isArray(taught)) {
+    throw new NotAPluginError('skills() did not answer with an array');
+  }
+  const skills = taught.map((one) => readSkill(one as Record<string, unknown>));
+
+  const shapes = typeof held['objects'] === 'function' ? answer('objects') : [];
+  if (!Array.isArray(shapes)) {
+    throw new NotAPluginError('objects() did not answer with an array');
+  }
+  const objects = shapes.map((one) => readObject(one as Record<string, unknown>));
+
   return {
     id: id.trim(),
     apiVersion,
@@ -199,6 +225,8 @@ export async function inspect(file: string): Promise<Inspection> {
     permissions,
     capabilities,
     libraries,
+    skills,
+    objects,
     file,
     bytes: source.byteLength,
     sha256,
@@ -218,6 +246,37 @@ function read(declared: Record<string, unknown>): DeclaredFunction {
       return {
         name: text(one, 'name') ?? refuse('a parameter has no name'),
         type: text(one, 'type') ?? refuse('a parameter has no type'),
+      };
+    }),
+  };
+}
+
+function readSkill(declared: Record<string, unknown>): DeclaredSkill {
+  return {
+    name: text(declared, 'name') ?? refuse('a skill has no name'),
+    description: text(declared, 'description') ?? null,
+    content: text(declared, 'content') ?? refuse('a skill has no content'),
+  };
+}
+
+function readObject(declared: Record<string, unknown>): DeclaredObject {
+  const properties = Array.isArray(declared['properties']) ? declared['properties'] : [];
+
+  return {
+    name: text(declared, 'name') ?? refuse('an object has no name'),
+    description: text(declared, 'description') ?? null,
+    properties: properties.map((property): DeclaredProperty => {
+      const one = property as Record<string, unknown>;
+      return {
+        name: text(one, 'name') ?? refuse('a property has no name'),
+        kind: text(one, 'kind') ?? refuse('a property has no kind'),
+        /*
+         * Absent and null are the same answer here — "this field points at
+         * nothing" — and validation is what decides whether that was allowed
+         * for the kind it is.
+         */
+        of: text(one, 'of') ?? null,
+        description: text(one, 'description') ?? null,
       };
     }),
   };

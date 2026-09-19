@@ -579,9 +579,9 @@ test('the date plugin declares what the server would accept, and counts the cale
   assert.deepEqual(inspected.capabilities, []);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
-    ['now', 'describe', 'shift', 'shiftBusinessDays', 'businessDaysBetween', 'between', 'isBusinessHours'],
+    ['today', 'now', 'describe', 'shift', 'shiftBusinessDays', 'businessDaysBetween', 'between', 'isBusinessHours'],
   );
-  assert.deepEqual(inspected.tools.length, 7);
+  assert.deepEqual(inspected.tools.length, 8);
 
   const url = new URL(`../../plugins/date/date.js`, import.meta.url);
   const { default: OrknuxDate } = await import(url.href);
@@ -600,6 +600,14 @@ test('the date plugin declares what the server would accept, and counts the cale
     opensAt: '09:00',
     closesAt: '17:00',
   });
+
+  /* The one question this plugin is asked most: what is the date. */
+  const todayThere = office('today').run('');
+  assert.match(todayThere, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(todayThere, office('now').run('').date, 'today is the date now carries');
+  /* And it follows the zone it is asked about, not the configured one. */
+  assert.match(office('today').run('Pacific/Auckland'), /^\d{4}-\d{2}-\d{2}$/);
+  assert.throws(() => office('today').run('Mars/Olympus'), /no timezone called/);
 
   /* 2026-09-19 is a Saturday, which is the whole of what a weekend means here. */
   const saturday = office('describe').run('2026-09-19', '');

@@ -224,6 +224,80 @@ export default class Slack extends OrknuxPlugin {
   }
 
   /*
+   * What the tool descriptions cannot carry: the half-dozen small habits that
+   * separate a message people read from one they scroll past. Each is cheap,
+   * none is discoverable from a function signature, and getting them wrong is
+   * visible to everybody in the channel rather than only in a log.
+   */
+  skills() {
+    return [
+      new OrknuxSkill({
+        name: 'Posting to Slack so people read it',
+        description: 'What to check before posting a message, and where replies belong.',
+        content: `# Posting to Slack so people read it
+
+A channel is somebody else's interface. Everything below is about not making
+it worse.
+
+## Markdown is not what Slack reads
+
+Slack reads *mrkdwn*, which looks like markdown and is not. Post markdown
+straight and the reader sees your punctuation: \`**bold**\` arrives with the
+asterisks showing, and \`[text](url)\` arrives as literal brackets.
+
+Run anything you composed through **\`markdown_toSlack\`** before
+\`slack_post\`. That is the whole fix, and it is one call.
+
+If that plugin is not available: one asterisk is bold, one underscore is
+italic, one tilde is strikethrough, a link is \`<url|text>\`, and there are no
+headings.
+
+## Never write a mention by hand
+
+\`<@U0123ABCD>\` looks guessable and is not. An id you invented either pings
+nobody or pings a stranger. Call **\`slack_mention(connection, name)\`** with
+the person's name and put its answer in the text exactly as it comes back.
+
+The same applies in reverse: a message that arrives containing \`<@U…>\` is not
+a name. \`slack_whoIs\` turns it into one before you quote it back at somebody.
+
+## Reply in the thread
+
+If you are answering a message, pass its \`threadTs\` to \`slack_post\`. A reply
+posted to the channel instead of the thread is a new conversation in front of
+everybody, and the person who asked has to work out which answer is theirs.
+
+Post to the channel itself only when starting something genuinely new.
+
+## Length, and the alternative to it
+
+If your answer is longer than a screen, do not paste it. Post two or three
+lines saying what it is and what it concludes, and attach the rest:
+
+- text — a log, a CSV, a query, a config — goes through **\`slack_upload\`**
+  with a filename whose extension says what it is
+- a PDF or an image goes through **\`slack_uploadBinary\`** as base64, which is
+  what \`pdf_fromHtml\` already answers
+- a diagram goes through **\`mermaid_render\`** and then \`slack_upload\` with a
+  \`.svg\` filename
+
+A wall of text costs everybody in the channel a scroll. A summary and a file
+costs the two people who care a click.
+
+## Before you post at all
+
+\`slack_readThread\` first when you are joining something already in progress.
+Somebody has usually answered already, and the most annoying possible message
+is a confident restatement of what the previous reply said.
+
+React rather than reply when acknowledgement is all that is needed.
+\`slack_react\` with a checkmark says "done, nothing to read here" without
+adding a message to anybody's unread count.`,
+      }),
+    ];
+  }
+
+  /*
    * The agents' surface: the three lookups, fronted. A proxy rather than a
    * copy, so the params, return type and implementation - and any edit made
    * to the function on the server - stay the function's own.

@@ -99,6 +99,32 @@ for (const name of shipped) {
 
     /* The one claim the marketplace checks against the code. */
     const inspected = await inspect(`${root}${name}/${file}`);
+
+    /*
+     * A skill is prose an agent reads rather than a name anything calls, so
+     * what can be checked is that it would survive the trip: within the
+     * server's bounds, and carrying a description — which is the line a model
+     * chooses from before it loads the page at all, so a skill without one is
+     * a page nobody opens.
+     */
+    assert.ok(inspected.skills.length <= 25, `${name} brings more skills than the server takes`);
+    for (const skill of inspected.skills) {
+      assert.ok(skill.name.length > 0 && skill.name.length <= 120, `a skill of ${name} is badly named`);
+      assert.ok(
+        typeof skill.description === 'string' && skill.description.length > 0,
+        `the ${name} skill "${skill.name}" has no description to be chosen by`,
+      );
+      assert.ok(
+        skill.content.length > 0 && skill.content.length <= 64 * 1024,
+        `the ${name} skill "${skill.name}" is empty or longer than the server takes`,
+      );
+      /*
+       * Written without frontmatter on purpose: the server writes the block
+       * from the name and description above, and stating the same two facts
+       * twice is how they drift apart.
+       */
+      assert.ok(!skill.content.startsWith('---'), `the ${name} skill "${skill.name}" writes its own frontmatter`);
+    }
     assert.equal(
       manifest.key,
       inspected.id,

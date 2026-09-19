@@ -253,6 +253,89 @@ export default class Jira extends OrknuxPlugin {
     return ['NETWORK_REQUEST'];
   }
 
+  /*
+   * JQL is the part a model gets wrong, and it gets it wrong silently: a
+   * query with a mistaken field name does not fail, it returns nothing, and
+   * "there are no issues" reads exactly like "I searched badly". So the page
+   * an agent reads is mostly a query cookbook, plus the two moves that change
+   * somebody else's board and deserve a moment's thought first.
+   */
+  skills() {
+    return [
+      new OrknuxSkill({
+        name: 'Finding and moving Jira issues',
+        description:
+          'How to write JQL that finds what you meant, and what to check before changing a ticket.',
+        content: `# Finding and moving Jira issues
+
+## An empty result is usually a bad query
+
+JQL does not fail on a query that means nothing useful — it returns nothing.
+So "no issues found" and "I asked the wrong question" look identical from
+here, and the difference matters.
+
+Before believing an empty answer, widen it: drop the narrowest clause and
+search again. If \`project = PROJ AND status = "In Review" AND assignee = x\`
+is empty, try it without the assignee. If that is empty too, try
+\`project = PROJ ORDER BY updated DESC\` and see what the statuses are actually
+called on this board. They are rarely what you assumed.
+
+## Queries worth knowing
+
+\`\`\`
+project = PROJ AND status != Done ORDER BY updated DESC
+assignee = currentUser() AND status != Done
+project = PROJ AND created >= -7d
+text ~ "connection timeout" AND project = PROJ
+labels = urgent AND status = "In Progress"
+project = PROJ AND status CHANGED TO Done AFTER -1w
+"Epic Link" = PROJ-100
+\`\`\`
+
+Things that catch people out:
+
+- **Quote anything with a space.** \`status = In Review\` is a syntax error;
+  \`status = "In Review"\` is not.
+- **\`~\` is text search, \`=\` is exact.** \`summary ~ "timeout"\` finds it in a
+  sentence; \`summary = "timeout"\` wants the whole summary to be that word.
+- **Relative dates are \`-7d\`, \`-2w\`, \`-1M\`** — capital M is months, lowercase
+  m is minutes, and that one bites.
+- **\`ORDER BY\` goes last**, always, after every clause.
+- **Status names are per-workflow.** "Done" on one board is "Closed" on the
+  next. Look before you assume.
+
+## Read before you write
+
+\`jira_openIssue(key)\` before commenting on or moving anything. The summary is
+not the ticket: the description says what was actually asked for, the comments
+say what has been tried, and the status says whether somebody is already on it.
+Acting on the summary alone is how a duplicate comment gets added to a ticket
+that was closed last week.
+
+## Moving an issue
+
+\`jira_transition(key, to)\` takes a **name**, not an id, and which names are
+available depends on where the issue is right now — a board can forbid going
+straight from "To Do" to "Done". If the name you want is refused, the refusal
+lists what *is* possible from here; pick from that list rather than trying
+synonyms.
+
+Say why in a comment when you move something. A status change with no comment
+is a mystery to whoever sees it in their morning filter.
+
+## Raising one
+
+Search first. \`jira_createIssue\` will happily make a second copy of a bug that
+is already open, and a duplicate is worse than no ticket: it splits the
+discussion and somebody has to close it by hand.
+
+Write the description as plain text. Jira renders its own wiki markup, not
+markdown, so asterisks and backticks arrive as asterisks and backticks. Put
+what happened, what was expected, and how to see it — in that order.`,
+      }),
+    ];
+  }
+
   /* The agents' surface: all of it. Reading a ticket and moving it are the same job. */
   tools() {
     return [

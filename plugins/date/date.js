@@ -242,6 +242,7 @@ export default class OrknuxDate extends OrknuxPlugin {
   /* The agents' surface: all of it. Date arithmetic is exactly what a model should not do in its head. */
   tools() {
     return [
+      new OrknuxFunctionTool({ function: 'today' }),
       new OrknuxFunctionTool({ function: 'now' }),
       new OrknuxFunctionTool({ function: 'describe' }),
       new OrknuxFunctionTool({ function: 'shift' }),
@@ -344,6 +345,25 @@ export default class OrknuxDate extends OrknuxPlugin {
 
   functions() {
     return [
+      new OrknuxFunction({
+        name: 'today',
+        description:
+          'Today\'s date, as YYYY-MM-DD - in the working timezone, or in timezone when one is passed ' +
+          '(an IANA name like Europe/Warsaw; empty for the configured one). Ask this rather than ' +
+          'assuming what the date is: you do not know it, and a guess is wrong by however long ago ' +
+          'you were trained. Use now for the time as well, or describe to ask whether a date is a ' +
+          'working day.',
+        params: [{ name: 'timezone', type: 'string' }],
+        returnType: 'string',
+        /*
+         * The same answer `now` carries in its `date`, as the string on its
+         * own. Worth its own name: "what is the date" is the commonest
+         * question asked of this plugin by far, and a workflow that only wants
+         * the date should not have to reach into a map for it.
+         */
+        run: (timezone) => dateOf(partsIn(new Date(), this.zoneOf(timezone))),
+      }),
+
       new OrknuxFunction({
         name: 'now',
         description:
