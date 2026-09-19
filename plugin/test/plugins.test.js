@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -952,4 +953,74 @@ test('an ungranted slack call from a shipped plugin is a thrown sentence, not a 
     () => declared.run.call(new Slack(), { id: 1, type: 'SLACK' }, 'C1', '1.0', '2.0'),
     /could not read the thread: this plugin was not granted SLACK_READ_THREAD/,
   );
+});
+
+test('the github plugin verifies a real signature, and refuses a wrong one', async () => {
+  /*
+   * Testable at all only because crypto is not a granted capability: the
+   * tooling hosts a real implementation outside the sandbox, so the one thing
+   * actually worth checking about the webhook half — that a delivery GitHub
+   * signed is accepted and one it did not is not — can be checked here rather
+   * than only on a server.
+   */
+  const url = new URL(`../../plugins/github/github.js`, import.meta.url);
+  const { default: Github } = await import(url.href);
+
+  const secret = 'it is a secret to everybody';
+  const configured = () => {
+    const plugin = Object.create(Github.prototype);
+    Object.defineProperty(plugin, 'settings', { value: Object.freeze({ webhookSecret: secret }) });
+    return plugin.functions().find((one) => one.name === 'verify');
+  };
+
+  /* Signed the way GitHub signs it: HMAC-SHA256 over the exact bytes, as hex. */
+  const body = JSON.stringify({ action: 'opened', number: 7 });
+  const signed = createHmac('sha256', secret).update(body, 'utf8').digest('hex');
+
+  assert.equal(configured().run({ 'x-hub-signature-256': `sha256=${signed}` }, body), true);
+
+  /* A body that changed by one character is a different signature. */
+  assert.equal(
+    configured().run({ 'x-hub-signature-256': `sha256=${signed}` }, body.replace('7', '8')),
+    false,
+  );
+  /* And so is one signed with somebody else's secret. */
+  const forged = createHmac('sha256', 'not the secret').update(body, 'utf8').digest('hex');
+  assert.equal(configured().run({ 'x-hub-signature-256': `sha256=${forged}` }, body), false);
+
+  /* Unsigned, wrongly-signed and malformed deliveries are all refused. */
+  assert.equal(configured().run({}, body), false);
+  /* The SHA-1 header GitHub still sends for compatibility is not accepted. */
+  assert.equal(configured().run({ 'x-hub-signature': `sha1=${signed}` }, body), false);
+  assert.equal(configured().run({ 'x-hub-signature-256': 'sha256=nothex' }, body), false);
+});
+
+test('the teams plugin verifies a real signature, and refuses a wrong one', async () => {
+  const url = new URL(`../../plugins/teams/teams.js`, import.meta.url);
+  const { default: Teams } = await import(url.href);
+
+  /* Teams hands out the secret as base64, and signs with those bytes. */
+  const secret = Buffer.from('the security token Teams showed').toString('base64');
+  const configured = () => {
+    const plugin = Object.create(Teams.prototype);
+    Object.defineProperty(plugin, 'settings', { value: Object.freeze({ webhookSecret: secret }) });
+    return plugin.functions().find((one) => one.name === 'verify');
+  };
+
+  const body = JSON.stringify({ type: 'message', text: 'hello' });
+  const signed = createHmac('sha256', Buffer.from(secret, 'base64'))
+    .update(body, 'utf8')
+    .digest('base64');
+
+  assert.equal(configured().run({ authorization: `HMAC ${signed}` }, body), true);
+  /* Teams' own spelling is upper case, and the scheme is matched either way. */
+  assert.equal(configured().run({ authorization: `hmac ${signed}` }, body), true);
+
+  /* A changed body, a wrong secret, and a missing header are all refused. */
+  assert.equal(configured().run({ authorization: `HMAC ${signed}` }, `${body} `), false);
+  const forged = createHmac('sha256', Buffer.from('not it')).update(body, 'utf8').digest('base64');
+  assert.equal(configured().run({ authorization: `HMAC ${forged}` }, body), false);
+  assert.equal(configured().run({}, body), false);
+  /* And a header that is not the scheme Teams sends. */
+  assert.equal(configured().run({ authorization: `Bearer ${signed}` }, body), false);
 });

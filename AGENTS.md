@@ -72,6 +72,35 @@ upload accepts.
   point. A plugin toolchain that pulled in an argument parser would be a
   dependency in every plugin project for the sake of three flags.
 
+## Crypto is arithmetic, not a grant
+
+`orknux.crypto` — `hash`, `hmac`, `pbkdf2`, `random`, `timingSafeEqual` —
+needs no permission and no capability, and `plugin/CRYPTO.md` says why: a
+digest reaches nothing, sends nothing and learns nothing. Making a plugin
+declare something to compute a SHA-256 would be a dialog with no decision
+behind it, and one nobody can answer is one they learn to click through.
+
+Everything crosses as base64, or as `{ text }` for a plugin that would rather
+not ask for `TEXT_ENCODING`. Every call answers `{ base64 }` or `{ error }` —
+a refusal is data, never a throw.
+
+**It replaced two hand-written SHA-256 implementations**, in github and teams,
+and took four hundred lines with it. That is not only less code: hashing by
+hand cost roughly a thousand statements per 64 bytes, so a large webhook
+payload ran the sandbox out of budget and the delivery was refused — a limit
+that is simply gone. And `timingSafeEqual` is genuinely constant-time, which a
+comparison written in JavaScript stops being the moment a JIT has looked at it.
+
+`src/hosted.ts` is the piece worth knowing about. Crypto is the one helper the
+bundle-safe fallbacks cannot honestly stand in for: the Slack calls and the
+HTTP door refuse outside the sandbox because they reach something a test has no
+business reaching, but crypto reaches nothing — so a plugin verifying a webhook
+signature would be untestable while it refused. The Node-only entry point
+installs a real implementation, bounded exactly as the server bounds it, which
+is why `plugins.test.js` can sign a body and check that github and teams accept
+it and refuse a forgery. **That file may never be reached from `src/index.ts`**
+— it imports `node:crypto`, and the main entry has to stay bundle-safe.
+
 ## What a plugin's folder carries
 
 Every directory under `plugins/` holds the same four things, and

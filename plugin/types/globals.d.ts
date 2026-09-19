@@ -212,6 +212,28 @@ type OrknuxBinaryResponse =
 type OrknuxStorePut = { ok: true; error?: undefined } | { error: string; ok?: undefined };
 
 /**
+ * What a crypto call is handed: bytes as base64, or text the server encodes as
+ * UTF-8 for you.
+ *
+ * The second form is there so a plugin that only wants to hash a string need
+ * not ask for `TEXT_ENCODING` to turn it into bytes first.
+ */
+type OrknuxCryptoInput = { base64: string; text?: undefined } | { text: string; base64?: undefined };
+
+/** What a digest, a derivation or a handful of random bytes came to. */
+type OrknuxDigest =
+  | { base64: string; error?: undefined }
+  | { error: string; base64?: undefined };
+
+/** Whether two byte strings are the same, compared in constant time. */
+type OrknuxComparison =
+  | { equal: boolean; error?: undefined }
+  | { error: string; equal?: undefined };
+
+/** The digests `orknux.crypto` will compute. */
+type OrknuxDigestAlgorithm = 'sha256' | 'sha384' | 'sha512' | 'sha1' | 'md5';
+
+/**
  * What the server will do on a plugin's behalf.
  *
  * A plugin has no network and no way to ask for one, so the calls that have to
@@ -378,6 +400,67 @@ declare const orknux: {
      * survive being read as a string. Capped at 5 MB of bytes.
      */
     download(url: string, headers?: Record<string, string>): OrknuxBinaryResponse;
+  };
+
+  /**
+   * Arithmetic the sandbox has no instruction for.
+   *
+   * GraalJS has no crypto at all — not a digest, not an HMAC, not a random
+   * number — so a plugin verifying a webhook signature or speaking an
+   * authentication handshake could not begin. These are the smallest surface
+   * that removes that wall.
+   *
+   * **Not granted, and deliberately so.** No permission, no capability, no
+   * acceptance dialog: a digest reaches nothing, sends nothing and learns
+   * nothing. It is in the same class as `JSON.parse`, and the server computes
+   * it only because the sandbox has no way to. Making every plugin declare a
+   * capability to compute a SHA-256 would be a dialog with no decision behind
+   * it, and a dialog nobody can answer meaningfully is one they learn to click
+   * through.
+   *
+   * Every call answers an object: `base64` on success, `error` and nothing
+   * else on refusal — a refusal is data a plugin can act on, never a throw.
+   */
+  crypto: {
+    /** The digest of some bytes. */
+    hash(algorithm: OrknuxDigestAlgorithm, input: OrknuxCryptoInput): OrknuxDigest;
+
+    /** HMAC, keyed. What a webhook signature is checked with. */
+    hmac(
+      algorithm: OrknuxDigestAlgorithm,
+      key: OrknuxCryptoInput,
+      input: OrknuxCryptoInput,
+    ): OrknuxDigest;
+
+    /**
+     * A key derived from a password, the slow way on purpose.
+     *
+     * `length` is how many bytes are wanted. `iterations` is capped — see
+     * [MAX_PBKDF2_ITERATIONS], and note that over the cap is a refusal rather
+     * than a clamp.
+     */
+    pbkdf2(
+      algorithm: OrknuxDigestAlgorithm,
+      password: OrknuxCryptoInput,
+      salt: OrknuxCryptoInput,
+      iterations: number,
+      length: number,
+    ): OrknuxDigest;
+
+    /** Bytes from the platform's secure source — a nonce, a state, an idempotency key. */
+    random(bytes: number): OrknuxDigest;
+
+    /**
+     * Whether two byte strings match, in time that does not depend on where
+     * they first differ.
+     *
+     * Comparing a signature with `===` leaks its prefix through how long the
+     * comparison took, one byte at a time, which is enough to forge one. This
+     * is here rather than left to the plugin because a constant-time
+     * comparison written in JavaScript stops being constant-time as soon as a
+     * JIT has looked at it.
+     */
+    timingSafeEqual(a: OrknuxCryptoInput, b: OrknuxCryptoInput): OrknuxComparison;
   };
 
   /**

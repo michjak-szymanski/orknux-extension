@@ -36,7 +36,6 @@ test('the report names the libraries that travel with a plugin', () => {
   const report = checked(shipped('github'));
 
   assert.match(report, /It ships with:/);
-  assert.match(report, /lib\/hashing\.js/);
   assert.match(report, /lib\/api\.js/);
   /* And still says the rest of what it always said. */
   assert.match(report, /Loading it means accepting: TEXT_ENCODING, NETWORK_REQUEST/);

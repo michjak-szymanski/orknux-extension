@@ -55,6 +55,35 @@ export const LIBRARY_PATH = /^(\.\/)?(?!\.)[A-Za-z0-9_\-.]+(\/(?!\.)[A-Za-z0-9_\
 export const MAX_LIBRARY_PATH_LENGTH = 200;
 
 /**
+ * The digests `orknux.crypto` will compute. `CryptoAlgorithms` on the server.
+ *
+ * `sha1` and `md5` are on the list because protocols need them — Postgres's
+ * older md5 authentication, S3 signatures, git object ids — and leaving them
+ * off would send plugin authors to hand-written implementations that are worse
+ * in every way. They are not for anything new.
+ */
+export const DIGEST_ALGORITHMS = ['sha256', 'sha384', 'sha512', 'sha1', 'md5'] as const;
+
+/** What one crypto call may be handed, before base64. It is held in memory twice. */
+export const MAX_CRYPTO_INPUT_BYTES = 8 * 1024 * 1024;
+
+/**
+ * The most rounds `pbkdf2` will do.
+ *
+ * The one bound worth explaining. PBKDF2 is deliberately slow and the work
+ * happens on the server's side of the sandbox, where the script guard's
+ * wall-clock bound does not reach it — so a plugin naming a large enough
+ * number is a denial of service against the whole installation rather than
+ * against its own call. Postgres asks for 4096. Over the cap is a refusal
+ * naming it and never a silent clamp: a plugin that believes it did ten
+ * million rounds and got one million has a security bug nobody can see.
+ */
+export const MAX_PBKDF2_ITERATIONS = 1_000_000;
+
+/** Longer than any key anybody derives, and the same bound for `random`. */
+export const MAX_DERIVED_BYTES = 1024;
+
+/**
  * More than there are permissions to ask for.
  *
  * A bound on the answer rather than a rule about plugins: what is actually

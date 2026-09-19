@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
 import { OrknuxPlugin } from './contract.js';
+import { hostCrypto } from './hosted.js';
 import { MAX_SOURCE_BYTES } from './limits.js';
 import type {
   DeclaredFunction,
@@ -58,6 +59,14 @@ export interface Inspection extends Declaration {
   /** Whether it is inside the size a plugin may be. */
   withinSizeLimit: boolean;
 }
+
+/*
+ * Crypto is not granted and reaches nothing, so the sandbox has it always —
+ * and a plugin verifying a signature would be untestable while the bundle-safe
+ * fallback refuses. Installed here rather than in `contract.ts` because this
+ * is the Node-only side, and the main entry has to stay free of `node:`.
+ */
+hostCrypto();
 
 export async function inspect(file: string): Promise<Inspection> {
   const source = await readFile(file);

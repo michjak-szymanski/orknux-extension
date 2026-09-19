@@ -330,6 +330,10 @@ function ungrantedHelpers(): OrknuxHelpers {
     error: `this plugin was not granted ${capability}`,
   });
 
+  const refusedHere = (): { error: string } => ({
+    error: 'there is no crypto here: only a call made inside the sandbox can compute one',
+  });
+
   const say = (level: 'debug' | 'info' | 'warn' | 'error') =>
     (...parts: unknown[]): void => {
       if (typeof console === 'undefined') return;
@@ -362,6 +366,22 @@ function ungrantedHelpers(): OrknuxHelpers {
       post: refused('NETWORK_REQUEST'),
       upload: refused('NETWORK_REQUEST'),
       download: refused('NETWORK_REQUEST'),
+    },
+    /*
+     * Crypto is not granted, so there is no "you were not granted this" to
+     * say — outside the sandbox there is simply no server to compute it. The
+     * refusal names that rather than a missing capability, and `orknux-plugin`
+     * replaces these with real implementations before it loads a plugin, so a
+     * `check` behaves the way the sandbox will. See `tooling.ts`.
+     */
+    crypto: {
+      hash: refusedHere,
+      hmac: refusedHere,
+      pbkdf2: refusedHere,
+      random: refusedHere,
+      timingSafeEqual: (): { error: string } => ({
+        error: 'there is no crypto here: only a call made inside the sandbox can compute one',
+      }),
     },
     /*
      * Outside the sandbox there is no session, and the sandbox's own answer

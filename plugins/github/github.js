@@ -61,17 +61,19 @@
  *
  * ## How the plugin is laid out
  *
- * Two libraries travel with this file, and `libraries()` declares them.
- * `lib/hashing.js` is SHA-256 and HMAC written out longhand — the sandbox has
- * no crypto, on purpose, and there is no permission that could be asked for
- * that would open a door to the host. Hashing costs roughly a thousand
- * statements per 64 bytes, so a payload in the hundreds of kilobytes will run
- * out of the sandbox's statement budget and the caller will be refused — set
- * the repository's webhook to send the events below rather than everything,
- * and nothing it sends comes close. `lib/api.js` is the door every REST call
- * goes through, and the readers every answer is picked apart with. What stays
- * in this file is what the plugin *declares*, which is the part somebody
- * loading it reads.
+ * One library travels with this file, and `libraries()` declares it:
+ * `lib/api.js`, the door every REST call goes through and the readers every
+ * answer is picked apart with. What stays here is what the plugin *declares*,
+ * which is the part somebody loading it reads.
+ *
+ * There used to be a second, `lib/hashing.js`, holding SHA-256 and HMAC
+ * written out longhand because the sandbox had no crypto. `orknux.crypto`
+ * replaced it. That is not only less code: hashing by hand cost roughly a
+ * thousand statements per 64 bytes, so a payload in the hundreds of kilobytes
+ * ran the sandbox out of budget and the caller was refused — a limit that is
+ * simply gone now, along with the advice to narrow which events the webhook
+ * sends. The constant-time comparison is better too: one written in
+ * JavaScript stops being constant-time the moment a JIT has looked at it.
  *
  * Written as JavaScript rather than as TypeScript compiled to it: the server
  * runs JavaScript, and a plugin somebody may need to load in a hurry should not
@@ -81,7 +83,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { hmacSha256, hex, sameDigest } from './lib/hashing.js';
 import {
   at,
   call,
@@ -96,6 +97,35 @@ import {
   scoped,
   statusError,
 } from './lib/api.js';
+
+/**
+ * A hex digest as the base64 of the same bytes.
+ *
+ * GitHub spells its signature in hex and `orknux.crypto` answers base64, so
+ * one of them has to be converted before they can be compared as bytes. Null
+ * for anything that is not an even run of hex digits, which is not a
+ * signature this would have vouched for anyway.
+ */
+function hexToBase64(hex) {
+  if (typeof hex !== 'string' || hex.length === 0 || hex.length % 2 !== 0 || /[^0-9a-fA-F]/.test(hex)) {
+    return null;
+  }
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const bytes = [];
+  for (let at = 0; at < hex.length; at += 2) {
+    bytes.push(parseInt(hex.slice(at, at + 2), 16));
+  }
+  let written = '';
+  for (let at = 0; at < bytes.length; at += 3) {
+    const one = bytes[at];
+    const two = at + 1 < bytes.length ? bytes[at + 1] : 0;
+    const three = at + 2 < bytes.length ? bytes[at + 2] : 0;
+    written += alphabet[one >> 2] + alphabet[((one & 3) << 4) | (two >> 4)];
+    written += at + 1 < bytes.length ? alphabet[((two & 15) << 2) | (three >> 6)] : '=';
+    written += at + 2 < bytes.length ? alphabet[three & 63] : '=';
+  }
+  return written;
+}
 
 export default class Github extends OrknuxPlugin {
 
@@ -171,9 +201,9 @@ export default class Github extends OrknuxPlugin {
   }
 
   libraries() {
-    // The files that travel with this one — the complete list, shown to
+    // The file that travels with this one — the complete list, shown to
     // whoever loads the plugin. Every relative import above resolves here.
-    return ['lib/hashing.js', 'lib/api.js'];
+    return ['lib/api.js'];
   }
 
   /*
@@ -623,9 +653,31 @@ not obviously say so.`,
             return false;
           }
 
-          const encoder = new TextEncoder();
-          const mine = hex(hmacSha256(encoder.encode(secret), encoder.encode(rawBody)));
-          return sameDigest(mine, sent.slice('sha256='.length));
+          /*
+           * `text` rather than bytes of our own: the server encodes it as
+           * UTF-8, which is what GitHub signed. A pull request title with an
+           * accent in it is not an edge case, and this is where getting the
+           * encoding wrong would show up as a delivery quietly refused.
+           */
+          const mine = orknux.crypto.hmac('sha256', { text: secret }, { text: rawBody });
+          if (mine.error !== undefined) {
+            // A refusal is data here, and the honest reading of "could not
+            // compute the signature" is that this delivery is not vouched for.
+            return false;
+          }
+
+          /*
+           * GitHub sends the digest as hex and crypto answers base64, so the
+           * two are compared as the bytes they both stand for. Constant-time,
+           * because a comparison that returns early tells whoever is guessing
+           * how much of their guess was right, one byte at a time.
+           */
+          const theirs = hexToBase64(sent.slice('sha256='.length));
+          if (theirs === null) {
+            return false;
+          }
+          const same = orknux.crypto.timingSafeEqual({ base64: mine.base64 }, { base64: theirs });
+          return same.equal === true;
         },
       }),
 
