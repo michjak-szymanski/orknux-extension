@@ -239,6 +239,70 @@ test('the slack plugin declares what the server would accept', async () => {
   );
 });
 
+test('post writes mrkdwn, and leaves alone what already was', async () => {
+  const url = new URL(`../../plugins/slack/slack.js`, import.meta.url);
+  const { default: Slack } = await import(url.href);
+  const post = new Slack().functions().find((one) => one.name === 'post').run;
+
+  /* The one call this plugin makes, stood in for, so the text can be read. */
+  const slack = globalThis.orknux.slack;
+  let sent = null;
+  globalThis.orknux.slack = {
+    post: (connection, channel, text) => {
+      sent = text;
+      return { channel: channel, ts: '1' };
+    },
+  };
+
+  try {
+    const say = (text) => {
+      post('c', 'C1', text, '', []);
+      return sent;
+    };
+
+    /*
+     * The five shapes that are never valid mrkdwn. Slack shows each of these
+     * as the punctuation it is, and whatever wrote the message cannot see it
+     * afterwards - which is why this happens on the way out rather than being
+     * somebody's job to remember.
+     */
+    assert.equal(say('**bold**'), '*bold*');
+    assert.equal(say('~~gone~~'), '~gone~');
+    assert.equal(say('[text](https://x.com)'), '<https://x.com|text>');
+    assert.equal(say('# Heading'), '*Heading*');
+    assert.equal(say('*  item'), '•  item');
+    assert.equal(say('- item'), '•  item');
+    assert.equal(say('***very***'), '*_very_*');
+
+    /*
+     * And the property the whole design rests on: a single asterisk is bold in
+     * mrkdwn and a single underscore is italic, so text that was already right
+     * has to come through untouched. Converting those would break the messages
+     * that needed no fixing, which is worse than the fault being fixed.
+     */
+    for (const already of [
+      '*bold* and _italic_ and ~struck~',
+      '<https://x.com|a link>',
+      'a * b * c',
+      '2 * 3 = 6',
+    ]) {
+      assert.equal(say(already), already, `left alone: ${already}`);
+    }
+
+    /* Code says what it says: a message about **bold** still reads **bold**. */
+    assert.equal(say('Write `**bold**` for bold.'), 'Write `**bold**` for bold.');
+    assert.equal(say('```\n**kept**\n```'), '```\n**kept**\n```');
+
+    /* The whole of the message from the channel that prompted this. */
+    assert.equal(
+      say('I found:\n*  **orknux-extension**: Plugins and SDK\n*  **orknux-ui**'),
+      'I found:\n•  *orknux-extension*: Plugins and SDK\n•  *orknux-ui*',
+    );
+  } finally {
+    globalThis.orknux.slack = slack;
+  }
+});
+
 test('the agents post refuses an attachment carrying bytes', async () => {
   const url = new URL(`../../plugins/slack/slack.js`, import.meta.url);
   const { default: Slack } = await import(url.href);

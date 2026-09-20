@@ -356,6 +356,50 @@ function uploadedFromUrl(settings, url, filename, channel, comment, threadTs) {
 }
 
 /**
+ * Markdown that Slack would show as punctuation, turned into mrkdwn.
+ *
+ * Slack reads mrkdwn, which resembles markdown closely enough to be mistaken
+ * for it: `**bold**` arrives with its asterisks showing, `[text](url)` as
+ * literal brackets, `# Heading` as a hash and a space. Whatever wrote the
+ * message cannot see it afterwards, so nothing corrects it.
+ *
+ * Only the five shapes that are **never valid mrkdwn** are touched, and that
+ * is the whole of the design. A single `*` is bold in mrkdwn and a single `_`
+ * is italic, so a caller who wrote mrkdwn correctly has written something this
+ * cannot misread - converting those would break the messages that were already
+ * right, which is a worse failure than the one being fixed.
+ *
+ * Code is lifted out first and put back last. A fence explaining `**bold**` is
+ * about the asterisks, and rewriting them there would be a different kind of
+ * wrong.
+ */
+function mrkdwn(text) {
+  if (typeof text !== 'string' || text.length === 0) {
+    return text;
+  }
+
+  const code = [];
+  let held = text.replace(/```[\s\S]*?```|`[^`\n]+`/g, (found) => {
+    code.push(found);
+    return `@@code${code.length - 1}@@`;
+  });
+
+  held = held
+    /* Bold before bullets: `**a**` becomes `*a*`, which the bullet rule then
+     * leaves alone because what follows the asterisk is not a space. */
+    .replace(/\*\*\*([^*\n]+)\*\*\*/g, '*_$1_*')
+    .replace(/\*\*([^*\n]+)\*\*/g, '*$1*')
+    .replace(/~~([^~\n]+)~~/g, '~$1~')
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '<$2|$1>')
+    /* mrkdwn has no headings; a bold line on its own is what one looks like. */
+    .replace(/^ {0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/gm, '*$1*')
+    /* And no list syntax either: the bullet has to be a bullet. */
+    .replace(/^([ \t]*)[*+-][ \t]+/gm, '$1•  ');
+
+  return held.replace(/@@code(\d+)@@/g, (whole, which) => code[Number(which)] ?? whole);
+}
+
+/**
  * The permalinks `post` attaches, from whatever a caller passed as attachments.
  *
  * A string is a file already on Slack and is used as it is - the cheap path,
@@ -790,16 +834,45 @@ it worse.
 
 ## Markdown is not what Slack reads
 
-Slack reads *mrkdwn*, which looks like markdown and is not. Post markdown
-straight and the reader sees your punctuation: \`**bold**\` arrives with the
-asterisks showing, and \`[text](url)\` arrives as literal brackets.
+Slack reads *mrkdwn*, which resembles markdown closely enough to be mistaken
+for it. Write markdown and the reader sees your punctuation: \`**bold**\`
+arrives with the asterisks showing, \`[text](url)\` as literal brackets,
+\`# Heading\` as a hash and a space. You cannot see the message afterwards, so
+nothing tells you it happened.
 
-Run anything you composed through **\`markdown_toSlack\`** before
-\`slack_post\`. That is the whole fix, and it is one call.
+**\`slack_post\` fixes the shapes that are never valid mrkdwn**, on the way out,
+without being asked:
 
-If that plugin is not available: one asterisk is bold, one underscore is
-italic, one tilde is strikethrough, a link is \`<url|text>\`, and there are no
-headings.
+    **bold**  ->  *bold*          [text](url)  ->  <url|text>
+    ~~gone~~  ->  ~gone~          # Heading    ->  *Heading*
+    *  item   ->  •  item         - item       ->  •  item
+
+Code spans and fences are left exactly as written, so a message explaining
+\`**bold**\` still says \`**bold**\`.
+
+**What it deliberately does not touch** is a single \`*\` or \`_\`, because those
+are already mrkdwn - \`*bold*\` and \`_italic_\` are correct and rewriting them
+would break the messages that were right. So text you wrote as mrkdwn goes out
+as you wrote it.
+
+### Write mrkdwn where nothing is posting for you
+
+Your reply in a thread may go to the channel as it stands, with no
+\`slack_post\` call anywhere to tidy it. Then the only fix is to have written
+mrkdwn in the first place:
+
+| you want | write | not |
+|---|---|---|
+| bold | \`*bold*\` | \`**bold**\` |
+| italic | \`_italic_\` | \`*italic*\` |
+| strikethrough | \`~struck~\` | \`~~struck~~\` |
+| a link | \`<https://x.com|text>\` | \`[text](https://x.com)\` |
+| a bullet | \`•\` or \`-\` | \`*\` |
+| a heading | a bold line on its own | \`#\` |
+
+There are **no headings and no tables** in mrkdwn at all. A table in a message
+somebody reads on a phone is unreadable whatever the syntax - make it a short
+list.
 
 ## Never write a mention by hand
 
@@ -1124,7 +1197,10 @@ adding a message to anybody's unread count.`,
       new OrknuxFunction({
         name: 'post',
         description:
-          'Posts a message to a Slack channel. Pass the channel id (or a #name), what to say, and a ' +
+          'Posts a message to a Slack channel, written as mrkdwn on the way out - markdown that ' +
+          'Slack would show as punctuation is converted, so **bold** arrives bold and a ' +
+          '[link](url) arrives as one, while text already written as mrkdwn is left alone and ' +
+          'code is never touched. Pass the channel id (or a #name), what to say, and a ' +
           'threadTs to reply inside a thread - or an empty threadTs to post to the channel itself. ' +
           'attachments hangs files on the message, and takes either kind: a permalink string for a ' +
           'file already on Slack (as an event or readThread carries it), or a map for one that is ' +
@@ -1151,7 +1227,13 @@ adding a message to anybody's unread count.`,
            * part that needs `botToken`. The `| ` label keeps the raw
            * url out of the text people read; the preview still unfurls.
            */
-          let said = text;
+          /*
+           * Written as mrkdwn on the way out, because this plugin is the one
+           * that knows what Slack reads. Nothing else has to be installed and
+           * nothing has to be called first: a message composed as markdown
+           * arrives as the bold and the links it was meant to be.
+           */
+          let said = mrkdwn(text);
           const linked = attaching(this.settings, attachments);
           if (linked.length > 0) {
             said = `${said}${linked.map((one) => ` <${one}| >`).join('')}`;
