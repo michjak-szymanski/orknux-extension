@@ -713,8 +713,19 @@ function drawnPage(base64, page, width) {
   const key = keyFor(drawn.base64);
   const kept = orknux.session.store.put(key, drawn.base64);
 
+  /*
+   * `picture`, which is the name the server lifts out.
+   *
+   * A tool's answer reaches a model as text - the answer to a call is a `tool`
+   * message and its content is a string - so base64 under any other name is
+   * thousands of characters it can read and cannot see. Under this one the
+   * server takes the bytes out, hangs them on a turn of their own as an image,
+   * and leaves a sentence here instead. The whole point of drawing a page is
+   * that something looks at it.
+   */
   return {
-    png: drawn.base64,
+    picture: drawn.base64,
+    pictureType: 'image/png',
     bytes: drawn.bytes,
     width: drawn.width,
     height: drawn.height,
@@ -851,12 +862,13 @@ it names never leaves the server.
 the page, and a width if you want one:
 
     pdf_fromHtml(html, title)   ->  { key: 'pdf.1k7e78y', pages: 2, problems: [] }
-    pdf_preview('pdf.1k7e78y', 1)  ->  { png: '…', width: 595, height: 842, pages: 2 }
+    pdf_preview('pdf.1k7e78y', 1)  ->  { width: 595, height: 842, pages: 2, shown: true }
 
 \`problems\` tells you what this plugin knows went wrong. Layout goes wrong in
 ways it cannot know - a heading stranded at the foot of a page, a diagram
 crowding its column, a table that ran off the side - and the only way to catch
-that is to look. The picture comes back in full, unlike everything else here,
+that is to look. The picture does not come back as text: the server takes it
+out of the answer and shows it to you as a picture,
 because seeing it is the point.
 
 Worth doing whenever the document is going to somebody who matters. Reporting
@@ -879,11 +891,17 @@ reads; the diagram is what they look at afterwards.`,
         description: 'One page of a document, drawn so somebody can look at it.',
         properties: [
           {
-            name: 'png',
+            name: 'picture',
             kind: 'string',
             description:
-              'The page as a picture, base64. Unlike everything else here this does come back in ' +
-              'full, because seeing it is the point of asking.',
+              'The page as a picture, base64 - and the one field here the server takes out of the ' +
+              'answer: it hangs the bytes on a turn of their own so a model can actually look at ' +
+              'the page, and leaves a note where they were.',
+          },
+          {
+            name: 'pictureType',
+            kind: 'string',
+            description: 'What kind of picture it is; always image/png, and what the server hangs it as.',
           },
           { name: 'bytes', kind: 'number', description: 'How large the picture is.' },
           { name: 'width', kind: 'number', description: 'The picture\'s width in pixels.' },
@@ -1024,8 +1042,10 @@ reads; the diagram is what they look at afterwards.`,
           'Draws one page of a PDF as a picture, so you can see what a document actually came ' +
           'out as. Pass the document as base64 and the page, counting from one - a page past the ' +
           'end is refused by name rather than rounded into the first - and a width in pixels, ' +
-          'left out for 96 dpi. Answers the picture as png base64, its width and height, how many ' +
-          'pages the whole document has, and a key the picture is kept under for this session. ' +
+          'left out for 96 dpi. The page is shown to you as a picture rather than answered as ' +
+          'text; what comes back is its width and height, how many pages the whole document has, ' +
+          'and a key the picture is kept under for this session - hand that to slack_uploadBinary ' +
+          'to show somebody the page. ' +
           'Use it on what fromHtml just made: problems tells you what went wrong that this plugin ' +
           'knows about, and layout goes wrong in ways it does not - a heading stranded at the ' +
           'foot of a page, a diagram crowding its column, a table that ran off the side.',
