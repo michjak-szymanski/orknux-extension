@@ -4,7 +4,7 @@
   "name": "nomnoml",
   "author": "Orknux",
   "summary": "Render UML-flavoured nomnoml diagrams to SVG, offline, inside the sandbox.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "icon": "icon.svg",
   "descriptionPath": "README.md",
   "path": "nomnoml.js"
