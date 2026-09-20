@@ -367,39 +367,6 @@ test('post writes mrkdwn, and leaves alone what already was', async () => {
     assert.equal(say('Write `**bold**` for bold.'), 'Write `**bold**` for bold.');
     assert.equal(say('```\n**kept**\n```'), '```\n**kept**\n```');
 
-    /*
-     * A link Slack cannot make, which arrived in a channel exactly like this:
-     * the angle brackets, the pipe and a whole image description printed as
-     * punctuation where a picture was meant to be.
-     *
-     * `<target|label>` only works on an absolute url. The path cannot be
-     * repaired here - what it is relative to is the server's own address, and
-     * this plugin has never been told it - so the label is what can be saved.
-     */
-    assert.equal(
-      say('</api/execution-pictures/4|A European-style town square with a fountain>'),
-      'A European-style town square with a fountain',
-    );
-    assert.equal(say('Here: </api/execution-pictures/4>'), 'Here: /api/execution-pictures/4');
-    assert.equal(say('[the run](/api/runs/4)'), 'the run');
-
-    /*
-     * And every angle-bracket form Slack *does* resolve, untouched - which is
-     * the half that makes this safe to do at all. A rule that ate mentions in
-     * order to fix links would be a worse fault than the one it fixed.
-     */
-    for (const resolves of [
-      '<https://orknux.ai/runs/4|the run>',
-      'ping <@U123> and <!here>',
-      'see <#C123|general>',
-      '<mailto:a@b.c|Ann>',
-    ]) {
-      assert.equal(say(resolves), resolves, `left alone: ${resolves}`);
-    }
-
-    /* Code still says what it says, this rule included. */
-    assert.equal(say('write `</a|b>` for that'), 'write `</a|b>` for that');
-
     /* The whole of the message from the channel that prompted this. */
     assert.equal(
       say('I found:\n*  **orknux-extension**: Plugins and SDK\n*  **orknux-ui**'),

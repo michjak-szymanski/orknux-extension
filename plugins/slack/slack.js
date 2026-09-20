@@ -396,39 +396,6 @@ function mrkdwn(text) {
     /* And no list syntax either: the bullet has to be a bullet. */
     .replace(/^([ \t]*)[*+-][ \t]+/gm, '$1•  ');
 
-  /*
-   * A link Slack cannot make, unmade.
-   *
-   * `<target|label>` is Slack's own link syntax and it works on an absolute
-   * url. Given a path - `</api/execution-pictures/4|A European town square>` -
-   * Slack resolves nothing and prints the whole thing, angle brackets, pipe
-   * and all, in the middle of the sentence. The reader gets punctuation where
-   * a picture was meant to be, with an image description standing in for the
-   * link text.
-   *
-   * The path cannot be repaired here: what it is relative to is the server's
-   * own address, and this plugin has never been told it. The label can be
-   * saved. Dropping the brackets leaves the words somebody wrote, which is
-   * worse than a working link and far better than markup read aloud.
-   *
-   * Slack's other angle-bracket forms pass the target test and are left
-   * exactly as they are - `<@U123>`, `<#C123|general>`, `<!here>`,
-   * `<mailto:a@b|Ann>` - because each of those is one Slack does resolve.
-   */
-  held = held
-    .replace(/<([^<>|\s]+)\|([^<>]*)>/g, (whole, target, label) =>
-      (/^(?:https?:\/\/|mailto:|tel:|[@#!])/i.test(target) ? whole : label))
-    /* And the same shape with no label, which prints just as raw. */
-    .replace(/<(\/[^<>|\s]*)>/g, '$1')
-    /*
-     * And markdown's own link shape, where the href is not one either. The
-     * rule above turned `[text](https://...)` into a Slack link; whatever is
-     * left is pointing somewhere Slack cannot go, so it keeps the words and
-     * loses the brackets rather than showing a reader square brackets and a
-     * path.
-     */
-    .replace(/\[([^\]\n]+)\]\((?!https?:\/\/|mailto:)[^)\s]*\)/g, '$1');
-
   return held.replace(/@@code(\d+)@@/g, (whole, which) => code[Number(which)] ?? whole);
 }
 
@@ -987,23 +954,31 @@ it, and say in two lines what it is.
 ## If you are giving a link, give one that opens
 
 Slack makes a link out of an **absolute** url - \`https://\` and a host. A path
-on its own is not one, and this is what that failure looks like in a channel:
+on its own is not one. Markdown resolves a path against the page it sits in;
+a chat message sits in no page, so Slack has nothing to resolve against, makes
+no link, and prints the construction instead:
 
-    </api/execution-pictures/4|A European-style town square with colorful...>
+    </pictures/6|A European town square with a row of traditional, colorful...>
 
-Every character of that was printed to the reader. Slack saw no url it could
-resolve, so it made no link and showed the markup instead - and the label,
-which was the whole image description, went with it.
+Every character of that reached the reader, with a whole image description
+standing in for link text.
 
-Two rules:
+**Where this comes from:** a tool answers you markdown pointing at a path -
+a picture it drew, a file it wrote, a page on the server - because it is
+describing something on its own host and has no reason to spell out where that
+is. Pasting that into a message is what produces the line above. It is not
+something the message can be repaired into being; the host is missing and
+nothing downstream can invent it.
 
-- **Absolute or nothing.** If you do not have the host, do not write a link.
-  Say what the thing is in words, or attach it, which is better anyway.
+Three rules:
+
+- **Absolute or nothing.** No host, no link. Say what the thing is in plain
+  words instead.
+- **Attach, do not link.** If it is a file this run produced, the section above
+  applies - upload it, and the reader gets the thing rather than directions to
+  it.
 - **Short labels.** A link's text is a few words - \`the run\`, \`page 4\`.
-  Never a sentence, and never the prompt something was generated from.
-
-If you are about to link to a file the run produced, that is the section above:
-upload it instead.
+  Never a sentence, and never the prompt a picture was generated from.
 
 ## Before you post at all
 
