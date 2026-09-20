@@ -161,6 +161,32 @@ function drawnWidth(svg, asked) {
   return Math.min(Math.max(Math.round(natural * 2), PNG_WIDTH.least), PNG_WIDTH.most);
 }
 
+/**
+ * The same drawing with its intrinsic size taken off, leaving the viewBox.
+ *
+ * Handed a width, a rasteriser is supposed to scale the document to it. Handed
+ * a document that also declares `width="140"`, some place that 140-pixel
+ * drawing inside the canvas you asked for and leave the rest empty - which
+ * looks like the diagram shrinking, because relative to the picture it did.
+ *
+ * The viewBox is what says how to scale, and it stays. Without a competing
+ * intrinsic size there is nothing to letterbox against, so the drawing fills
+ * the width it was asked for whichever way the rasteriser is built.
+ *
+ * Only on the way to a picture. The svg answer keeps its width and height,
+ * because something embedding markup wants to know how big it is.
+ */
+function scalable(svg) {
+  const close = svg.indexOf('>');
+  if (close === -1 || !/viewBox=/.test(svg.slice(0, close))) {
+    return svg;
+  }
+  const root = svg
+    .slice(0, close)
+    .replace(/\s(?:width|height)="[^"]*"/g, '');
+  return root + svg.slice(close);
+}
+
 export default class Mermaid extends OrknuxPlugin {
 
   id() {
@@ -454,7 +480,7 @@ drawn here - change the tool, not the diagram.`,
            * only way this answer exists.
            */
           if (asked === 'png') {
-            const drawn = orknux.render.pngFromSvg(held, drawnWidth(held, width));
+            const drawn = orknux.render.pngFromSvg(scalable(held), drawnWidth(held, width));
             if (drawn.error !== undefined) {
               throw new Error(`could not draw the diagram: ${drawn.error}`);
             }
