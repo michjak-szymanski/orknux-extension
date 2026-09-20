@@ -762,12 +762,31 @@ test('the pdf plugin writes a pdf out of html, diagrams and all, without a DOM',
   assert.equal(made.pages, 1);
   assert.equal(bytes.subarray(0, 5).toString('latin1'), '%PDF-');
   const raw = bytes.toString('latin1');
-  assert.ok(raw.includes('DejaVu'), 'the unicode faces are embedded');
   assert.ok(raw.includes('The Report'), 'the title metadata is set');
 
-  /* Real diacritics now — nothing is folded, so this must simply not throw. */
+  /*
+   * Nothing here is past ASCII, so nothing is embedded: the two DejaVu faces
+   * are 1.4 MB of TTF that jsPDF parses and writes into every file asking for
+   * them, and a page of English does not need a letter they have and
+   * Helvetica lacks. It is the difference between four kilobytes and two
+   * hundred and seventy-seven, and between one millisecond and a hundred —
+   * which in a sandbox that interprets was the difference between a PDF and a
+   * timeout.
+   */
+  assert.ok(!raw.includes('DejaVu'), 'an ascii document embeds no font');
+  assert.ok(raw.includes('Helvetica'), 'and is set in the one jsPDF already has');
+  assert.ok(made.bytes < 20000, `an ascii page should be small, got ${made.bytes}`);
+
+  /*
+   * And real diacritics still get the face that has them. Folding ż to z is
+   * the thing DejaVu is carried for, so this must both embed and not throw.
+   */
   const polish = declared.run('<p>Zażółć gęślą jaźń</p>', '');
   assert.ok(polish.bytes > 0);
+  assert.ok(
+    Buffer.from(polish.base64, 'base64').toString('latin1').includes('DejaVu'),
+    'a document past ascii embeds the face that can set it',
+  );
 
   /* A mermaid block becomes vector drawing in the page, still offline. */
   const diagrammed = declared.run(

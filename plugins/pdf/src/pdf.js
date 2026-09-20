@@ -267,9 +267,19 @@ function blocksOf(html) {
   return blocks;
 }
 
+/**
+ * The face this document is being set in.
+ *
+ * Carried on the document rather than in a variable up here, because it is a
+ * fact about one document and two of them should not be able to disagree.
+ */
+function faceOf(doc) {
+  return doc.orknuxFace ?? 'helvetica';
+}
+
 /** The width of some text in the face and size the writer would set it. */
 function widthOf(doc, text, bold, size) {
-  doc.setFont('DejaVu', bold ? 'bold' : 'normal');
+  doc.setFont(faceOf(doc), bold ? 'bold' : 'normal');
   doc.setFontSize(size);
   return doc.getTextWidth(text);
 }
@@ -555,7 +565,7 @@ function drawnDiagram(doc, svg, left, top, maxWidth, maxHeight) {
       const color = colorOf(attrs.fill, vars) ?? [0, 0, 0];
       const size = Number(attrs['font-size'] ?? 12) * scale;
       const bold = Number(attrs['font-weight'] ?? 400) >= 600;
-      doc.setFont('DejaVu', bold ? 'bold' : 'normal');
+      doc.setFont(faceOf(doc), bold ? 'bold' : 'normal');
       doc.setFontSize(size);
       doc.setTextColor(color[0], color[1], color[2]);
       const anchor = attrs['text-anchor'];
@@ -694,10 +704,35 @@ export default class Pdf extends OrknuxPlugin {
           }
 
           const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-          doc.addFileToVFS('DejaVuSans.ttf', DEJAVU);
-          doc.addFont('DejaVuSans.ttf', 'DejaVu', 'normal');
-          doc.addFileToVFS('DejaVuSans-Bold.ttf', DEJAVU_BOLD);
-          doc.addFont('DejaVuSans-Bold.ttf', 'DejaVu', 'bold');
+
+          /*
+           * DejaVu only where a document actually needs it.
+           *
+           * The two faces are 1.4 MB of TTF, and jsPDF parses and writes both
+           * into every file that asks for them: a page of English cost 277 kB
+           * and most of the time spent making it. That is affordable in a
+           * browser and is not here - the sandbox interprets, and a call that
+           * took 74 ms in node was timing out at ten seconds.
+           *
+           * So the alphabet decides. Anything past ASCII needs DejaVu, because
+           * the built-in faces would fold ą to a; everything else is set in
+           * Helvetica, which jsPDF has and embeds nothing for - three
+           * kilobytes instead of two hundred and seventy-seven, and no font
+           * parsed at all.
+           *
+           * Tested on the html rather than on what was laid out, because every
+           * character that reaches the page came from it - a diagram's labels
+           * included, since those are written in the source too.
+           */
+          if (/[^\u0000-\u007f]/.test(html)) {
+            doc.orknuxFace = 'DejaVu';
+            doc.addFileToVFS('DejaVuSans.ttf', DEJAVU);
+            doc.addFont('DejaVuSans.ttf', 'DejaVu', 'normal');
+            doc.addFileToVFS('DejaVuSans-Bold.ttf', DEJAVU_BOLD);
+            doc.addFont('DejaVuSans-Bold.ttf', 'DejaVu', 'bold');
+          } else {
+            doc.orknuxFace = 'helvetica';
+          }
           if (typeof title === 'string' && title.length > 0) {
             doc.setProperties({ title: title });
           }
@@ -768,13 +803,13 @@ export default class Pdf extends OrknuxPlugin {
               }
               doc.setTextColor(39, 39, 42);
               if (index === 0 && block.marker !== null) {
-                doc.setFont('DejaVu', 'normal');
+                doc.setFont(faceOf(doc), 'normal');
                 doc.setFontSize(style.size);
                 const wide = doc.getTextWidth(block.marker);
                 doc.text(block.marker, left - wide - 5, y);
               }
               for (const part of lines[index]) {
-                doc.setFont('DejaVu', part.bold ? 'bold' : 'normal');
+                doc.setFont(faceOf(doc), part.bold ? 'bold' : 'normal');
                 doc.setFontSize(style.size);
                 doc.text(part.text, left + part.x, y);
               }
