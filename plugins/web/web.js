@@ -157,6 +157,76 @@ function brave(key, query, limit) {
   };
 }
 
+/**
+ * Brave's image index, which answers the picture and where it came from.
+ *
+ * A different endpoint from the web one and a different shape: the result's
+ * `url` is the *page* the picture sits on, and the picture itself is under
+ * `properties.url`. Answered the other way round here, because what a caller
+ * wants is the image - the page is where it came from.
+ */
+function braveImages(key, query, limit) {
+  const answered = orknux.http.get(
+    `https://api.search.brave.com/res/v1/images/search?q=${encodeURIComponent(query)}&count=${limit}`,
+    { accept: 'application/json', 'x-subscription-token': key },
+  );
+  if (answered.error !== undefined) {
+    throw new Error(`could not reach Brave: ${answered.error}`);
+  }
+  if (answered.status >= 400) {
+    const refused = at(answered.json, 'error');
+    const said = at(refused, 'detail') ?? at(at(refused, 'meta'), 'message');
+    throw new Error(
+      `Brave answered ${answered.status}${typeof said === 'string' ? ': ' + said : ''}`,
+    );
+  }
+
+  return (at(answered.json, 'results') ?? []).map((one) => ({
+    url: at(at(one, 'properties'), 'url') ?? at(one, 'url'),
+    title: at(one, 'title'),
+    source: at(one, 'source') ?? at(one, 'url'),
+    thumbnail: at(at(one, 'thumbnail'), 'src'),
+  }));
+}
+
+/**
+ * Tavily's images, which come out of a search rather than an image index.
+ *
+ * It has no image endpoint: `include_images` adds pictures to an ordinary
+ * search, and `include_image_descriptions` makes them objects with a sentence
+ * instead of bare urls. So the title is a description of the picture rather
+ * than a caption somebody wrote, there is no separate thumbnail, and the page
+ * it came from is not answered at all - nulls rather than invention.
+ */
+function tavilyImages(key, query, limit) {
+  const answered = orknux.http.request({
+    url: 'https://api.tavily.com/search',
+    method: 'POST',
+    headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+    body: {
+      query: query,
+      max_results: limit,
+      include_images: true,
+      include_image_descriptions: true,
+    },
+  });
+  if (answered.error !== undefined) {
+    throw new Error(`could not reach Tavily: ${answered.error}`);
+  }
+  if (answered.status >= 400) {
+    const said = at(answered.json, 'detail') ?? at(answered.json, 'error');
+    throw new Error(
+      `Tavily answered ${answered.status}${typeof said === 'string' ? ': ' + said : ''}`,
+    );
+  }
+
+  return (at(answered.json, 'images') ?? []).slice(0, limit).map((one) =>
+    typeof one === 'string'
+      ? { url: one, title: null, source: null, thumbnail: null }
+      : { url: at(one, 'url'), title: at(one, 'description'), source: null, thumbnail: null },
+  );
+}
+
 export default class Web extends OrknuxPlugin {
 
   id() {
@@ -234,6 +304,47 @@ export default class Web extends OrknuxPlugin {
       }),
 
       new OrknuxObject({
+        name: 'Image',
+        description: 'One picture a search found, and where it came from.',
+        properties: [
+          {
+            name: 'url',
+            kind: 'string',
+            description:
+              'The picture itself. Hand it to slack_uploadFromUrl and the channel gets the ' +
+              'image rather than a link to it.',
+          },
+          {
+            name: 'title',
+            kind: 'string',
+            description:
+              'What it is: a caption where the backend had one, a description of the picture ' +
+              'where it did not.',
+          },
+          {
+            name: 'source',
+            kind: 'string',
+            description: 'The page it sits on, for crediting it. Null where the backend does not say.',
+          },
+          {
+            name: 'thumbnail',
+            kind: 'string',
+            description: 'A smaller copy, where there is one. Null otherwise.',
+          },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'ImageSearch',
+        description: 'What an image search came to.',
+        properties: [
+          { name: 'backend', kind: 'string', description: 'Which index answered.' },
+          { name: 'query', kind: 'string', description: 'What was asked, after trimming.' },
+          { name: 'images', kind: 'array', of: 'Image', description: 'Best first, capped by limit.' },
+        ],
+      }),
+
+      new OrknuxObject({
         name: 'Search',
         description: 'What one web search came to.',
         properties: [
@@ -250,13 +361,82 @@ export default class Web extends OrknuxPlugin {
     ];
   }
 
-  /* The agents' surface: the one call, fronted. A proxy, so everything stays the function's own. */
+  /* The agents' surface: both calls, fronted. Proxies, so everything stays the functions' own. */
   tools() {
-    return [new OrknuxFunctionTool({ function: 'search' })];
+    return [
+      new OrknuxFunctionTool({ function: 'search' }),
+      new OrknuxFunctionTool({ function: 'searchImages' }),
+    ];
+  }
+
+  /*
+   * Which index to ask, matched forgivingly and refused by name.
+   *
+   * The settings page draws a picker for a parameter that names its values, so
+   * a typo is no longer reachable from the form - but a workspace variable can
+   * hold anything, and answering the wrong index quietly is worse than being
+   * told. Shared by both searches rather than written twice.
+   */
+  backend() {
+    const named =
+      typeof this.settings.backend === 'string' ? this.settings.backend.trim().toLowerCase() : '';
+    if (!BACKENDS.includes(named)) {
+      throw new Error(
+        named.length === 0
+          ? `the plugin's backend parameter is not set: it takes ${BACKENDS.join(' or ')}`
+          : `no search backend called ${named}: it takes ${BACKENDS.join(' or ')}`,
+      );
+    }
+    return named;
+  }
+
+  /** The credential that backend takes, or the sentence naming what is missing. */
+  key(named) {
+    const held = this.settings.apiKey;
+    if (typeof held !== 'string' || held.length === 0) {
+      throw new Error(`the plugin's apiKey parameter is not set, and ${named} needs one`);
+    }
+    return held;
   }
 
   functions() {
     return [
+      new OrknuxFunction({
+        name: 'searchImages',
+        description:
+          'Searches the web for pictures and answers the url of each, what it is, and the page ' +
+          'it came from. Use it when somebody asks what something looks like, for cover art, a ' +
+          'screenshot, a photograph, a logo - anything where a picture is the answer and a ' +
+          'paragraph is not. Every url can go straight to slack_uploadFromUrl, which copies the ' +
+          'picture into a channel so people see it rather than a link they have to click. limit ' +
+          'caps how many come back, 5 if not given. Brave answers a caption, the page and a ' +
+          'thumbnail; Tavily has no image index and answers pictures from an ordinary search, so ' +
+          'its title is a description and its source and thumbnail are null.',
+        params: [
+          { name: 'query', type: 'string' },
+          { name: 'limit', type: 'number', required: false, default: DEFAULT_RESULTS },
+        ],
+        returnType: 'ImageSearch',
+        run: (query, limit) => {
+          const asked = typeof query === 'string' ? query.trim() : '';
+          if (asked.length === 0) {
+            throw new Error('there is nothing to search for');
+          }
+
+          const named = this.backend();
+          const key = this.key(named);
+          const capped = Math.min(Math.max(limit, 1), MAX_RESULTS);
+
+          return {
+            backend: named,
+            query: asked,
+            images: named === 'tavily'
+              ? tavilyImages(key, asked, capped)
+              : braveImages(key, asked, capped),
+          };
+        },
+      }),
+
       new OrknuxFunction({
         name: 'search',
         description:
@@ -277,29 +457,8 @@ export default class Web extends OrknuxPlugin {
             throw new Error('there is nothing to search for');
           }
 
-          /*
-           * Still matched forgivingly, and still refused by name. The settings
-           * page draws a picker for a parameter that names its values now, so
-           * a typo is no longer reachable from the form — but a workspace
-           * variable can hold anything, and answering the wrong index quietly
-           * is worse than being told.
-           */
-          const named =
-            typeof this.settings.backend === 'string'
-              ? this.settings.backend.trim().toLowerCase()
-              : '';
-          if (!BACKENDS.includes(named)) {
-            throw new Error(
-              named.length === 0
-                ? `the plugin's backend parameter is not set: it takes ${BACKENDS.join(' or ')}`
-                : `no search backend called ${named}: it takes ${BACKENDS.join(' or ')}`,
-            );
-          }
-
-          const key = this.settings.apiKey;
-          if (typeof key !== 'string' || key.length === 0) {
-            throw new Error(`the plugin's apiKey parameter is not set, and ${named} needs one`);
-          }
+          const named = this.backend();
+          const key = this.key(named);
 
           /* The server put the default in, so this only has to cap it. */
           const capped = Math.min(Math.max(limit, 1), MAX_RESULTS);

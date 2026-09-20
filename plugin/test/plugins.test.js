@@ -493,6 +493,46 @@ test('the makers of bytes answer their agents a key, not the bytes', async () =>
   }
 });
 
+test('web declares searchImages beside search', async () => {
+  const inspected = await inspect(shipped('web'));
+
+  assert.deepEqual(
+    inspected.functions.map((one) => one.name),
+    ['searchImages', 'search'],
+  );
+  assert.deepEqual(
+    inspected.tools.map((one) => one.name),
+    ['search', 'searchImages'],
+  );
+
+  /* A picture, and where it came from, so a caller can credit it. */
+  const image = inspected.objects.find((one) => one.name === 'Image');
+  assert.deepEqual(
+    image.properties.map((one) => one.name),
+    ['url', 'title', 'source', 'thumbnail'],
+  );
+  const found = inspected.objects.find((one) => one.name === 'ImageSearch');
+  assert.deepEqual(
+    found.properties.map((one) => one.name),
+    ['backend', 'query', 'images'],
+  );
+
+  const url = new URL(`../../plugins/web/web.js`, import.meta.url);
+  const { default: Web } = await import(url.href);
+  const images = new Web().functions().find((one) => one.name === 'searchImages').run;
+
+  /*
+   * Which backend answers, and with what key, is not reachable from here:
+   * both come off `this.settings`, and the contract's own fallback freezes
+   * those empty and non-extensible on purpose - a plugin being asked what it
+   * is has no settings yet. So what a test can hold is the declaration above
+   * and the two refusals below; how Brave's and Tavily's answers are read is
+   * the sandbox's to prove.
+   */
+  assert.throws(() => images('   ', 1), /nothing to search for/);
+  assert.throws(() => images('anything', 1), /backend parameter is not set/);
+});
+
 test('the teams plugin declares what the server would accept', async () => {
   const inspected = await inspect(shipped('teams'));
 
@@ -905,7 +945,8 @@ test('pdf preview draws a page: bytes on the function, a key on the tool', async
 
     /* The tool takes the key the document came back with, and nothing else. */
     const seen = tool.run(doc.key, 1, 800);
-    assert.equal(seen.png, 'iVBOR', 'the picture comes back in full - looking at it is the point');
+    assert.equal(seen.picture, 'iVBOR', 'the picture comes back in full - looking at it is the point');
+    assert.equal(seen.pictureType, 'image/png', 'and says what it is');
     assert.equal(seen.pages, 3, "and the document's page count, not this page's number");
     assert.equal(seen.width, 800);
     assert.equal(seen.height, 842);
@@ -922,7 +963,7 @@ test('pdf preview draws a page: bytes on the function, a key on the tool', async
       'base64',
       'the workflow surface still takes a document',
     );
-    assert.equal(declared(doc.base64, 1, 800).png, 'iVBOR');
+    assert.equal(declared(doc.base64, 1, 800).picture, 'iVBOR');
 
     /* Each refusal names what to do instead, or what was actually there. */
     assert.throws(() => tool.run('', 1, 0), /takes a contentKey, not a document/);
@@ -1258,13 +1299,14 @@ test('the web plugin declares what the server would accept', async () => {
   /* Nothing of the language is needed — only the request and what came back. */
   assert.deepEqual(inspected.permissions, []);
   assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
+  /* Two searches, one index: pictures and pages come from the same key. */
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
-    ['search'],
+    ['searchImages', 'search'],
   );
   assert.deepEqual(
     inspected.tools.map((declared) => declared.name),
-    ['search'],
+    ['search', 'searchImages'],
   );
 });
 
