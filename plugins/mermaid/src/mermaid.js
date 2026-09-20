@@ -59,6 +59,26 @@ function offline(svg) {
   return svg.replace(/^\s*@import url\([^)]*\);\s*$/m, '');
 }
 
+/**
+ * A short name for one drawing, derived from the drawing itself.
+ *
+ * Content rather than a counter or a clock: the same diagram rendered twice
+ * lands on the same key and simply overwrites itself, and nothing here has to
+ * ask what time it is or keep a number between calls.
+ *
+ * FNV-1a because it is four lines and this is a name, not a checksum - two
+ * different diagrams colliding would mean one overwriting the other's entry
+ * in a single session, which is a handful of bits away from never.
+ */
+function keyFor(text) {
+  let hash = 0x811c9dc5;
+  for (let at = 0; at < text.length; at += 1) {
+    hash ^= text.charCodeAt(at);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `mermaid.${hash.toString(36)}`;
+}
+
 export default class Mermaid extends OrknuxPlugin {
 
   id() {
@@ -97,6 +117,14 @@ export default class Mermaid extends OrknuxPlugin {
             description: 'The SVG itself. Upload it with a .svg filename and it shows as an image.',
           },
           { name: 'bytes', kind: 'number', description: 'How long that text is.' },
+          {
+            name: 'key',
+            kind: 'string',
+            description:
+              'Where this drawing is kept for the rest of this session. Hand it to ' +
+              'slack_upload as contentKey instead of copying the svg out - the bytes never ' +
+              'leave the server, so nothing can be truncated on the way.',
+          },
         ],
       }),
 
@@ -130,9 +158,10 @@ export default class Mermaid extends OrknuxPlugin {
           'flowchart/graph, sequenceDiagram, stateDiagram-v2, classDiagram and erDiagram; another ' +
           'kind (pie, gantt, mindmap, ...) is refused by name - use links for those. theme names a ' +
           'palette (zinc-light, zinc-dark, tokyo-night, catppuccin-mocha, catppuccin-latte, nord, ' +
-          '...), left out for the light default. The answer is SVG text: put it on Slack with ' +
-          'slack_upload and a .svg filename, where it shows as an image. Answers svg and its byte ' +
-          'count.',
+          '...), left out for the light default. Answers the svg, its byte count, and a short key ' +
+          'the drawing is kept under. To put it on Slack call slack_upload with a .svg filename ' +
+          'and pass that key as contentKey - do not copy the svg out and paste it in, which is ' +
+          'thousands of characters that have to come back perfect and do not.',
         params: [
           { name: 'source', type: 'string' },
           { name: 'theme', type: 'string', required: false, default: '' },
@@ -168,7 +197,37 @@ export default class Mermaid extends OrknuxPlugin {
           }
 
           const held = offline(svg);
-          return { svg: held, bytes: held.length };
+
+          /*
+           * Kept here as well as answered, and this is the half that matters
+           * for anything large.
+           *
+           * The answer travels through the model: it reads the svg, and to
+           * upload it it has to write every character of it back out in the
+           * next tool call. A diagram of four kilobytes is four kilobytes of
+           * generated text that has to come out perfect, and it does not -
+           * one that went to Slack as base64 arrived with a stray character
+           * in the middle of it and the whole call was rejected as malformed
+           * JSON.
+           *
+           * So the bytes are also left in the session's own store, and the
+           * key is short enough to copy without getting it wrong. Whatever
+           * reads it takes them from here rather than from what the model
+           * managed to retype. The svg stays in the answer because a caller
+           * that only wants to look at it should not have to fetch it, and
+           * because a workflow node - no session, no store - has nowhere
+           * else to read it from.
+           */
+          const key = keyFor(held);
+          const kept = orknux.session.store.put(key, held);
+
+          return {
+            svg: held,
+            bytes: held.length,
+            // Empty where there is no session to keep it in, which is exactly
+            // when a caller has to fall back to the svg above.
+            key: kept.error === undefined ? key : '',
+          };
         },
       }),
 

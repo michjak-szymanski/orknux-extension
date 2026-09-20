@@ -46,10 +46,38 @@ is in:
 
 | Function | For |
 |---|---|
-| `upload(channel, filename, content, comment, threadTs)` | **Text** Slack will host: a CSV, a log, JSON, mermaid source. Answers the file's `id` and `permalink`. An empty `channel` uploads without sharing, and the permalink then goes into a later `post`'s `attachments`. |
+| `upload(channel, filename, content, comment, threadTs, contentKey)` | **Text** Slack will host: an SVG, a CSV, a log, JSON, mermaid source. Answers the file's `id` and `permalink`. An empty `channel` uploads without sharing, and the permalink then goes into a later `post`'s `attachments`. `contentKey` takes the bytes from the session store instead of from `content` — see *Passing content by key*. |
 | `uploadBinary(channel, filename, base64, comment, threadTs)` | **Bytes** Slack will host, as base64 — a PDF, an image. Up to the http door's 10 MB. `pdf_fromHtml` answers base64 ready for this. |
 | `uploadFromUrl(channel, url, filename, comment, threadTs)` | **Copying a file from a url onto Slack**, so the channel holds the file rather than a link. Fetches up to 5 MB. An empty `filename` is derived from the url and its content type. |
 | `remoteFile(channel, url, title, filetype)` | **Pointing at a url without copying it.** Slack keeps a pointer and shows a card. The right door when the bytes should stay where they are, or exceed the caps above. |
+
+## Passing content by key
+
+A tool's answer reaches the next tool call by going **through the model**,
+which has to write every character of it back out. A few kilobytes does not
+survive that trip: a rendered diagram went to Slack with one stray character in
+the middle of it and the whole call was rejected as malformed JSON.
+
+So `upload` takes a `contentKey` as well as `content`:
+
+```
+mermaid_render('flowchart LR
+ A --> B')   → { svg: '<svg …>', bytes: 4182, key: 'mermaid.1k3af9' }
+slack_upload('C123', 'flow.svg', '', 'the flow', '', 'mermaid.1k3af9')
+```
+
+The key is a dozen characters, and what it names never leaves the server —
+`mermaid_render` puts the SVG in the session store on the way out, and `upload`
+reads it back from there.
+
+**Preferred, not exclusive.** A caller holding the text passes `content` as
+before, and a workflow node has no session to keep anything in, so `content`
+stays the path that always works. A key that names nothing throws and says to
+pass the content or render again, rather than uploading an empty file.
+
+**Text goes to `upload`, not `uploadBinary`.** An SVG is text. Encoding it to
+base64 to send it as bytes doubles its length and puts it back through the
+model, which is the problem this exists to avoid.
 
 ### Files in
 

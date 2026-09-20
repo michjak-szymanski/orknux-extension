@@ -996,13 +996,18 @@ adding a message to anybody's unread count.`,
       new OrknuxFunction({
         name: 'upload',
         description:
-          'Uploads text content to Slack as a file the workspace hosts - a CSV, a log, JSON, mermaid ' +
-          'source - and shares it to a channel with a message. Pass the channel id (not a #name), a ' +
+          'Uploads text content to Slack as a file the workspace hosts - an SVG, a CSV, a log, JSON, ' +
+          'markdown, source - and shares it to a channel with a message. Anything you can read is ' +
+          'text and belongs here, including an SVG a renderer answered with: send it as it stands, ' +
+          'never base64. Pass the channel id (not a #name), a ' +
           'filename whose extension says what the content is (report.csv, diagram.mmd), the content ' +
           'itself, what the sharing message should say, and a threadTs to share inside a thread - ' +
           'empty for the channel itself. Pass an empty channel to only upload: the answered permalink ' +
           'then goes in a later post\'s attachments. Text only - a PDF or an image cannot travel this ' +
-          'way; give remoteFile its url instead. Answers the file\'s id and permalink. Needs the ' +
+          'way; give remoteFile its url instead. Where a tool answered with a key for what it ' +
+          'made - mermaid_render does - pass that as contentKey and leave content empty: the ' +
+          'bytes are taken from the server rather than from what you retype, which is what stops ' +
+          'a long file arriving truncated. Answers the file\'s id and permalink. Needs the ' +
           'botToken parameter.',
         params: [
           { name: 'channel', type: 'string' },
@@ -1010,17 +1015,48 @@ adding a message to anybody's unread count.`,
           { name: 'content', type: 'string' },
           { name: 'comment', type: 'string' },
           { name: 'threadTs', type: 'string' },
+          { name: 'contentKey', type: 'string', required: false, default: '' },
         ],
         returnType: 'HostedFile',
-        run: (channel, filename, content, comment, threadTs) =>
-          uploadedText(this.settings, filename, content, channel, comment, threadTs),
+        run: (channel, filename, content, comment, threadTs, contentKey) => {
+          /*
+           * The key is preferred over the content, and that is the point of it.
+           *
+           * Anything a tool answered with has to be written back out by the
+           * model to reach the next call, and a few kilobytes of it does not
+           * survive the trip - a rendered diagram went to Slack with a stray
+           * character in the middle and the whole call was rejected as
+           * malformed JSON. A key is a dozen characters, and what it names
+           * never leaves the server.
+           *
+           * Preferred rather than exclusive: a caller with the text in hand
+           * passes content as before, and a workflow node has no session to
+           * keep anything in, so content stays the way that always works.
+           */
+          let said = content;
+          if (typeof contentKey === 'string' && contentKey.length > 0) {
+            const held = orknux.session.store.get(contentKey);
+            if (typeof held !== 'string' || held.length === 0) {
+              throw new Error(
+                `nothing is kept under ${contentKey} in this session: pass the content itself, ` +
+                  'or render it again to get a fresh key',
+              );
+            }
+            said = held;
+          }
+
+          return uploadedText(this.settings, filename, said, channel, comment, threadTs);
+        },
       }),
 
       new OrknuxFunction({
         name: 'uploadBinary',
         description:
-          'Uploads bytes to Slack as a file the workspace hosts - a PDF, an image - passed as base64, ' +
-          'up to 10 MB decoded, and shares them to a channel with a message. Pass the channel id, a ' +
+          'Uploads bytes to Slack as a file the workspace hosts - a PDF, a PNG, a JPEG - passed as ' +
+          'base64, up to 10 MB decoded, and shares them to a channel with a message. Only for bytes ' +
+          'that are not text: an SVG, a CSV, JSON, markdown or any source you could read goes to ' +
+          'upload as it stands. Encoding text to base64 to send it here doubles its length and has ' +
+          'to be copied out perfectly, which is how a long one gets truncated. Pass the channel id, a ' +
           'filename whose extension says what the bytes are (report.pdf, chart.png), the base64, what ' +
           'the sharing message should say, and a threadTs - or an empty channel to only upload. ' +
           'pdf_fromHtml answers base64 ready for this. Answers the file\'s id and permalink. Needs the ' +
