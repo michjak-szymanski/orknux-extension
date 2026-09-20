@@ -39,7 +39,15 @@ jobs:
       contents: write
 
     steps:
+      # The whole history, not the tip.
+      #
+      # A release's notes are the commit that set that plugin's version, found
+      # with `git log -S` over its `plugin.json` - which needs the commits to
+      # be here. A hundred of them in 34 MB is cheaper than asking anybody to
+      # write the same sentence twice.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -211,15 +219,56 @@ jobs:
           fi
 
           published=0
+          noted=0
           for zip in plugins/dist/*.zip; do
             name="$(basename "$zip")"
+            slug="${name%.zip}"
+            key="${slug%-*}"
+            version="${slug##*-}"
+
+            # What changed, for the listing to show beside this version.
+            #
+            # The commit that set the version is the note, because it already
+            # is one: a bump and the reason for it are written in the same
+            # place here, and asking for the same sentence again in a file
+            # beside the plugin is asking for one of the two to go stale.
+            # `-S` finds where this exact version string entered the manifest.
+            #
+            # Sent every time, for every plugin, not only for the ones whose
+            # version moved. The notes are derived from the version rather
+            # than from the run, so a plugin republished unchanged is sent the
+            # same words it already had - which makes this idempotent, and
+            # means a listing that has no notes yet gets them on the next
+            # release rather than staying blank until its next bump.
+            rm -f notes.md
+            sha="$(git log -1 --format=%H -S"\"version\": \"$version\"" \
+              -- "plugins/$key/plugin.json" || true)"
+            if [ -n "$sha" ]; then
+              git log -1 --format='%s%n%n%b' "$sha" > notes.md
+              noted=$((noted + 1))
+            else
+              # A version that entered the manifest before this repository did,
+              # or one hand-edited into it. Worth saying out loud, and not
+              # worth failing a release over.
+              echo "::warning::no commit set $key $version, so it goes up without notes"
+            fi
+
             # `-o` keeps the body out of the log, where a token echoed back in
             # an error would otherwise land; `-w` is the only thing printed.
-            status="$(curl -sS --retry 2 --retry-connrefused \
-              -o answer.json -w '%{http_code}' \
-              -X POST https://orknux.ai/api/plugins \
-              -H "Authorization: Bearer $ORKNUX_PUBLISH_TOKEN" \
-              -F "file=@$zip")"
+            sending=(
+              -sS --retry 2 --retry-connrefused
+              -o answer.json -w '%{http_code}'
+              -X POST https://orknux.ai/api/plugins
+              -H "Authorization: Bearer $ORKNUX_PUBLISH_TOKEN"
+              -F "file=@$zip"
+            )
+            # `notes=<file` sends the file's text as a field. `@` would send it
+            # as an upload, which is not what a paragraph is.
+            if [ -f notes.md ]; then
+              sending+=(-F 'notes=<notes.md')
+            fi
+
+            status="$(curl "${sending[@]}")"
 
             case "$status" in
               201) echo "$name — created" ;;
@@ -234,7 +283,7 @@ jobs:
             esac
             published=$((published + 1))
           done
-          echo "published $published plugin(s) to orknux.ai"
+          echo "published $published plugin(s) to orknux.ai, $noted of them with notes"
 
       # On a manual run there is no tag and no release, so the zips go up as a
       # build artifact instead — which is what somebody clicking "Run workflow"

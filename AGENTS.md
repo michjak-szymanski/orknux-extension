@@ -222,38 +222,36 @@ mention `currentColor`, and each must declare a colour of its own.
 against it and so the test can. `plugins/plugin.example.json` is a filled-in
 one to copy when writing a new plugin.
 
-## The changelog
+## Release notes are the bump commit
 
-Each plugin keeps a `changelog.json` beside it: an object keyed by version,
-**newest first**, each value a line or two of markdown saying what that release
-changed.
+The marketplace shows, beside each release, what that version changed. Those
+notes are sent at publish time by the workflow, and where they come from is
+this:
 
-```json
-{
-  "0.5.0": "`searchImages`, because a picture is sometimes the answer.",
-  "0.4.1": "No code changed. `category` became `tags` in every manifest here."
-}
-```
+> the commit that set the version in `plugins/<key>/plugin.json`
 
-A file rather than a `changelog` field in the manifest, because slack's runs to
-fourteen entries and would be most of what `plugin.json` says. A file rather
-than a `changelogPath` naming it, because `changelog.json` beside the plugin is
-what the marketplace reads without being told to — a field repeating the
-default is a second place for it to be wrong, and the test refuses one.
+found with `git log -S` on the version string, subject and body both. Nothing
+is written twice and nothing beside the plugin can go stale, because there is
+only one copy of the sentence and it is the one in the history.
 
-**Bump the version and write the entry in the same commit.** A changelog one
-release behind is worse than none: the listing shows a history that looks
-complete and stops exactly where somebody is looking. `manifests.test.js`
-fails when the version being shipped has no entry, which is the only part of
-this a test can hold you to.
+**So a commit that bumps a version is published prose.** Write it for somebody
+deciding whether to update, not only for whoever reads `git log` — say what
+changed, and say what it was like before if that is what makes the change make
+sense. The commits here already read that way; this is why it matters that
+they keep to it.
 
-Entries are for versions that were **released**. A version bumped and
-superseded before any tag went out was never installable, and a line about it
-in a public listing is noise dressed as history.
+A version bumped in a commit that changes several plugins gives all of them
+the same note. That is honest where the change really was one change, and a
+reason to bump separately where it was not.
 
-Order is the author's and is kept: the marketplace neither parses nor compares
-versions — `2.0.0`, `2026.1` and `v3-beta` are all somebody's idea of one — so
-newest first is a convention here rather than something computed.
+Notes are derived from the version rather than from the run, so every publish
+sends them for every plugin — a plugin republished unchanged is sent the same
+words it already had. That is what makes it safe to run twice, and it is why a
+listing that has no notes yet gets them at the next release rather than waiting
+for its own next bump.
+
+Nothing about the changelog lives in the plugin's folder or its zip. The
+marketplace used to read one from there and no longer does.
 
 There is no catalog above these, and there should not be one: a plugin is
 described in its own folder and nowhere else, so what is on offer is whatever

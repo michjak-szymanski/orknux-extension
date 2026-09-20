@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -85,53 +85,6 @@ for (const name of shipped) {
     assert.ok(manifest.version.length <= 32, 'version is longer than the schema allows');
     if (manifest.author !== undefined) {
       assert.ok(manifest.author.length <= 120, 'author is longer than the schema allows');
-    }
-
-    /*
-     * The history, where a plugin keeps one.
-     *
-     * `changelog.json` beside the plugin is what the marketplace reads
-     * without being told to, which is why none of these manifests name a
-     * `changelogPath` - the convention already points at the right file, and
-     * a field repeating it is a second place to get it wrong.
-     *
-     * The rule that earns this test: **the version being shipped has an
-     * entry**. A changelog silently one release behind is worse than no
-     * changelog, because the listing shows a history that looks complete and
-     * stops exactly where somebody would be looking.
-     */
-    const history = `${root}${name}/changelog.json`;
-    if (existsSync(history)) {
-      const changelog = JSON.parse(readFileSync(history, 'utf8'));
-      assert.ok(
-        !Array.isArray(changelog) && typeof changelog === 'object' && changelog !== null,
-        'a changelog is an object keyed by version',
-      );
-
-      const versions = Object.keys(changelog);
-      assert.ok(versions.length <= 200, 'more entries than the schema allows');
-      assert.ok(
-        versions.includes(manifest.version),
-        `${name} ships ${manifest.version} and its changelog stops at ${versions[0]}`,
-      );
-
-      for (const [version, said] of Object.entries(changelog)) {
-        assert.ok(version.length >= 1 && version.length <= 32, `${version} is not a version`);
-        assert.equal(typeof said, 'string', `${version} says something that is not text`);
-        /* Never empty: a version with nothing under it looks documented and is not. */
-        assert.ok(said.trim().length > 0, `${version} has an empty entry`);
-        assert.ok(said.length <= 4000, `${version} says more than the schema allows`);
-      }
-
-      /* Newest first, which is the order the marketplace keeps and shows. */
-      assert.equal(versions[0], manifest.version, 'the newest entry is the version shipped');
-
-      /*
-       * And no manifest names a changelogPath, because the file above is
-       * already where the default looks. Named and defaulted pointing at the
-       * same file is one of them that can rot.
-       */
-      assert.equal(manifest.changelogPath, undefined, 'the convention already finds it');
     }
 
     /*

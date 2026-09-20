@@ -1,6 +1,0 @@
-{
-  "0.3.0": "A skill, **Writing for Slack**, for the case that has no call in it. A reply had been arriving in a channel reading `**orknux-extension**` with the asterisks showing - text a model wrote straight into a message rather than through any function here, which no converter can reach. The skill can.",
-  "0.2.1": "No code changed. `category` became `tags` in every manifest here, and a manifest field is a patch.",
-  "0.2.0": "No change to this plugin. The repository moved its hashing to the platform's crypto API and versioned everything together.",
-  "0.1.0": "First release. Turns the markdown a model writes into the mrkdwn Slack actually reads - or into plain text - without mangling the code spans and links on the way."
-}

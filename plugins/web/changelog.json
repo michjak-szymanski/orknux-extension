@@ -1,7 +1,0 @@
-{
-  "0.5.0": "`searchImages`, because a picture is sometimes the answer. Same `backend` and same `apiKey` as `search`, so turning it on costs nothing beyond what is already configured. Brave has a real image index; Tavily has none and says so by answering `null` for the fields it cannot fill, rather than inventing them.",
-  "0.4.1": "No code changed. `category` became `tags` in every manifest here, and a manifest field is a patch.",
-  "0.4.0": "Optional parameters carry a real default instead of a sentinel. `0` no longer means *the usual number* and an empty string no longer means *use the configured one* - the argument can simply be left out, and the tool descriptions stopped spending a model's attention explaining a convention it kept getting wrong.",
-  "0.2.0": "No change to this plugin. The repository moved its hashing to the platform's crypto API and versioned everything together.",
-  "0.1.0": "First release. Searches the web through Tavily or Brave, whichever the workspace configures, and answers title, url and a readable snippet per result."
-}

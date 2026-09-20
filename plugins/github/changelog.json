@@ -1,6 +1,0 @@
-{
-  "1.2.1": "No code changed. `category` became `tags` in every manifest here, and a manifest field is a patch.",
-  "1.2.0": "Optional parameters carry a real default instead of a sentinel. `0` no longer means *the usual number* and an empty string no longer means *use the configured one* - the argument can simply be left out, and the tool descriptions stopped spending a model's attention explaining a convention it kept getting wrong.",
-  "1.1.0": "Four hundred lines of hand-written HMAC and SHA-256 are gone. Webhook signatures are verified through the platform's crypto API instead, and `lib/hashing.js` left with them.",
-  "1.0.0": "First release. Searches pulls, code and commits, opens files and their history, reports build status, and verifies webhook deliveries."
-}
