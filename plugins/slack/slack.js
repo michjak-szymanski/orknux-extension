@@ -93,11 +93,32 @@ function at(holder, name) {
  * that are undefined or empty are left out, which is how an optional Slack
  * argument is not passed.
  */
-/** The bot token, or the sentence that says which parameter is missing. */
+/**
+ * The bot token, or the sentence that says which parameter is missing.
+ *
+ * A user token is accepted and noted rather than refused. Slack takes either
+ * for these calls and attributes the result to whoever the token belongs to -
+ * so a `xoxp-` here means every file this plugin uploads is posted by that
+ * person, under their name and their picture, and the bot's own message
+ * afterwards says "I have attached the file" beside somebody else's upload.
+ *
+ * That is occasionally what somebody wants, which is why this is a line in the
+ * log rather than an error. What it usually is, is a `botToken` pointed at
+ * the user token `search` needs - the one Slack call here that will not
+ * answer to a bot. That token has its own parameter now, `userToken`, so
+ * the two no longer have to share a field and uploads can stay the bot's.
+ */
 function tokenOf(settings) {
   const token = settings.botToken;
   if (typeof token !== 'string' || token.length === 0) {
     throw new Error("the plugin's botToken parameter is not set, and uploading needs it");
+  }
+  if (token.startsWith('xoxp-')) {
+    orknux.log.warn(
+      'botToken holds a user token (xoxp-), so Slack will show this upload as posted by that ' +
+        'person rather than by the bot. A bot token (xoxb-) uploads as the bot; if this was ' +
+        'meant for search, it belongs in the userToken parameter.',
+    );
   }
   return token;
 }
@@ -168,6 +189,241 @@ function completed(settings, fileId, filename, channel, comment, threadTs) {
   return { id: at(file, 'id'), permalink: at(file, 'permalink') };
 }
 
+/** The middle step's two failures, which every upload here answers the same way. */
+function putOrThrow(put) {
+  if (put.error !== undefined) {
+    throw new Error(`could not reach Slack's upload url: ${put.error}`);
+  }
+  if (put.status >= 400) {
+    throw new Error(`Slack's upload url answered ${put.status}`);
+  }
+}
+
+/**
+ * Text put on Slack as a file it hosts.
+ *
+ * Slack's external upload flow, whose three steps are the reason this is one
+ * function: ask for an upload url naming the byte length, put the bytes
+ * there, then complete - which is also where sharing to a channel and saying
+ * something about it happen.
+ */
+function uploadedText(settings, filename, content, channel, comment, threadTs) {
+  if (typeof filename !== 'string' || filename.length === 0) {
+    throw new Error('an upload needs a filename');
+  }
+  if (typeof content !== 'string' || content.length === 0) {
+    throw new Error('there is no content to upload');
+  }
+
+  const opened = slackApi(settings, 'files.getUploadURLExternal', {
+    filename: filename,
+    length: new TextEncoder().encode(content).length,
+  });
+
+  putOrThrow(
+    orknux.http.request({
+      url: at(opened, 'upload_url'),
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: content,
+    }),
+  );
+
+  return completed(settings, at(opened, 'file_id'), filename, channel, comment, threadTs);
+}
+
+/** Bytes, passed as base64, put on Slack the same way. */
+function uploadedBytes(settings, filename, base64, channel, comment, threadTs) {
+  if (typeof filename !== 'string' || filename.length === 0) {
+    throw new Error('an upload needs a filename');
+  }
+  const packed = typeof base64 === 'string' ? base64.replace(/\s+/g, '') : '';
+  if (packed.length === 0) {
+    throw new Error('there are no bytes to upload');
+  }
+
+  /*
+   * Slack is told the length in decoded bytes, which base64 carries in its
+   * own arithmetic: three bytes per four characters, less what the padding
+   * says was never there.
+   */
+  const size = Math.floor((packed.replace(/=+$/, '').length * 3) / 4);
+  const opened = slackApi(settings, 'files.getUploadURLExternal', {
+    filename: filename,
+    length: size,
+  });
+
+  putOrThrow(orknux.http.upload(at(opened, 'upload_url'), packed));
+
+  return completed(settings, at(opened, 'file_id'), filename, channel, comment, threadTs);
+}
+
+/** A file fetched from a url and put on Slack, so the workspace holds it. */
+function uploadedFromUrl(settings, url, filename, channel, comment, threadTs) {
+  if (typeof url !== 'string' || !/^https?:\/\//.test(url)) {
+    throw new Error('a file is fetched by its http(s) url, and none was passed');
+  }
+  tokenOf(settings); // before the fetch, so a missing token costs nothing
+
+  const got = orknux.http.download(url);
+  if (got.error !== undefined) {
+    throw new Error(`could not fetch the file: ${got.error}`);
+  }
+  if (got.status >= 400) {
+    throw new Error(`${url} answered ${got.status}`);
+  }
+
+  const named =
+    typeof filename === 'string' && filename.length > 0
+      ? filename
+      : namedFromUrl(url, got.contentType);
+  const opened = slackApi(settings, 'files.getUploadURLExternal', {
+    filename: named,
+    length: got.size,
+  });
+
+  putOrThrow(
+    orknux.http.upload(at(opened, 'upload_url'), got.base64, got.contentType ?? undefined),
+  );
+
+  return completed(settings, at(opened, 'file_id'), named, channel, comment, threadTs);
+}
+
+/**
+ * The permalinks `post` attaches, from whatever a caller passed as attachments.
+ *
+ * A string is a file already on Slack and is used as it is - the cheap path,
+ * and the one that needs no token at all. A map is a file that does not exist
+ * yet: it is uploaded here, with `botToken`, and what comes back is its
+ * permalink, so both kinds end up in the same list.
+ *
+ * Uploaded *without* a channel, deliberately. Sharing at upload time makes
+ * Slack post the file as its own message, which is a second message nobody
+ * asked for and which arrives before the text explaining it. A permalink in
+ * the message that follows is Slack's own way of hanging a file on a message
+ * somebody wrote.
+ */
+function attaching(settings, attachments) {
+  if (!Array.isArray(attachments)) {
+    return [];
+  }
+  const links = [];
+  for (const one of attachments) {
+    if (typeof one === 'string') {
+      if (one.length > 0) links.push(one);
+      continue;
+    }
+    if (one === null || typeof one !== 'object') {
+      continue;
+    }
+
+    const filename = at(one, 'filename');
+    const named = typeof filename === 'string' ? filename : '';
+    const content = at(one, 'content');
+    const base64 = at(one, 'base64');
+    const url = at(one, 'url');
+
+    let hosted;
+    if (typeof content === 'string') {
+      hosted = uploadedText(settings, named, content, '', '', '');
+    } else if (typeof base64 === 'string') {
+      hosted = uploadedBytes(settings, named, base64, '', '', '');
+    } else if (typeof url === 'string') {
+      hosted = uploadedFromUrl(settings, url, named, '', '', '');
+    } else {
+      throw new Error(
+        'an attachment map says which file by content, base64 or url, and none of the three was set',
+      );
+    }
+    if (typeof hosted.permalink === 'string' && hosted.permalink.length > 0) {
+      links.push(hosted.permalink);
+    }
+  }
+  return links;
+}
+
+/**
+ * A search run against Slack's own API with the `userToken` parameter.
+ *
+ * Search is the one call here Slack will not answer for a bot: `search.messages`
+ * refuses a `xoxb-` with `not_allowed_token_type`, whoever asks. The capability
+ * path reads the User Token field of the connection, which is the right answer
+ * when a workspace has filled it in - and this is the answer when it has not,
+ * or when the searching identity should not be whoever the connection belongs
+ * to. Shaped to match the capability's answer exactly, so the function's
+ * callers cannot tell which path ran.
+ */
+function searchAs(token, query, limit) {
+  const answered = orknux.http.request({
+    url: 'https://slack.com/api/search.messages',
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body:
+      `query=${encodeURIComponent(query)}&count=${encodeURIComponent(limit)}`,
+  });
+  if (answered.error !== undefined) {
+    return { error: answered.error };
+  }
+  if (at(answered.json, 'ok') !== true) {
+    const said = at(answered.json, 'error');
+    return { error: typeof said === 'string' ? said : `status ${answered.status}` };
+  }
+
+  const messages = at(answered.json, 'messages');
+  const matches = (at(messages, 'matches') ?? []).map((one) => ({
+    channel: at(at(one, 'channel'), 'id'),
+    channelName: at(at(one, 'channel'), 'name'),
+    ts: at(one, 'ts'),
+    /* Slack answers a search match by name where a thread answers by id. */
+    user: at(one, 'user') ?? at(one, 'username'),
+    text: at(one, 'text'),
+    permalink: at(one, 'permalink'),
+  }));
+  return { matches: matches, total: at(messages, 'total') ?? matches.length };
+}
+
+/**
+ * Whether a failure was the connection being gone rather than Slack saying no.
+ *
+ * The event a workflow carries holds the connection it came in on, and every
+ * function here tells the caller to pass it - so when that connection has
+ * since been deleted, what fails is the caller doing exactly as it was told.
+ */
+function connectionGone(error) {
+  return typeof error === 'string' && error.includes('has been deleted');
+}
+
+/**
+ * One call, through the connection asked for, or through the configured one.
+ *
+ * A connection id travels inside the event payload and outlives the connection
+ * itself: delete the connection and every event already in flight still names
+ * it. An agent handed one of those did as it was told, was told the connection
+ * is gone, and had to work out on its own that an empty string means "the
+ * configured one" - a wasted turn on the way to the only other option there is.
+ *
+ * So the fallback happens here. It cannot reach another workspace's Slack: the
+ * server checks that the caller may use the connection it names, and the
+ * configured one is this workspace's own, chosen in the plugin's settings. What
+ * it can do is send through a different connection of this workspace than the
+ * one named, which is worth a line in the log and is better than not sending.
+ *
+ * @param call takes a connection id and answers what the door answered.
+ */
+function through(call, asked, configured) {
+  const first = call(asked || configured);
+  if (first.error === undefined || !asked || asked === configured) return first;
+  if (!connectionGone(first.error)) return first;
+
+  orknux.log.warn(
+    `the connection this event came in on (${asked}) has been deleted; using the configured one instead`,
+  );
+  return call(configured);
+}
+
 export default class Slack extends OrknuxPlugin {
 
   id() {
@@ -192,8 +448,23 @@ export default class Slack extends OrknuxPlugin {
       new OrknuxParameter({
         name: 'botToken',
         description:
-          'A bot token for the two upload functions, with files:write - and remote_files:write ' +
-          'and remote_files:share for remoteFile. Everything else here runs without it.',
+          'A bot token (xoxb-) for the two upload functions, with files:write - and ' +
+          'remote_files:write and remote_files:share for remoteFile. Everything else here runs ' +
+          'without it, and post needs it only when an attachment is a file to upload rather ' +
+          'than a permalink. It must be the bot\'s own: a user token (xoxp-) works, but Slack ' +
+          'then shows every uploaded file as posted by that person rather than by the bot - a ' +
+          'user token for search goes in userToken instead.',
+        type: 'string',
+        required: false,
+        secret: true,
+      }),
+      new OrknuxParameter({
+        name: 'userToken',
+        description:
+          'A user token (xoxp-) for search, which is the one call Slack will not answer for a bot: ' +
+          'search.messages refuses a bot token with not_allowed_token_type. Set this and search runs ' +
+          'as that person; leave it empty and search uses the connection\'s own User Token field, ' +
+          'which is where a workspace usually keeps one. Nothing else here uses it.',
         type: 'string',
         required: false,
         secret: true,
@@ -509,7 +780,7 @@ adding a message to anybody's unread count.`,
             return false;
           }
 
-          const read = orknux.slack.thread(connection ?? this.settings.slack, channel, threadTs, 2);
+          const read = through((use) => orknux.slack.thread(use, channel, threadTs, 2), connection, this.settings.slack);
           if (read.error !== undefined) {
             /*
              * Thrown rather than answered false. A condition that cannot be
@@ -534,14 +805,15 @@ adding a message to anybody's unread count.`,
         description:
           'Reads the Slack message a permalink points at. Use when a message links to another message ' +
           '(https://…slack.com/archives/…) and you need what that message says. Pass the connection the ' +
-          'event came in on, or an empty string to use the configured one. Answers channel, ts, user and text.',
+          'event came in on, or an empty string to use the configured one. An empty string is always safe: a connection named by an older event may since have been deleted. ' +
+          'Answers channel, ts, user and text.',
         params: [
           { name: 'connection', type: 'string' },
           { name: 'link', type: 'string' },
         ],
         returnType: 'LinkedMessage',
         run: (connection, link) => {
-          const read = orknux.slack.message(connection || this.settings.slack, link);
+          const read = through((use) => orknux.slack.message(use, link), connection, this.settings.slack);
           if (read.error !== undefined) {
             throw new Error(`could not read the linked message: ${read.error}`);
           }
@@ -554,7 +826,8 @@ adding a message to anybody's unread count.`,
         description:
           'Says who a Slack user id belongs to. Use when a message carries a mention like <@U0123ABCD> ' +
           'and you need the person behind it; pass the id bare or as the whole <@…> notation. Pass the ' +
-          'connection the event came in on, or an empty string to use the configured one. Answers id, ' +
+          'connection the event came in on, or an empty string to use the configured one. An empty string is always safe: a connection named by an older event may since have been deleted. ' +
+          'Answers id, ' +
           'name, realName, displayName and whether it is a bot.',
         params: [
           { name: 'connection', type: 'string' },
@@ -562,7 +835,7 @@ adding a message to anybody's unread count.`,
         ],
         returnType: 'User',
         run: (connection, userId) => {
-          const found = orknux.slack.user(connection || this.settings.slack, userId);
+          const found = through((use) => orknux.slack.user(use, userId), connection, this.settings.slack);
           if (found.error !== undefined) {
             throw new Error(`could not look the user up: ${found.error}`);
           }
@@ -576,7 +849,7 @@ adding a message to anybody's unread count.`,
           'Reads a Slack thread: the messages under one parent, oldest first, and how many replies the ' +
           'whole thread holds. Pass the channel id and the thread\'s ts (threadTs on an event; a message\'s ' +
           'own ts when it is the parent). Pass the connection the event came in on, or an empty string to ' +
-          'use the configured one. limit caps how many messages come back.',
+          'use the configured one. An empty string is always safe: a connection named by an older event may since have been deleted. limit caps how many messages come back.',
         params: [
           { name: 'connection', type: 'string' },
           { name: 'channel', type: 'string' },
@@ -585,7 +858,7 @@ adding a message to anybody's unread count.`,
         ],
         returnType: 'Thread',
         run: (connection, channel, threadTs, limit) => {
-          const read = orknux.slack.thread(connection || this.settings.slack, channel, threadTs, limit);
+          const read = through((use) => orknux.slack.thread(use, channel, threadTs, limit), connection, this.settings.slack);
           if (read.error !== undefined) {
             throw new Error(`could not read the thread: ${read.error}`);
           }
@@ -598,10 +871,14 @@ adding a message to anybody's unread count.`,
         description:
           'Posts a message to a Slack channel. Pass the channel id (or a #name), what to say, and a ' +
           'threadTs to reply inside a thread - or an empty threadTs to post to the channel itself. ' +
-          'attachments takes permalinks of files already hosted on Slack (a file\'s permalink, as an ' +
-          'event or readThread carries it) and attaches each to the message - pass an empty array for ' +
+          'attachments hangs files on the message, and takes either kind: a permalink string for a ' +
+          'file already on Slack (as an event or readThread carries it), or a map for one that is ' +
+          'not there yet - {filename, content} for text like a CSV, {filename, base64} for bytes ' +
+          'like a PDF (pdf_fromHtml answers base64 ready for this), or {url} to copy a file from a ' +
+          'url. The maps upload first and need the botToken parameter; permalinks need nothing. ' +
+          'Pass an empty array for ' +
           'none. Pass the connection the event came in on, or an empty string to use the configured ' +
-          'one. Answers the channel and the new message\'s ts.',
+          'one. An empty string is always safe: a connection named by an older event may since have been deleted. Answers the channel and the new message\'s ts.',
         params: [
           { name: 'connection', type: 'string' },
           { name: 'channel', type: 'string' },
@@ -613,19 +890,23 @@ adding a message to anybody's unread count.`,
         run: (connection, channel, text, threadTs, attachments) => {
           /*
            * Slack attaches a hosted file to a message when the message carries
-           * the file's permalink — that is Slack's own mechanism, so it needs
-           * nothing beyond SLACK_POST_MESSAGE. The `| ` label keeps the raw
+           * the file's permalink - that is Slack's own mechanism, so linking a
+           * file that is already there needs nothing beyond SLACK_POST_MESSAGE.
+           * A file that is *not* there yet is put there first, which is the
+           * part that needs `botToken`. The `| ` label keeps the raw
            * url out of the text people read; the preview still unfurls.
            */
           let said = text;
-          const linked = Array.isArray(attachments)
-            ? attachments.filter((one) => typeof one === 'string' && one.length > 0)
-            : [];
+          const linked = attaching(this.settings, attachments);
           if (linked.length > 0) {
             said = `${said}${linked.map((one) => ` <${one}| >`).join('')}`;
           }
 
-          const posted = orknux.slack.post(connection || this.settings.slack, channel, said, threadTs || undefined);
+          const posted = through(
+            (use) => orknux.slack.post(use, channel, said, threadTs || undefined),
+            connection,
+            this.settings.slack,
+          );
           if (posted.error !== undefined) {
             throw new Error(`could not post the message: ${posted.error}`);
           }
@@ -638,7 +919,7 @@ adding a message to anybody's unread count.`,
         description:
           'Adds an emoji reaction to a Slack message. Pass the channel id, the message\'s own ts, and the ' +
           'emoji\'s short name with or without the colons. Already-reacted counts as done. Pass the ' +
-          'connection the event came in on, or an empty string to use the configured one.',
+          'connection the event came in on, or an empty string to use the configured one. An empty string is always safe: a connection named by an older event may since have been deleted.',
         params: [
           { name: 'connection', type: 'string' },
           { name: 'channel', type: 'string' },
@@ -647,7 +928,7 @@ adding a message to anybody's unread count.`,
         ],
         returnType: 'boolean',
         run: (connection, channel, ts, emoji) => {
-          const done = orknux.slack.react(connection || this.settings.slack, channel, ts, emoji);
+          const done = through((use) => orknux.slack.react(use, channel, ts, emoji), connection, this.settings.slack);
           if (done.error !== undefined) {
             throw new Error(`could not add the reaction: ${done.error}`);
           }
@@ -661,8 +942,9 @@ adding a message to anybody's unread count.`,
           'Searches Slack messages the way the search box does. Slack\'s search syntax works: in:#channel, ' +
           'from:@name, "an exact phrase". Answers the matches - channel, ts, user, text and a permalink ' +
           'back to each - and how many the whole search holds. Pass the connection the event came in on, ' +
-          'or an empty string to use the configured one; limit caps the matches. Note: ' +
-          'Slack answers search only for a user token, so the connection needs one in its User Token field.',
+          'or an empty string to use the configured one. An empty string is always safe: a connection named by an older event may since have been deleted. limit caps the matches. Note: ' +
+          'Slack answers search only for a user token, so either the userToken parameter is set or the ' +
+          'connection carries one in its User Token field.',
         params: [
           { name: 'connection', type: 'string' },
           { name: 'query', type: 'string' },
@@ -670,7 +952,18 @@ adding a message to anybody's unread count.`,
         ],
         returnType: 'SearchResult',
         run: (connection, query, limit) => {
-          const found = orknux.slack.search(connection || this.settings.slack, query, limit);
+          /*
+           * The plugin's own user token first, where a workspace set one, and
+           * the connection's User Token field otherwise. Both end at the same
+           * Slack endpoint with the same kind of credential; what differs is
+           * who holds it, and a workspace that has filled in neither gets the
+           * capability's own error rather than a second one invented here.
+           */
+          const mine = this.settings.userToken;
+          const found =
+            typeof mine === 'string' && mine.length > 0
+              ? searchAs(mine, query, limit)
+              : through((use) => orknux.slack.search(use, query, limit), connection, this.settings.slack);
           if (found.error !== undefined) {
             throw new Error(`could not search Slack: ${found.error}`);
           }
@@ -685,14 +978,14 @@ adding a message to anybody's unread count.`,
           'for a user group. Use it to ping somebody in a message you are composing - put the answer in ' +
           'the message text as it is, and never write <@…> from a guessed id. Takes a display name, ' +
           'username, email, id or group handle. Pass the connection the event came in on, or an empty ' +
-          'string to use the configured one.',
+          'string to use the configured one. An empty string is always safe: a connection named by an older event may since have been deleted.',
         params: [
           { name: 'connection', type: 'string' },
           { name: 'name', type: 'string' },
         ],
         returnType: 'string',
         run: (connection, name) => {
-          const resolved = orknux.slack.mention(connection || this.settings.slack, name);
+          const resolved = through((use) => orknux.slack.mention(use, name), connection, this.settings.slack);
           if (resolved.error !== undefined) {
             throw new Error(`could not resolve the mention: ${resolved.error}`);
           }
@@ -719,40 +1012,8 @@ adding a message to anybody's unread count.`,
           { name: 'threadTs', type: 'string' },
         ],
         returnType: 'HostedFile',
-        run: (channel, filename, content, comment, threadTs) => {
-          if (typeof filename !== 'string' || filename.length === 0) {
-            throw new Error('an upload needs a filename');
-          }
-          if (typeof content !== 'string' || content.length === 0) {
-            throw new Error('there is no content to upload');
-          }
-
-          /*
-           * Slack's external upload flow, whose three steps are the reason
-           * this is one function: ask for an upload url naming the byte
-           * length, put the bytes there, then complete — which is also where
-           * sharing to a channel and saying something about it happen.
-           */
-          const opened = slackApi(this.settings, 'files.getUploadURLExternal', {
-            filename: filename,
-            length: new TextEncoder().encode(content).length,
-          });
-
-          const put = orknux.http.request({
-            url: at(opened, 'upload_url'),
-            method: 'POST',
-            headers: { 'content-type': 'application/octet-stream' },
-            body: content,
-          });
-          if (put.error !== undefined) {
-            throw new Error(`could not reach Slack's upload url: ${put.error}`);
-          }
-          if (put.status >= 400) {
-            throw new Error(`Slack's upload url answered ${put.status}`);
-          }
-
-          return completed(this.settings, at(opened, 'file_id'), filename, channel, comment, threadTs);
-        },
+        run: (channel, filename, content, comment, threadTs) =>
+          uploadedText(this.settings, filename, content, channel, comment, threadTs),
       }),
 
       new OrknuxFunction({
@@ -772,36 +1033,8 @@ adding a message to anybody's unread count.`,
           { name: 'threadTs', type: 'string' },
         ],
         returnType: 'HostedFile',
-        run: (channel, filename, base64, comment, threadTs) => {
-          if (typeof filename !== 'string' || filename.length === 0) {
-            throw new Error('an upload needs a filename');
-          }
-          const packed = typeof base64 === 'string' ? base64.replace(/\s+/g, '') : '';
-          if (packed.length === 0) {
-            throw new Error('there are no bytes to upload');
-          }
-
-          /*
-           * Slack is told the length in decoded bytes, which base64 carries in
-           * its own arithmetic: three bytes per four characters, less what the
-           * padding says was never there.
-           */
-          const size = Math.floor((packed.replace(/=+$/, '').length * 3) / 4);
-          const opened = slackApi(this.settings, 'files.getUploadURLExternal', {
-            filename: filename,
-            length: size,
-          });
-
-          const put = orknux.http.upload(at(opened, 'upload_url'), packed);
-          if (put.error !== undefined) {
-            throw new Error(`could not reach Slack's upload url: ${put.error}`);
-          }
-          if (put.status >= 400) {
-            throw new Error(`Slack's upload url answered ${put.status}`);
-          }
-
-          return completed(this.settings, at(opened, 'file_id'), filename, channel, comment, threadTs);
-        },
+        run: (channel, filename, base64, comment, threadTs) =>
+          uploadedBytes(this.settings, filename, base64, channel, comment, threadTs),
       }),
 
       new OrknuxFunction({
@@ -821,39 +1054,8 @@ adding a message to anybody's unread count.`,
           { name: 'threadTs', type: 'string' },
         ],
         returnType: 'HostedFile',
-        run: (channel, url, filename, comment, threadTs) => {
-          if (typeof url !== 'string' || !/^https?:\/\//.test(url)) {
-            throw new Error('a file is fetched by its http(s) url, and none was passed');
-          }
-          tokenOf(this.settings); // before the fetch, so a missing token costs nothing
-
-          const got = orknux.http.download(url);
-          if (got.error !== undefined) {
-            throw new Error(`could not fetch the file: ${got.error}`);
-          }
-          if (got.status >= 400) {
-            throw new Error(`${url} answered ${got.status}`);
-          }
-
-          const named =
-            typeof filename === 'string' && filename.length > 0
-              ? filename
-              : namedFromUrl(url, got.contentType);
-          const opened = slackApi(this.settings, 'files.getUploadURLExternal', {
-            filename: named,
-            length: got.size,
-          });
-
-          const put = orknux.http.upload(at(opened, 'upload_url'), got.base64, got.contentType ?? undefined);
-          if (put.error !== undefined) {
-            throw new Error(`could not reach Slack's upload url: ${put.error}`);
-          }
-          if (put.status >= 400) {
-            throw new Error(`Slack's upload url answered ${put.status}`);
-          }
-
-          return completed(this.settings, at(opened, 'file_id'), named, channel, comment, threadTs);
-        },
+        run: (channel, url, filename, comment, threadTs) =>
+          uploadedFromUrl(this.settings, url, filename, channel, comment, threadTs),
       }),
 
       new OrknuxFunction({

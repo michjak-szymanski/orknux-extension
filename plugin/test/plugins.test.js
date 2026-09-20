@@ -108,15 +108,22 @@ test('the slack plugin declares what the server would accept', async () => {
   assert.deepEqual(validate(inspected), []);
 
   /* A connection parameter: answered by pointing at a row, never typed in. */
-  assert.equal(inspected.parameters.length, 2);
+  assert.equal(inspected.parameters.length, 3);
   assert.equal(inspected.parameters[0].name, 'slack');
   assert.equal(inspected.parameters[0].type, 'connection');
   assert.equal(inspected.parameters[0].connectionType, 'SLACK');
   assert.equal(inspected.parameters[0].required, false);
-  /* The upload half's token: a secret, and optional so everything else stays tokenless. */
+  /*
+   * Two tokens, because Slack needs two: a bot token uploads files as the bot,
+   * and search will not answer to one at all. Both secret, both optional — a
+   * workspace that only reads and posts sets neither.
+   */
   assert.equal(inspected.parameters[1].name, 'botToken');
   assert.equal(inspected.parameters[1].secret, true);
   assert.equal(inspected.parameters[1].required, false);
+  assert.equal(inspected.parameters[2].name, 'userToken');
+  assert.equal(inspected.parameters[2].secret, true);
+  assert.equal(inspected.parameters[2].required, false);
 
   assert.deepEqual(inspected.permissions, ['TEXT_ENCODING']);
   assert.deepEqual(inspected.capabilities, [

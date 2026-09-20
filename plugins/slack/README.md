@@ -25,7 +25,7 @@ configured `slack` parameter. The section after the tables says why.
 
 | Function | Answers |
 |---|---|
-| `readThread(connection, channel, threadTs, limit)` | `messages` — each with `ts`, `user`, `text` and whether it is the `parent` — and `replies`, Slack's own count of the whole thread rather than of the page. `limit` 0 for the default of 20. |
+| `readThread(connection, channel, threadTs, limit)` | `messages` — each with `ts`, `user`, `text` and whether it is the `parent` — and `replies`, Slack's own count of the whole thread rather than of the page. `limit` defaults to 20. |
 | `readMessage(connection, link)` | The one message a permalink points at: `channel`, `ts`, `user`, `text`, `threadTs`. For when a message quotes another by link. |
 | `whoIs(connection, userId)` | Who an id belongs to: `id`, `name`, `realName`, `displayName`, `bot`. Takes the id bare or as the whole `<@U…>` notation a message carries it in. |
 | `search(connection, query, limit)` | `matches` — `channel`, `channelName`, `ts`, `user`, `text`, `permalink` each — and `total`, how many the whole search holds. Slack's search syntax works: `in:#channel`, `from:@name`, `"an exact phrase"`. |
@@ -35,7 +35,7 @@ configured `slack` parameter. The section after the tables says why.
 
 | Function | Answers |
 |---|---|
-| `post(connection, channel, text, threadTs, attachments)` | The new message's `channel` and `ts`. An empty `threadTs` posts to the channel itself; `attachments` takes permalinks of files already on Slack and attaches each. |
+| `post(connection, channel, text, threadTs, attachments)` | The new message's `channel` and `ts`. An empty `threadTs` posts to the channel itself. `attachments` hangs files on the message and takes **either kind**: a permalink string for a file already on Slack, or a map for one that isn't there yet — `{filename, content}`, `{filename, base64}`, or `{url}` — which is uploaded first. See below. |
 | `react(connection, channel, ts, emoji)` | `true`. The emoji's short name, with or without colons. Already-reacted counts as done. |
 | `mention(connection, name)` | The notation Slack renders as a ping — `<@U…>` for a person, `<!subteam^S…>` for a group — from a display name, username, email, id or group handle. Put the answer in a message as it is, and never write `<@…>` from a guessed id. |
 
@@ -63,7 +63,57 @@ is in:
 | Name | |
 |---|---|
 | `slack` | A `SLACK` connection: the Slack to read through when a function is not handed one. Optional. |
-| `botToken` | A bot token, **secret**, used only by the four file functions and `readAttachment`. Everything else runs without it. |
+| `botToken` | A **bot** token (`xoxb-`), **secret**. The four file functions, `readAttachment`, and `post` when an attachment is a file rather than a permalink. |
+| `userToken` | A **user** token (`xoxp-`), **secret**. `search` alone — see *Two tokens* below. Optional: without it, search falls back to the connection's own User Token field. |
+
+## Attaching a file to a message
+
+`post` takes both kinds of attachment, and which one you want follows from
+whether the file is on Slack already:
+
+```js
+// Already there — a permalink an event or readThread carried. Costs nothing.
+post(conn, 'C123', 'here it is', '', ['https://acme.slack.com/files/U1/F2/report.pdf'])
+
+// Not there yet — uploaded first, with botToken, then attached.
+post(conn, 'C123', 'this quarter', '', [
+  { filename: 'q3.csv',    content: 'region,revenue
+EMEA,41000' },
+  { filename: 'q3.pdf',    base64:  pdfFromHtml.base64 },
+  { url: 'https://ci.acme.com/build/42/chart.png' },
+])
+```
+
+A string is used as it is and needs no token at all. A map is a file that does
+not exist yet: it is uploaded with `botToken` and its permalink goes into the
+message with the others, so both kinds end up in one message.
+
+**The upload deliberately does not share to the channel.** Sharing at upload
+time makes Slack post the file as its own message — a second message nobody
+asked for, arriving before the text that explains it. A permalink in the
+message that follows is Slack's own way of hanging a file on a message
+somebody wrote, which is why `post` needs nothing beyond `SLACK_POST_MESSAGE`
+for the permalink half.
+
+Use the `upload*` functions directly when you want the file to *be* the
+message, or when you want its id back.
+
+## Two tokens, because Slack needs two
+
+| | |
+|---|---|
+| `botToken` | `xoxb-`. Uploads files **as the bot**, under the bot's name and picture. |
+| `userToken` | `xoxp-`. Runs `search`, which Slack will not answer for a bot at all: `search.messages` refuses a bot token with `not_allowed_token_type`. |
+
+They used to share a field, and the failure mode was quiet: somebody needs
+search, puts a user token in `botToken` because that is the only token field
+there is, and from then on every file the workspace uploads is posted by that
+person rather than by the app. `tokenOf` still warns when it sees an `xoxp-`,
+and now has somewhere to point.
+
+`userToken` is optional. Left empty, `search` uses the connection's own **User
+Token** field, which is where a workspace that has one usually keeps it — so
+nothing that works today stops working.
 
 ## Why the connection is an argument, not just a setting
 
@@ -88,25 +138,29 @@ Seven Slack capabilities, one per call: `SLACK_READ_THREAD`,
 making one call for the plugin; the plugin never sees a token and could not use
 one.
 
-`NETWORK_REQUEST` — **for the file functions alone.** The server's capability
-vocabulary has no spelling for "put a file on Slack", so those four go straight
-at Slack's Web API with the `botToken` above. They are the only functions here
-that hold a credential.
+`NETWORK_REQUEST` — **for the functions that hold a token.** The server's
+capability vocabulary has no spelling for "put a file on Slack", so the file
+functions go straight at Slack's Web API with `botToken`; `post` joins them
+when an attachment is a file rather than a permalink, and `search` does when
+`userToken` is set. Everything else here runs on capabilities and never sees a
+credential.
 
 ### Slack-side scopes
 
 | For | Scope |
 |---|---|
-| `upload`, `uploadBinary`, `uploadFromUrl` | `files:write` |
+| `upload`, `uploadBinary`, `uploadFromUrl`, `post` with a file attachment | `files:write` |
 | `remoteFile` | `remote_files:write`, `remote_files:share` |
 | `listAttachments` | `files:read`, plus the conversation's history scope |
 | `readAttachment` | `files:read` |
+| `search` via `userToken` | `search:read`, on a user token |
 
 ## Two caveats worth knowing before you debug them
 
 **Search answers only for a user token.** `search.messages` refuses a bot token
-with `not_allowed_token_type`, which comes back as the error — so the
-connection's **User Token** field is what a search actually runs on.
+with `not_allowed_token_type`, which comes back as the error — so a search runs
+on either the `userToken` parameter or the connection's **User Token** field,
+and on nothing else.
 
 **A condition that cannot be decided must not quietly decide.** `isFirstReply`
 throws when the thread cannot be read rather than answering `false`: "we could
