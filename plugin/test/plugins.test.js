@@ -800,6 +800,29 @@ test('the pdf plugin writes a pdf out of html, diagrams and all, without a DOM',
     /could not render the diagram/,
   );
 
+  /*
+   * Every kind the plugin says it draws, drawn. Only the flowchart was
+   * covered here, and `erDiagram` had been throwing the whole time: its
+   * SVG writes dy="0.35em" where the others write a bare number, Number()
+   * made that NaN, and jsPDF answers NaN by refusing the call and taking
+   * the document down with it.
+   */
+  for (const [kind, source] of Object.entries({
+    flowchart: 'graph TD\n  A[start] --> B{ok?}\n  B -->|yes| C[done]',
+    sequence: 'sequenceDiagram\n  A->>B: hi\n  B-->>A: hello',
+    state: 'stateDiagram-v2\n  [*] --> queued\n  queued --> running\n  running --> [*]',
+    class: 'classDiagram\n  Plugin <|-- Slack\n  Plugin : +id()',
+    er: 'erDiagram\n  USER ||--o{ ORDER : places\n  ORDER ||--|{ LINE : contains',
+  })) {
+    const drawn = declared.run(`<h2>${kind}</h2><pre class="mermaid">${source}</pre>`, '');
+    assert.ok(drawn.bytes > 0, `${kind} draws into a page`);
+    assert.equal(
+      Buffer.from(drawn.base64, 'base64').subarray(0, 5).toString('latin1'),
+      '%PDF-',
+      `${kind} produces a readable file`,
+    );
+  }
+
   /* Enough paragraphs run past one A4 page. */
   const long = declared.run(`<p>${'word '.repeat(120)}</p>`.repeat(20), '');
   assert.ok(long.pages > 1, `expected more than one page, got ${long.pages}`);

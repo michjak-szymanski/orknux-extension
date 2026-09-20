@@ -268,6 +268,33 @@ function blocksOf(html) {
 }
 
 /**
+ * A `dy`, which SVG allows to be a number or a length.
+ *
+ * beautiful-mermaid writes `dy="4.55"` for most diagrams and `dy="0.35em"` for
+ * an entity relationship one, and `Number('0.35em')` is NaN - which jsPDF
+ * refuses with "Invalid arguments passed to jsPDF.text", taking the whole
+ * document with it. So every `erDiagram` in a PDF threw, while the four kinds
+ * that write plain numbers were fine.
+ *
+ * An em is the font size, so it is resolved against the size the element is
+ * set in, in the SVG's own units - the page's scale is applied afterwards by
+ * whoever places it. Anything that is neither is nothing rather than NaN: a
+ * label a hair off its baseline is a better answer than no document.
+ */
+function dyOf(value, size) {
+  if (value === undefined || value === null) {
+    return 0;
+  }
+  const written = String(value).trim();
+  const ems = written.endsWith('em');
+  const measure = Number(ems ? written.slice(0, -2) : written);
+  if (!Number.isFinite(measure)) {
+    return 0;
+  }
+  return ems ? measure * size : measure;
+}
+
+/**
  * Anything in the text the bundled face has no glyph for.
  *
  * `plugins/build.mjs` subsets DejaVu down to what this plugin actually sets -
@@ -532,7 +559,20 @@ function drawnDiagram(doc, svg, left, top, maxWidth, maxHeight) {
     vars[one[1]] = one[2].trim();
   }
 
-  const scale = Math.min(1, maxWidth / width, maxHeight / height);
+  /*
+   * Drawn to fit the page rather than at whatever size the renderer chose.
+   *
+   * This used to cap at 1, so a diagram was never enlarged: a two-node
+   * flowchart is 152 pt wide and sat in the middle of a 483 pt column, a third
+   * of the width, with labels smaller than the body text around them. Nothing
+   * about it was low resolution - the whole page is vector - but small reads
+   * the same way at a glance.
+   *
+   * Capped at twice, because a figure is still a figure. Scaling the drawing
+   * scales the type inside it, and a diagram whose labels tower over the
+   * paragraph explaining them is the opposite mistake.
+   */
+  const scale = Math.min(2, maxWidth / width, maxHeight / height);
   const place = (x) => left + x * scale;
   place.y = (y) => top + y * scale;
 
@@ -601,13 +641,25 @@ function drawnDiagram(doc, svg, left, top, maxWidth, maxHeight) {
         continue;
       }
       const color = colorOf(attrs.fill, vars) ?? [0, 0, 0];
-      const size = Number(attrs['font-size'] ?? 12) * scale;
+      const written = Number(attrs['font-size'] ?? 12);
       const bold = Number(attrs['font-weight'] ?? 400) >= 600;
       doc.setFont(faceOf(doc), bold ? 'bold' : 'normal');
-      doc.setFontSize(size);
+      doc.setFontSize(written * scale);
       doc.setTextColor(color[0], color[1], color[2]);
       const anchor = attrs['text-anchor'];
-      doc.text(content, place(Number(attrs.x)), place.y(Number(attrs.y) + Number(attrs.dy ?? 0)), {
+
+      const x = place(Number(attrs.x));
+      const y = place.y(Number(attrs.y) + dyOf(attrs.dy, written));
+      /*
+       * A coordinate that did not parse is skipped rather than passed on:
+       * jsPDF answers NaN by throwing, and one unplaceable label should not
+       * cost the whole document.
+       */
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        continue;
+      }
+
+      doc.text(content, x, y, {
         align: anchor === 'middle' ? 'center' : anchor === 'end' ? 'right' : 'left',
       });
     }
