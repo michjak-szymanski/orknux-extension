@@ -710,11 +710,34 @@ lines saying what it is and what it concludes, and attach the rest:
   with a filename whose extension says what it is
 - a PDF or an image goes through **\`slack_uploadBinary\`** as base64, which is
   what \`pdf_fromHtml\` already answers
-- a diagram goes through **\`mermaid_render\`** and then \`slack_upload\` with a
-  \`.svg\` filename
+- a diagram goes through **\`mermaid_render\`** or **\`nomnoml_render\`** and
+  then \`slack_uploadBinary\` with a \`.png\` filename — see below
 
 A wall of text costs everybody in the channel a scroll. A summary and a file
 costs the two people who care a click.
+
+## Diagrams: always the picture, never the markup
+
+**Slack draws no SVG.** It hosts one as a file and shows a card with a filename
+on it, so an SVG posted to a channel is a thing people have to download and open
+before they can see it — which is to say, a thing most of them will never see.
+
+So take the default and do not think about it. \`mermaid_render\` and
+\`nomnoml_render\` both answer a **png** unless you ask otherwise, and that png
+goes to \`slack_uploadBinary\` with a \`.png\` filename. Ask for
+\`format: 'svg'\` only when the reader is not a person: something that embeds
+the markup, or a file somebody is going to edit. Posting one to a channel is
+never that.
+
+Pass the **\`key\`** the render answered, not the bytes:
+
+    mermaid_render(source)  ->  { png: '…', key: 'mermaid.1k3af9' }
+    slack_uploadBinary(channel, 'flow.png', '', comment, threadTs, 'mermaid.1k3af9')
+
+The answer reaches the next call by going through you, and a few kilobytes of
+base64 does not survive being written out again — one arrived with a stray
+character in the middle of it and the whole call was rejected as malformed.
+The key is a dozen characters and what it names never leaves the server.
 
 ## Before you post at all
 

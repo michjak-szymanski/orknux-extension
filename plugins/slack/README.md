@@ -58,26 +58,34 @@ which has to write every character of it back out. A few kilobytes does not
 survive that trip: a rendered diagram went to Slack with one stray character in
 the middle of it and the whole call was rejected as malformed JSON.
 
-So `upload` takes a `contentKey` as well as `content`:
+So both upload functions take a `contentKey` as well as their content:
 
 ```
 mermaid_render('flowchart LR
- A --> B')   → { svg: '<svg …>', bytes: 4182, key: 'mermaid.1k3af9' }
-slack_upload('C123', 'flow.svg', '', 'the flow', '', 'mermaid.1k3af9')
+ A --> B')   → { png: 'iVBORw0…', bytes: 18402, key: 'mermaid.1k3af9' }
+slack_uploadBinary('C123', 'flow.png', '', 'the flow', '', 'mermaid.1k3af9')
 ```
 
-The key is a dozen characters, and what it names never leaves the server —
-`mermaid_render` puts the SVG in the session store on the way out, and `upload`
-reads it back from there.
+The key is a dozen characters, and what it names never leaves the server — the
+render puts the bytes in the session store on the way out, and the upload reads
+them back from there.
 
 **Preferred, not exclusive.** A caller holding the text passes `content` as
 before, and a workflow node has no session to keep anything in, so `content`
 stays the path that always works. A key that names nothing throws and says to
 pass the content or render again, rather than uploading an empty file.
 
-**Text goes to `upload`, not `uploadBinary`.** An SVG is text. Encoding it to
-base64 to send it as bytes doubles its length and puts it back through the
-model, which is the problem this exists to avoid.
+**A diagram goes as a picture.** Slack draws no SVG — it hosts one as a file
+and shows a card with a filename on it, so an SVG in a channel is something
+people have to download before they can see it. `mermaid_render` and
+`nomnoml_render` both answer a `png` unless asked otherwise; send that, with a
+`.png` filename, through `uploadBinary`. `format: 'svg'` is for a reader that
+is not a person.
+
+**Everything else that is text goes to `upload`, not `uploadBinary`.** A CSV, a
+log, JSON, a config. Encoding text to base64 to send it as bytes doubles its
+length and puts it back through the model, which is the problem this exists to
+avoid.
 
 ### Files in
 
