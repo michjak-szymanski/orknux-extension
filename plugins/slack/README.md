@@ -17,6 +17,10 @@ Everything except `isFirstReply` is fronted to agents as a tool. That one is a
 workflow's gate, written to be a condition — a model reading a thread has
 better ways to ask.
 
+Twelve of those thirteen are the function itself, under a name an agent can
+call. The thirteenth, `uploadBinary`, is a tool of its own with a different
+signature — see *Two surfaces* below for why.
+
 Every function in the first two groups takes `connection` first: pass the
 connection a trigger says its event arrived on, or an empty string to use the
 configured `slack` parameter. The section after the tables says why.
@@ -51,6 +55,13 @@ is in:
 | `uploadFromUrl(channel, url, filename, comment, threadTs)` | **Copying a file from a url onto Slack**, so the channel holds the file rather than a link. Fetches up to 5 MB. An empty `filename` is derived from the url and its content type. |
 | `remoteFile(channel, url, title, filetype)` | **Pointing at a url without copying it.** Slack keeps a pointer and shows a card. The right door when the bytes should stay where they are, or exceed the caps above. |
 
+### Files in
+
+| Function | Answers |
+|---|---|
+| `listAttachments(channel, ts)` | `files` hanging on one message — `id`, `name`, `title`, `filetype`, `mimetype`, `size`, `permalink` each. A message with no files answers an empty list. Reads channel history, falling back to the thread, because a reply is not in the channel's history. |
+| `readAttachment(file)` | One attachment by id: `name`, `mimetype`, `size`, and exactly one of `content` (text as text) or `base64` (binary as bytes), the other `null` — plus a `key` naming whichever it was. Hand that straight to `uploadBinary` or `upload` as `contentKey` to move a file between channels without either of you retyping it. |
+
 ## Passing content by key
 
 A tool's answer reaches the next tool call by going **through the model**,
@@ -75,22 +86,6 @@ before, and a workflow node has no session to keep anything in, so `content`
 stays the path that always works. A key that names nothing throws and says to
 pass the content or render again, rather than uploading an empty file.
 
-### Two surfaces, on purpose
-
-`uploadBinary` is the one call here whose tool is not its function.
-
-The **function** — what a workflow step calls — keeps its `base64` argument. A
-workflow has no session, so no key was ever on offer to it, and taking the
-argument away would close the only door it has.
-
-The **tool** — what an agent calls — takes a `contentKey` and has nowhere to
-put bytes. A model has a key every time, because everything that makes bytes
-answers one, and it still wrote five thousand characters of base64 into the
-argument: it arrived a character wrong and the whole call was rejected as
-malformed before anything ran. Advice did not fix that and a refusal would only
-have described it. An argument a model should never fill is an argument that
-should not be in front of it.
-
 **A diagram goes as a picture.** Slack draws no SVG — it hosts one as a file
 and shows a card with a filename on it, so an SVG in a channel is something
 people have to download before they can see it. `mermaid_render` and
@@ -103,12 +98,34 @@ log, JSON, a config. Encoding text to base64 to send it as bytes doubles its
 length and puts it back through the model, which is the problem this exists to
 avoid.
 
-### Files in
+## Two surfaces, on purpose
 
-| Function | Answers |
+`uploadBinary` is the one call here whose tool is not its function, and the
+signatures differ by one argument:
+
+| | |
 |---|---|
-| `listAttachments(channel, ts)` | `files` hanging on one message — `id`, `name`, `title`, `filetype`, `mimetype`, `size`, `permalink` each. A message with no files answers an empty list. Reads channel history, falling back to the thread, because a reply is not in the channel's history. |
-| `readAttachment(file)` | One attachment by id: `name`, `mimetype`, `size`, and exactly one of `content` (text as text) or `base64` (binary as bytes), the other `null` — plus a `key` naming whichever it was. Hand that straight to `uploadBinary` or `upload` as `contentKey` to move a file between channels without either of you retyping it. |
+| **function** — a workflow step calls this | `uploadBinary(channel, filename, base64, comment, threadTs, contentKey)` |
+| **tool** — an agent calls this | `uploadBinary(channel, filename, contentKey, comment, threadTs)` |
+
+The function keeps its `base64`. A workflow has no session, so a key was never
+on offer to it, and taking the argument away would close the only door it has.
+
+The tool has nowhere to put bytes at all. A model has a key every time —
+everything that makes bytes answers one — and it still wrote five thousand
+characters of base64 into the argument, where it arrived a character wrong and
+the whole call was rejected as malformed before anything ran. Advice did not
+fix that, and a refusal would only have described it after the fact. An
+argument a model should never fill is an argument that should not be in front
+of it.
+
+That only works because nothing that makes bytes leaves them unnamed:
+
+| Answers a key | |
+|---|---|
+| `mermaid_render`, `nomnoml_render` | the picture, or the markup |
+| `pdf_fromHtml` | the document |
+| `slack_readAttachment` | whichever half it read — so a file moves between channels without passing through anybody |
 
 ## Parameters
 
