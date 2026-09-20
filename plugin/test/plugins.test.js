@@ -795,10 +795,26 @@ test('the pdf plugin writes a pdf out of html, diagrams and all, without a DOM',
   );
   assert.equal(diagrammed.pages, 1);
   assert.ok(diagrammed.bytes > made.bytes, 'the drawing weighs something');
-  assert.throws(
-    () => declared.run('<pre class="mermaid">gantt\n  title x</pre>', ''),
-    /could not render the diagram/,
+  /*
+   * A diagram that will not draw costs the diagram and not the document.
+   *
+   * This used to throw, and what a caller did with that was call again
+   * with the diagram written slightly differently, three or four times,
+   * before saying PDFs were unavailable - having already been handed a
+   * working document and thrown it away. The page says what happened,
+   * where the drawing would have been, and the rest is written.
+   */
+  const refused = declared.run(
+    '<h1>Report</h1><pre class="mermaid">gantt\n  title x</pre><p>The rest of it.</p>',
+    '',
   );
+  assert.equal(refused.pages, 1, 'the document is still written');
+  const inked = Buffer.from(refused.base64, 'base64').toString('latin1');
+  assert.ok(inked.includes('diagram not drawn'), 'and says where the drawing would have been');
+  /* Words are placed one at a time, so the prose is checked a word at a time. */
+  for (const word of ['Report', 'rest']) {
+    assert.ok(inked.includes(word), `${word} survived the diagram failing`);
+  }
 
   /*
    * Every kind the plugin says it draws, drawn. Only the flowchart was

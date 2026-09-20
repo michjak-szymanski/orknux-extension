@@ -763,21 +763,18 @@ refused by name.
 
 ## When a diagram will not draw
 
-**The document is not lost.** \`pdf_fromHtml\` refuses the whole call when a
-diagram fails, so the fix is to send the document without that diagram - not
-to abandon the PDF.
+**The document is not lost, and you do not have to do anything.** A diagram
+that will not draw leaves a note in the page where it would have been, and the
+rest of the document is written normally. You get a PDF back.
 
-Do this, in order, and stop at the first that works:
+If the diagram matters enough to try again, try **once**: simplify the source -
+plain \`-->\` arrows, short labels, nothing exotic inside \`[...]\`. If that fails
+too, send the document you already have and put the same information in a list
+beside it. Say what was left out.
 
-1. Simplify the source. Plain \`-->\` arrows, short labels, no quotes or colons
-   inside \`[...]\` if the first attempt failed on them.
-2. Send the document **without** the \`<pre>\` block, putting the same
-   information in a list. A report that describes the flow in five bullets is
-   worth more than no report.
-3. Only then say something is wrong - and say what you did produce.
-
-Do not call the tool a fourth time with a fourth shape of the same diagram.
-Two failures mean the diagram, not the call.
+Do not call the tool a third time with a third shape of the same diagram. Two
+failures mean the diagram rather than the call, and you are holding a document
+worth sending either way.
 
 ## Getting it to somebody
 
@@ -948,8 +945,39 @@ reads; the diagram is what they look at afterwards.`,
               try {
                 svg = renderMermaidSync(block.source);
               } catch (failure) {
+                /*
+                 * The diagram is lost; the document is not.
+                 *
+                 * This used to throw, which meant one bad diagram cost the
+                 * whole call - and what a caller did with that was call again
+                 * with the diagram written a slightly different way, three or
+                 * four times, before telling somebody PDFs were unavailable.
+                 * It had already been handed a working document on the second
+                 * attempt and thrown it away.
+                 *
+                 * So the page says what happened, where the drawing would
+                 * have been, and the rest of the document is written. A report
+                 * with a note in it beats no report, and the note is visible
+                 * rather than silent: whoever reads the PDF can see that a
+                 * diagram was meant to be there.
+                 */
                 const said = failure instanceof Error ? failure.message : String(failure);
-                throw new Error(`could not render the diagram: ${said}`);
+                orknux.log.warn(`a diagram could not be drawn and was left out: ${said}`);
+
+                const note = `[diagram not drawn: ${said}]`;
+                doc.setFont(faceOf(doc), 'normal');
+                doc.setFontSize(STYLES.p.size);
+                doc.setTextColor(120, 120, 120);
+                for (const line of doc.splitTextToSize(note, usable)) {
+                  if (y > bottom) {
+                    carry();
+                    y = top + STYLES.p.size * 1.4;
+                  }
+                  doc.text(line, PAGE.margin, y);
+                  y += STYLES.p.size * 1.4;
+                }
+                y += STYLES.p.after;
+                continue;
               }
               /*
                * Sized before placed — the size is on the SVG root, no drawing
