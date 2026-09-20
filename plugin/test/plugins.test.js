@@ -1107,3 +1107,89 @@ test('a default is of the type its parameter declared', async () => {
     }
   }
 });
+
+test('the nomnoml plugin declares what the server would accept, and renders offline', async () => {
+  const inspected = await inspect(shipped('nomnoml'));
+
+  assert.equal(inspected.id, 'nomnoml');
+  assert.deepEqual(validate(inspected), []);
+  assert.deepEqual(inspected.parameters, []);
+  /*
+   * Nothing, in both lists, which is the whole argument for this plugin over
+   * every other diagramming library: the renderer is bundled in, so the
+   * server is never asked to fetch anything — and it measures text from
+   * metrics it carries rather than through a builtin behind a permission, so
+   * there is nothing to grant either.
+   */
+  assert.deepEqual(inspected.permissions, []);
+  assert.deepEqual(inspected.capabilities, []);
+  assert.deepEqual(
+    inspected.functions.map((declared) => declared.name),
+    ['render'],
+  );
+  assert.deepEqual(
+    inspected.tools.map((declared) => declared.name),
+    ['render'],
+  );
+
+  const url = new URL(`../../plugins/nomnoml/nomnoml.js`, import.meta.url);
+  const { default: Nomnoml } = await import(url.href);
+  const functions = new Nomnoml().functions();
+  const render = functions.find((declared) => declared.name === 'render').run;
+
+  /* Drawn right here, in a Node with no DOM — the sandbox's own situation. */
+  const drawn = render('[<actor>User] -> [<usecase>Load a plugin]', '', '');
+  assert.ok(drawn.svg.includes('<svg'), 'renders svg');
+  assert.ok(drawn.svg.includes('Load a plugin'), 'the nodes are in the drawing');
+  assert.equal(drawn.bytes, drawn.svg.length);
+
+  /* And carrying no outward reference, so the drawing is as offline as the drawing was. */
+  assert.ok(!drawn.svg.includes('@import'), 'no font import');
+  assert.ok(!/https?:\/\/(?!www\.w3\.org)/.test(drawn.svg), 'no remote reference');
+
+  /* A theme is directives put in front of the source, so it colours the result. */
+  assert.ok(render('[a] -> [b]', 'dark', '').svg.includes('#1e232b'), 'the theme colours the drawing');
+
+  /*
+   * And the caller's own directives beat the argument, because they come
+   * after it — the argument is the convenience, the source is the statement.
+   */
+  const asked = render('[a] -> [b]', '', 'right');
+  const said = render('#direction: down\n[a] -> [b]', '', 'right');
+  assert.notEqual(asked.svg, said.svg, 'a direction in the source overrides the argument');
+
+  assert.throws(() => render('[a] -> [b]', 'solarized', ''), /no theme called solarized/);
+  assert.throws(() => render('[a] -> [b]', '', 'sideways'), /no direction called sideways/);
+  assert.throws(() => render('[a] ->', '', ''), /could not render the diagram: Parse error/);
+  assert.throws(() => render('   ', '', ''), /no diagram source/);
+
+  /* The editor url escapes the way nomnoml's own does — quotes spelled out. */
+  assert.ok(
+    render("[<note>it's here]", '', '').editor.startsWith('https://www.nomnoml.com/#view/'),
+    'the editor url points at the editor',
+  );
+  assert.ok(render("[<note>it's here]", '', '').editor.includes('%27'), 'an apostrophe is escaped');
+
+  /* Outside a session the fallback store keeps nothing, and the key says so. */
+  assert.equal(drawn.key, '', 'no session, no key');
+
+  /* Given one, the key names exactly the bytes that were answered. */
+  const held = new Map();
+  const store = globalThis.orknux.session.store;
+  globalThis.orknux.session.store = {
+    put: (key, value) => {
+      held.set(key, value);
+      return { ok: true };
+    },
+    get: (key) => (held.has(key) ? held.get(key) : null),
+  };
+  try {
+    const kept = render('[a] -> [b]', '', '');
+    assert.ok(kept.key.startsWith('nomnoml.'), 'the key is named for its plugin');
+    assert.equal(held.get(kept.key), kept.svg, 'what is kept is what was answered');
+    /* Content-derived, so the same diagram twice overwrites itself rather than piling up. */
+    assert.equal(render('[a] -> [b]', '', '').key, kept.key, 'the same source lands on the same key');
+  } finally {
+    globalThis.orknux.session.store = store;
+  }
+});

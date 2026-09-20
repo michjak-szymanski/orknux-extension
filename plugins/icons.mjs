@@ -94,6 +94,11 @@ const DRAWN = [
     ],
   },
   {
+    plugin: 'nomnoml',
+    title: 'Two boxes and the line between them',
+    paths: ['M2.5 3.5h8v6h-8Z', 'M13.5 14.5h8v6h-8Z', 'M6.5 9.5v6a2 2 0 0 0 2 2h5'],
+  },
+  {
     plugin: 'todo',
     title: 'A list with its first items checked off',
     paths: ['m3.5 7.5 2 2 3.5-4', 'm3.5 17 2 2 3.5-4', 'M13 7.5h7.5', 'M13 17h7.5'],

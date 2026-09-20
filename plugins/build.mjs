@@ -35,6 +35,7 @@ const here = fileURLToPath(new URL('.', import.meta.url));
  */
 const BUILT = [
   { entry: 'mermaid/src/mermaid.js', outfile: 'mermaid/mermaid.js' },
+  { entry: 'nomnoml/src/nomnoml.js', outfile: 'nomnoml/nomnoml.js' },
   { entry: 'pdf/src/pdf.js', outfile: 'pdf/pdf.js' },
 ];
 
