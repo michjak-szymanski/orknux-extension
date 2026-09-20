@@ -194,6 +194,29 @@ function attachmentRead(described, mimetype, size, content, base64) {
 }
 
 /**
+ * One attachment as a model should be handed it: the text, or the key.
+ *
+ * Base64 goes, because nobody reads base64. A model reads every character of
+ * an answer, and bytes wearing base64 are thousands of them spent to arrive at
+ * a key a dozen characters long naming the same bytes on the server - so the
+ * key is what comes back and `uploadBinary` is what takes it.
+ *
+ * Text stays, and this is the difference between this and the renderers. An
+ * SVG nobody reads; a CSV or a log is exactly what somebody asked for when
+ * they read an attachment at all. Stripping that would answer "there is a file
+ * and I will not tell you what is in it".
+ *
+ * And where there was nowhere to keep it, the key is empty and the bytes are
+ * all there is, so they stay.
+ */
+function readAsKeyed(attachment) {
+  if (attachment.key.length === 0 || typeof attachment.base64 !== 'string') {
+    return attachment;
+  }
+  return { ...attachment, base64: '' };
+}
+
+/**
  * A filename for a fetched url: its last path segment where that reads as a
  * name, else `file` with the extension its content type implies — because a
  * mermaid.ink url's last segment is the whole encoded diagram, not a name.
@@ -815,6 +838,7 @@ adding a message to anybody's unread count.`,
    * to be a condition; a model reading a thread has better ways to ask.
    */
   tools() {
+    const read = this.functions().find((one) => one.name === 'readAttachment');
     return [
       new OrknuxFunctionTool({ function: 'readMessage' }),
       new OrknuxFunctionTool({ function: 'whoIs' }),
@@ -889,7 +913,24 @@ adding a message to anybody's unread count.`,
       new OrknuxFunctionTool({ function: 'uploadFromUrl' }),
       new OrknuxFunctionTool({ function: 'remoteFile' }),
       new OrknuxFunctionTool({ function: 'listAttachments' }),
-      new OrknuxFunctionTool({ function: 'readAttachment' }),
+
+      /*
+       * The second tool here that is not its function, for the reason the
+       * first one exists: what crosses to a model should be what a model can
+       * use. A workflow node reading this function gets the bytes, because it
+       * has no session to read a key from.
+       */
+      new OrknuxTool({
+        name: 'readAttachment',
+        description:
+          read.description +
+          ' A file that is not text answers the key and an empty base64: the bytes stay on the ' +
+          'server, and that key is what uploadBinary takes. Text still answers its content, ' +
+          'because reading it is the point.',
+        params: read.params,
+        returnType: read.returnType,
+        run: (file) => readAsKeyed(read.run(file)),
+      }),
     ];
   }
 

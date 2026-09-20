@@ -198,6 +198,19 @@ test('the slack plugin declares what the server would accept', async () => {
       );
       continue;
     }
+    /*
+     * And the second: readAttachment answers a model the key for a file's
+     * bytes rather than the base64 itself, for the same reason - what crosses
+     * to a model should be what a model can use. Its arguments are the
+     * function's; only the answer differs, which is why it cannot be a proxy.
+     */
+    if (declared.name === 'readAttachment') {
+      assert.equal(declared.proxyOf, null, "the agents' readAttachment is its own tool");
+      const behind = inspected.functions.find((one) => one.name === 'readAttachment');
+      assert.deepEqual(declared.params, behind.params, 'taking the same argument');
+      assert.equal(declared.returnType, behind.returnType, 'and answering the same shape');
+      continue;
+    }
     assert.equal(declared.proxyOf, declared.name);
     const fronted = inspected.functions.find((one) => one.name === declared.proxyOf);
     assert.deepEqual(declared.params, fronted.params);
@@ -269,10 +282,14 @@ test('readAttachment answers a key beside what it read', async () => {
   );
 
   /*
-   * How the two branches fill it is not reachable from here: every path past
-   * the token check needs `this.settings`, and the contract's own fallback
-   * freezes those empty and non-configurable on purpose. What a test can hold
-   * is the shape above and the refusal below - the rest is the sandbox's.
+   * Two things here are not reachable from a test, for one reason: every path
+   * past the token check needs `this.settings`, and the contract's own
+   * fallback freezes those empty and non-configurable on purpose. So neither
+   * how the branches fill this answer, nor how the agents' tool strips the
+   * base64 out of it, can be driven from here - the tool closes over its own
+   * declaration, so there is nothing to stand in for either. What a test can
+   * hold is the shape above, the declaration in the loop further up, and the
+   * refusal below.
    */
   const url = new URL(`../../plugins/slack/slack.js`, import.meta.url);
   const { default: Slack } = await import(url.href);
