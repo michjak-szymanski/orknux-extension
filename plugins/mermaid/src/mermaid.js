@@ -134,6 +134,33 @@ function keyedOnly(made) {
   return { ...made, svg: '', png: '' };
 }
 
+/**
+ * How wide to draw, when the caller did not say.
+ *
+ * A renderer sizes an SVG for layout, not for looking at: a two-node flowchart
+ * declares about 140 points, and drawn at 140 pixels it is a postage stamp
+ * that Slack then scales up into a blur. Vector redrawn larger is not upscaled
+ * - every line is computed again at the new size - so the only cost of asking
+ * for more is the file, and a diagram nobody can read costs more than that.
+ *
+ * Twice the declared size, floored so the smallest diagram still arrives
+ * legible and capped so a wide one does not turn into a wall. A caller who
+ * names a width gets exactly it.
+ */
+const PNG_WIDTH = { least: 1200, most: 2400 };
+
+function drawnWidth(svg, asked) {
+  if (typeof asked === 'number' && asked > 0) {
+    return asked;
+  }
+  const found = /\bwidth="([\d.]+)"/.exec(svg);
+  const natural = found === null ? 0 : Number(found[1]);
+  if (!Number.isFinite(natural) || natural <= 0) {
+    return PNG_WIDTH.least;
+  }
+  return Math.min(Math.max(Math.round(natural * 2), PNG_WIDTH.least), PNG_WIDTH.most);
+}
+
 export default class Mermaid extends OrknuxPlugin {
 
   id() {
@@ -342,7 +369,8 @@ drawn here - change the tool, not the diagram.`,
           'palette (zinc-light, zinc-dark, tokyo-night, catppuccin-mocha, catppuccin-latte, nord, ' +
           '...), left out for the light default. format is png (the default) for a picture people ' +
           'can see, or svg for the markup; width sets the picture width in pixels, left out for ' +
-          'the size the diagram declares. Answers png as base64 or svg as text, the byte count, ' +
+          'twice what the diagram declares, which is what makes it legible rather than a postage ' +
+          'stamp Slack scales up. Answers png as base64 or svg as text, the byte count, ' +
           'and a short key the answer is kept under for this session. To put it on Slack pass ' +
           'that key - slack_uploadBinary takes it for a png, slack_upload for an svg - rather ' +
           'than copying the answer out and pasting it in, which is thousands of characters that ' +
@@ -426,7 +454,7 @@ drawn here - change the tool, not the diagram.`,
            * only way this answer exists.
            */
           if (asked === 'png') {
-            const drawn = orknux.render.pngFromSvg(held, typeof width === 'number' && width > 0 ? width : undefined);
+            const drawn = orknux.render.pngFromSvg(held, drawnWidth(held, width));
             if (drawn.error !== undefined) {
               throw new Error(`could not draw the diagram: ${drawn.error}`);
             }

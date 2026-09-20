@@ -1775,9 +1775,14 @@ test('the nomnoml plugin declares what the server would accept, and renders offl
       assert.ok(drawnFrom.includes('#1e232b'), 'the themed markup is what was drawn');
       assert.equal(widthAsked, 640, 'the width is passed through');
 
-      /* A width of zero is no width at all, which is the size the svg declares. */
+      /*
+       * A width of zero asks for the legible default, not for the size the
+       * renderer declared. Two boxes declare about eighty points, and a
+       * picture eighty pixels wide is one Slack scales up into a blur -
+       * redrawing vector larger costs a bigger file and nothing else.
+       */
       render('[a] -> [b]', '', '', 'png', 0);
-      assert.equal(widthAsked, undefined, 'zero asks for no particular width');
+      assert.equal(widthAsked, 1200, 'zero asks for the floor, not for nothing');
     } finally {
       globalThis.orknux.render = renderer;
     }
