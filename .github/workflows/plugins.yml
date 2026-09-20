@@ -245,6 +245,20 @@ jobs:
               -- "plugins/$key/plugin.json" || true)"
             if [ -n "$sha" ]; then
               git log -1 --format='%s%n%n%b' "$sha" > notes.md
+
+              # The schema takes 4000 characters and a commit body has no such
+              # ceiling. Cut on a paragraph rather than mid-sentence, and say
+              # so in the notes themselves - prose that stops without warning
+              # reads as a mistake, which it would then be.
+              if [ "$(wc -c < notes.md)" -gt 4000 ]; then
+                awk 'BEGIN { RS = ""; ORS = "\n\n" }
+                     { if (length(kept) + length($0) + 2 > 3880) exit; kept = kept $0; print }
+                     END { }' notes.md > trimmed.md
+                printf '*(Shortened. The whole commit is in the repository.)*\n' >> trimmed.md
+                mv trimmed.md notes.md
+                echo "::notice::$key $version has a long commit, so its notes were shortened"
+              fi
+
               noted=$((noted + 1))
             else
               # A version that entered the manifest before this repository did,

@@ -88,6 +88,24 @@ for (const name of shipped) {
     }
 
     /*
+     * No manifest here writes `notes`.
+     *
+     * The schema has the field, and a descriptor beats the one the publish
+     * sends beside the zip - so a `notes` typed in here would silently win
+     * over the commit the workflow derives them from, and keep winning at
+     * every release until somebody edited it again. That is the one copy of
+     * the sentence this repository has, and it is in the history.
+     *
+     * A plugin published from somewhere without a build is exactly who the
+     * field is for. This is not that.
+     */
+    assert.equal(
+      manifest.notes,
+      undefined,
+      `${name} writes its own notes, which would beat the ones the publish sends`,
+    );
+
+    /*
      * `path` names the file the server loads. Where a plugin is a build, its
      * source sits in `src/` under the same name — so this is the one field
      * that keeps an archive from being published with the unbundled source,

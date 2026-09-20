@@ -250,8 +250,17 @@ words it already had. That is what makes it safe to run twice, and it is why a
 listing that has no notes yet gets them at the next release rather than waiting
 for its own next bump.
 
-Nothing about the changelog lives in the plugin's folder or its zip. The
-marketplace used to read one from there and no longer does.
+`plugin.json` may also carry a `notes` string, and **the descriptor wins over
+the field a publish sends**. No manifest here writes one, and
+`manifests.test.js` fails if any does: a `notes` typed into a manifest would
+silently beat the commit at every release until somebody remembered to edit it
+again, which is the second copy this whole arrangement exists to avoid. The
+field is for a plugin published by hand, from somewhere with no build to derive
+anything. This is not that.
+
+The cap is 4000 characters. A commit body longer than that is cut on a
+paragraph and says at the end that it was — prose that stops mid-sentence reads
+as a bug, so it would be one.
 
 There is no catalog above these, and there should not be one: a plugin is
 described in its own folder and nowhere else, so what is on offer is whatever

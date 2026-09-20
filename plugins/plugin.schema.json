@@ -35,6 +35,11 @@
       "maxLength": 32,
       "description": "The offering's own string. The marketplace neither parses nor compares these -- a server that wants to say 'update available' compares against what it recorded at install.\n\n**A version is a release.** Publishing a key that already exists replaces its listing, keeping its reviews and its download count, and records the version in that plugin's history. Republishing the same number does not add a second entry: it leaves the listing's place in 'newest first' alone, so correcting a typo in the summary is not an announcement. Where the bytes move under a number that did not, the history says so -- that is a plugin edited without being renumbered, and it is worth avoiding.\n\nThe ten newest releases keep their files, so somebody can take the version they had rather than only the current one. Older releases stay in the history without their bytes."
     },
+    "notes": {
+      "type": "string",
+      "maxLength": 4000,
+      "description": "What changed in this version, as markdown -- your release notes.\n\nKept with the version rather than with the plugin, so it stays true once the next one is out. Write about this release only; the marketplace keeps the ones you wrote before and shows them together on a changelog tab.\n\nOptional. A version nobody wrote about is simply not listed there."
+    },
     "author": {
       "type": "string",
       "maxLength": 120,
@@ -63,25 +68,6 @@
       "default": "README.md",
       "description": "Which file in the archive holds the long description, as markdown, relative to the plugin's own folder. Defaults to `README.md`, which is where every plugin in the extension repository keeps it. The markdown is passed through as written and rendered by whoever shows it -- somebody else's prose from an upload, so the shower sanitizes."
     },
-    "changelog": {
-      "type": "object",
-      "maxProperties": 200,
-      "propertyNames": {
-        "maxLength": 32,
-        "minLength": 1
-      },
-      "additionalProperties": {
-        "type": "string",
-        "minLength": 1,
-        "maxLength": 4000
-      },
-      "description": "What changed, keyed by version -- for example the key 1.1.0 with the value `Faster, and it keeps attachments.`\\n\\nThe value is markdown, so a list of bullets is a list of bullets where it is shown. The key is the version as you spell it elsewhere in this file, which is what ties an entry to a release.\\n\\nThe order is yours and is kept: this marketplace neither parses nor compares versions -- 2.0.0, 2026.1 and v3-beta are all somebody's idea of one -- so write them newest first if that is how you want them read. At most 200 entries, and none of them empty: a version with nothing under it looks documented and is not."
-    },
-    "changelogPath": {
-      "type": "string",
-      "maxLength": 400,
-      "description": "The file in this archive holding the same object, when it is long enough to want a file of its own -- `CHANGELOG.json`, `docs/history.json`.\\n\\nOmit it and a `changelog.json` beside the plugin is read anyway; this is for one kept somewhere else. A `changelog` written here in the descriptor wins over both."
-    },
     "path": {
       "type": "string",
       "maxLength": 400,
@@ -94,6 +80,7 @@
       "name": "Greeter",
       "summary": "Says hello, and says it in the language the workflow asked for.",
       "version": "1.0.0",
+      "notes": "Says hello in Welsh, and stops saying it twice.",
       "author": "Somebody",
       "tags": [
         "chat",
@@ -101,10 +88,6 @@
       ],
       "icon": "icon.svg",
       "descriptionPath": "README.md",
-      "changelog": {
-        "1.1.0": "Says hello in Welsh, and stops saying it twice.",
-        "1.0.0": "First release."
-      },
       "path": "greeter.js"
     }
   ]
