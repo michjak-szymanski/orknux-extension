@@ -999,7 +999,9 @@ adding a message to anybody's unread count.`,
           'Uploads text content to Slack as a file the workspace hosts - an SVG, a CSV, a log, JSON, ' +
           'markdown, source - and shares it to a channel with a message. Anything you can read is ' +
           'text and belongs here, including an SVG a renderer answered with: send it as it stands, ' +
-          'never base64. Pass the channel id (not a #name), a ' +
+          'never base64. Slack hosts what it is given but draws none of it - every one of these ' +
+          'arrives as a file card, an SVG included - so where somebody should see a picture in ' +
+          'the message, upload a PNG with uploadFromUrl instead. Pass the channel id (not a #name), a ' +
           'filename whose extension says what the content is (report.csv, diagram.mmd), the content ' +
           'itself, what the sharing message should say, and a threadTs to share inside a thread - ' +
           'empty for the channel itself. Pass an empty channel to only upload: the answered permalink ' +
@@ -1059,7 +1061,9 @@ adding a message to anybody's unread count.`,
           'to be copied out perfectly, which is how a long one gets truncated. Pass the channel id, a ' +
           'filename whose extension says what the bytes are (report.pdf, chart.png), the base64, what ' +
           'the sharing message should say, and a threadTs - or an empty channel to only upload. ' +
-          'pdf_fromHtml answers base64 ready for this. Answers the file\'s id and permalink. Needs the ' +
+          'pdf_fromHtml and mermaid_render answer base64 ready for this - and both answer a key as ' +
+          'well: pass that as contentKey and leave base64 empty, so the bytes come off the server ' +
+          'rather than out of what you retype. Answers the file\'s id and permalink. Needs the ' +
           'botToken parameter.',
         params: [
           { name: 'channel', type: 'string' },
@@ -1067,10 +1071,31 @@ adding a message to anybody's unread count.`,
           { name: 'base64', type: 'string' },
           { name: 'comment', type: 'string' },
           { name: 'threadTs', type: 'string' },
+          { name: 'contentKey', type: 'string', required: false, default: '' },
         ],
         returnType: 'HostedFile',
-        run: (channel, filename, base64, comment, threadTs) =>
-          uploadedBytes(this.settings, filename, base64, channel, comment, threadTs),
+        run: (channel, filename, base64, comment, threadTs, contentKey) => {
+          /*
+           * The key wins over the base64, for the reason upload{Q}s does: bytes
+           * that reach here by being written out by a model do not survive the
+           * trip. A rendered diagram is tens of kilobytes of base64, and one
+           * stray character makes the whole call unparseable - which is how
+           * this failed before there was a key to pass instead.
+           */
+          let bytes = base64;
+          if (typeof contentKey === 'string' && contentKey.length > 0) {
+            const held = orknux.session.store.get(contentKey);
+            if (typeof held !== 'string' || held.length === 0) {
+              throw new Error(
+                `nothing is kept under ${contentKey} in this session: pass the base64 itself, ` +
+                  'or render it again to get a fresh key',
+              );
+            }
+            bytes = held;
+          }
+
+          return uploadedBytes(this.settings, filename, bytes, channel, comment, threadTs);
+        },
       }),
 
       new OrknuxFunction({
