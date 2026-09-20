@@ -292,6 +292,218 @@ function painted(svg) {
   return svg.replace(/\b(fill|stroke|stop-color|flood-color)="transparent"/g, '$1="none"');
 }
 
+/**
+ * The same drawing with its colours worked out.
+ *
+ * beautiful-mermaid paints in CSS custom properties - `fill="var(--_node-fill)"`
+ * against a stylesheet deriving a dozen of them from `--bg` and `--fg`. In a
+ * browser that is the right design: one theme, two variables, everything
+ * follows.
+ *
+ * Batik is not a browser. It implements SVG 1.1 and CSS 2, where `var()` does
+ * not exist and neither does `color-mix()`, so every one of those attributes is
+ * an invalid value and falls back to the property's initial one - **black**.
+ * Forty-eight of them in a four-node flowchart: every box, every arrow and
+ * every letter painted solid black on white. It looks like the renderer broke
+ * rather than like a colour that did not resolve, which is why it took a
+ * picture to notice.
+ *
+ * So the variables are resolved here, where there is a JavaScript engine to do
+ * it, and what crosses the door is literal colour.
+ *
+ * Only `fill` and `stroke` and their siblings, and only where the value
+ * actually mentions `var(` or `color-mix(` - a literal is left exactly as
+ * written, and anything this cannot work out is left alone rather than guessed
+ * at, because a wrong colour is worse than one the renderer will refuse
+ * visibly.
+ */
+const PAINT = /(fill|stroke|stop-color|flood-color)="([^"]*)"/g;
+
+/** `--name: value` pairs, wherever they were declared. */
+function declarations(svg) {
+  const declared = new Map();
+
+  const close = svg.indexOf('>');
+  const root = close === -1 ? svg : svg.slice(0, close);
+  const inline = /style="([^"]*)"/.exec(root);
+  const sources = inline === null ? [] : [inline[1]];
+  for (const block of svg.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)) {
+    sources.push(block[1]);
+  }
+
+  for (const source of sources) {
+    for (const found of source.matchAll(/(--[\w-]+)\s*:\s*([^;}]+)/g)) {
+      declared.set(found[1], found[2].trim());
+    }
+  }
+  return declared;
+}
+
+/** Split on commas that are not inside brackets, which `color-mix` needs. */
+function commas(text) {
+  const parts = [];
+  let depth = 0;
+  let at = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (c === '(') depth += 1;
+    else if (c === ')') depth -= 1;
+    else if (c === ',' && depth === 0) {
+      parts.push(text.slice(at, i).trim());
+      at = i + 1;
+    }
+  }
+  parts.push(text.slice(at).trim());
+  return parts;
+}
+
+/** `#abc`, `#aabbcc` or `rgb(r, g, b)` as three numbers, or null. */
+function channels(colour) {
+  const short = /^#([\da-f])([\da-f])([\da-f])$/i.exec(colour);
+  if (short !== null) {
+    return [1, 2, 3].map((at) => parseInt(short[at] + short[at], 16));
+  }
+  const long = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(colour);
+  if (long !== null) {
+    return [1, 2, 3].map((at) => parseInt(long[at], 16));
+  }
+  const listed = /^rgba?\(([^)]*)\)$/i.exec(colour);
+  if (listed !== null) {
+    const parts = listed[1].split(/[\s,/]+/).filter((one) => one.length > 0);
+    if (parts.length >= 3) {
+      const read = parts.slice(0, 3).map((one) =>
+        one.endsWith('%') ? Math.round((Number(one.slice(0, -1)) / 100) * 255) : Number(one));
+      if (read.every((one) => Number.isFinite(one))) {
+        return read.map((one) => Math.min(255, Math.max(0, Math.round(one))));
+      }
+    }
+  }
+  return null;
+}
+
+function hex(numbers) {
+  return `#${numbers.map((one) => Math.round(one).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/**
+ * One paint expression worked out, or null where it cannot be.
+ *
+ * `seen` is the cycle guard: a stylesheet that defines `--a: var(--b)` and
+ * `--b: var(--a)` is somebody else's file and must not become an endless loop
+ * in this one.
+ */
+function paint(expression, declared, seen) {
+  const text = String(expression).trim();
+
+  const variable = /^var\(\s*(--[\w-]+)\s*(?:,([\s\S]*))?\)$/.exec(text);
+  if (variable !== null) {
+    const name = variable[1];
+    const otherwise = variable[2];
+    if (declared.has(name) && !seen.has(name)) {
+      const worked = paint(declared.get(name), declared, new Set([...seen, name]));
+      if (worked !== null) {
+        return worked;
+      }
+    }
+    return otherwise === undefined ? null : paint(otherwise, declared, seen);
+  }
+
+  /* `color-mix(in srgb, A 60%, B)`: A at that weight, B with the rest. */
+  const mixed = /^color-mix\(([\s\S]*)\)$/.exec(text);
+  if (mixed !== null) {
+    const parts = commas(mixed[1]);
+    if (parts.length !== 3 || !/^in\s+srgb$/i.test(parts[0])) {
+      return null;
+    }
+    const sides = [parts[1], parts[2]].map((side) => {
+      const share = /\s(\d+(?:\.\d+)?)%$/.exec(side);
+      return {
+        colour: share === null ? side.trim() : side.slice(0, share.index).trim(),
+        share: share === null ? null : Number(share[1]) / 100,
+      };
+    });
+
+    const worked = sides.map((side) => {
+      const resolved = paint(side.colour, declared, seen);
+      return resolved === null ? null : channels(resolved);
+    });
+    if (worked.some((one) => one === null)) {
+      return null;
+    }
+
+    let [one, two] = sides.map((side) => side.share);
+    if (one === null && two === null) {
+      one = 0.5;
+    }
+    if (one === null) one = 1 - two;
+    if (two === null) two = 1 - one;
+    const total = one + two;
+    if (total <= 0) {
+      return null;
+    }
+    const weight = one / total;
+    return hex(worked[0].map((channel, at) => channel * weight + worked[1][at] * (1 - weight)));
+  }
+
+  /* A literal, which is the answer, or a keyword this has no table for. */
+  return channels(text) === null ? (/^[a-z]+$/i.test(text) ? text : null) : text;
+}
+
+function resolved(svg) {
+  const declared = declarations(svg);
+  if (declared.size === 0) {
+    return svg;
+  }
+
+  return svg.replace(PAINT, (whole, property, value) => {
+    if (!value.includes('var(') && !value.includes('color-mix(')) {
+      return whole;
+    }
+    const worked = paint(value, declared, new Set());
+    return worked === null ? whole : `${property}="${worked}"`;
+  });
+}
+
+/**
+ * The background the drawing asked for, painted as a rectangle.
+ *
+ * beautiful-mermaid says `background: var(--bg)` on the root, and `background`
+ * is a CSS property that SVG has no equivalent for - a browser paints it, a
+ * rasteriser does not, and the picture comes back transparent. The library
+ * offers `transparent: true` for when that is wanted, which is its way of
+ * saying the default is not.
+ *
+ * So the intention is honoured with the one thing SVG does have: a rect the
+ * size of the viewBox, behind everything, in the colour that was asked for.
+ */
+function grounded(svg, width, height) {
+  const close = svg.indexOf('>');
+  if (close === -1) {
+    return svg;
+  }
+  const root = svg.slice(0, close);
+  const style = /style="([^"]*)"/.exec(root);
+  if (style === null || !/background\s*:/.test(style[1])) {
+    return svg;
+  }
+
+  const asked = /background\s*:\s*([^;"]+)/.exec(style[1]);
+  const colour = asked === null ? null : paint(asked[1].trim(), declarations(svg), new Set());
+  if (colour === null || colour === 'none' || colour === 'transparent') {
+    return svg;
+  }
+
+  const box = /viewBox="\s*([-\d.]+)[\s,]+([-\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/.exec(root);
+  const at = box === null
+    ? { x: 0, y: 0, width: width, height: height }
+    : { x: Number(box[1]), y: Number(box[2]), width: Number(box[3]), height: Number(box[4]) };
+
+  return (
+    `${svg.slice(0, close + 1)}<rect x="${at.x}" y="${at.y}" width="${at.width}" ` +
+    `height="${at.height}" fill="${colour}"/>${svg.slice(close + 1)}`
+  );
+}
+
 export default class Mermaid extends OrknuxPlugin {
 
   id() {
@@ -613,7 +825,7 @@ drawn here - change the tool, not the diagram.`,
           if (asked === 'png') {
             const want = drawnSize(held, width);
             const drawn = orknux.render.pngFromSvg(
-              painted(sized(held, want.width, want.height)),
+              resolved(grounded(painted(sized(held, want.width, want.height)), want.width, want.height)),
               want.width,
             );
             if (drawn.error !== undefined) {

@@ -77,6 +77,18 @@ function handedOver(markup, asked) {
     'a paint is left as transparent, which a strict renderer draws black',
   );
 
+  /*
+   * And no paint left as a CSS variable, for the same reason and with the same
+   * result. Batik implements SVG 1.1 and CSS 2: `var()` and `color-mix()` are
+   * not values it has, so an attribute using one is invalid and falls back to
+   * the initial value - black. A four-node flowchart carried forty-eight of
+   * them, and came back as black boxes and black letters on white.
+   */
+  const unresolved = [...markup.matchAll(/(?:fill|stroke|stop-color|flood-color)="([^"]*)"/g)]
+    .map((found) => found[1])
+    .filter((value) => value.includes('var(') || value.includes('color-mix('));
+  assert.deepEqual(unresolved, [], 'a paint is still a CSS variable, which draws black');
+
   return { width, height };
 }
 

@@ -71,6 +71,22 @@ drawing letterboxed in the middle of it. This plugin once stripped the
 intrinsic size deliberately, on exactly the opposite theory, and that is the
 picture that came back 178 pixels wide in an 800-pixel frame.
 
+**And the colours are worked out before the SVG leaves.** beautiful-mermaid
+paints in CSS custom properties — `fill="var(--_node-fill)"` against a
+stylesheet deriving a dozen of them from `--bg` and `--fg` with `color-mix()`.
+In a browser that is the right design. Batik implements SVG 1.1 and CSS 2,
+where neither `var()` nor `color-mix()` exists, so every one of those
+attributes is invalid and falls back to the property's initial value —
+**black**. A four-node flowchart carries forty-eight of them, and came back as
+black boxes and black letters on a white page.
+
+They are resolved here, where there is a JavaScript engine to do it, and what
+crosses the door is literal colour. The `background` the library asks for is
+painted as a rect the size of the viewBox, because `background` is a CSS
+property SVG has no equivalent for — a browser paints it, a rasteriser does
+not, and the library's `transparent: true` option is its way of saying the
+default is otherwise.
+
 **And `transparent` is spelled `none` on the way out.** It is a CSS colour and
 SVG 1.1 has no such keyword, so a strict renderer falls back to the property's
 initial value — black for `fill`. A diagram marking its background that way
