@@ -403,6 +403,20 @@ The answer carries a **key**, not the picture. Pass the key:
     nomnoml_render(source)  ->  { key: 'nomnoml.1fpehnu', bytes: 18402 }
     slack_uploadBinary(channel, 'design.png', 'nomnoml.1fpehnu', comment, threadTs)
 
+
+## Where it goes when it is done
+
+**Into the message.** \`slack_uploadBinary\` with the key, and the picture is
+in the channel where whoever asked for it is already looking.
+
+\`save_artifact\` puts a file on the orknux side instead. That is the right
+place for something a later step of the same run picks up, and the wrong place
+for anything a person is meant to see: reaching it means leaving the
+conversation and going to find the run, which is a thing nobody does. A diagram
+saved as an artifact has not been shown to anybody - it has been filed.
+
+If you are about to announce a file rather than attach one, attach it instead.
+
 \`slack_uploadBinary\` takes the key and nothing else - there is no argument to
 put bytes in. The \`editor\` url in the answer opens the diagram in the nomnoml
 editor, which is worth giving somebody who will want to tweak it.`,

@@ -618,6 +618,19 @@ put bytes in. A picture is thousands of characters of base64 and does not
 survive being written back out by you; the key is a dozen and what it names
 never leaves the server.
 
+## Where it goes when it is done
+
+**Into the message.** \`slack_uploadBinary\` with the key, and the picture is
+in the channel where whoever asked for it is already looking.
+
+\`save_artifact\` puts a file on the orknux side instead. That is the right
+place for something a later step of the same run picks up, and the wrong place
+for anything a person is meant to see: reaching it means leaving the
+conversation and going to find the run, which is a thing nobody does. A diagram
+saved as an artifact has not been shown to anybody - it has been filed.
+
+If you are about to announce a file rather than attach one, attach it instead.
+
 ## When it will not draw
 
 The error says what is wrong, and there are only two kinds of wrong:
@@ -651,8 +664,11 @@ drawn here - change the tool, not the diagram.`,
             name: 'png',
             kind: 'string',
             description:
-              'The picture as base64, where png was asked for. Empty for svg. Hand it to ' +
-              'slack_uploadBinary as the base64, or save_artifact with base64 true.',
+              'The picture as base64, where png was asked for. Empty for svg. Pass the key rather ' +
+              'than this: slack_uploadBinary takes it, and puts the picture where somebody ' +
+              'will see it. save_artifact keeps a file on the server instead, which is right ' +
+              'for a later step of the same run and wrong for anything a person is meant to ' +
+              'look at.',
           },
           { name: 'bytes', kind: 'number', description: 'How long the answer is.' },
           {

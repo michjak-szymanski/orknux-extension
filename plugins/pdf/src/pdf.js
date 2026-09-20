@@ -895,6 +895,19 @@ plain \`-->\` arrows, short labels, nothing exotic inside \`[...]\`. If that fai
 too, send the document you already have and put the same information in a list
 beside it. Say what was left out.
 
+## Where it goes when it is done
+
+**Into the message.** `slack_uploadBinary` with the key, and the document is in
+the channel where whoever asked for it is already looking.
+
+`save_artifact` puts a file on the orknux side instead. That is the right place
+for something a later step of the same run picks up, and the wrong place for
+anything a person is meant to read: reaching it means leaving the conversation
+and going to find the run, which is a thing nobody does. A report saved as an
+artifact and announced in a channel has not been delivered - it has been filed.
+
+If you are about to announce a file rather than attach one, attach it instead.
+
 ## Look at it before you send it
 
 \`pdf_preview(key, page)\` draws a page as a picture you can actually see.
