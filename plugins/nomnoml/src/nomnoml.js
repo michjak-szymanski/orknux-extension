@@ -147,6 +147,111 @@ export default class Nomnoml extends OrknuxPlugin {
     return ['RENDER_PNG'];
   }
 
+  /*
+   * Its syntax is nobody's first guess.
+   *
+   * A model reaching for a diagram writes mermaid, because mermaid is what
+   * there is most of in the world - and mermaid's arrows, its node shapes and
+   * its `graph TD` header are all parse errors here. The description says
+   * what the syntax is; a skill can say when this is the right tool at all,
+   * which is the part a description is too short for.
+   */
+  skills() {
+    return [
+      new OrknuxSkill({
+        name: 'Drawing with nomnoml',
+        description: 'When nomnoml is the right diagram, its syntax, and why a wrong one does not error.',
+        content: `# Drawing with nomnoml
+
+\`nomnoml_render\` draws the **structural** half of what people draw about
+software: classes and what they hold, actors and use cases, packages inside
+packages, state machines, a note pinned beside the thing it is about.
+
+## Which tool
+
+| You are drawing | Use |
+|---|---|
+| A class, its fields, what it inherits or contains | \`nomnoml_render\` |
+| An actor and what they do | \`nomnoml_render\` |
+| Packages, components, what is inside what | \`nomnoml_render\` |
+| A flowchart - steps, decisions, arrows through a process | \`mermaid_render\` |
+| A sequence - who called whom, in order | \`mermaid_render\` |
+
+**This is not mermaid, and it will not tell you so.** nomnoml accepts a great
+deal and draws *something* rather than refusing. Write mermaid at it and you
+get a diagram - just not the one you meant:
+
+    graph TD                ->  a stray box labelled "graph TD", beside the rest
+    A[start] --> B[done]    ->  four boxes: A, B, start and done
+
+So the question after a render is not "did it error" but "is this the diagram I
+asked for". If you want a flowchart, call \`mermaid_render\` rather than
+translating one into this.
+
+## The syntax, entire
+
+    [Node]                      a box
+    [A] -> [B]                  an arrow
+    [A] o- [B]                  composition        +- is aggregation
+    [A] <:- [B]                 inheritance        -- is a plain line
+    [Name|field; method()]      compartments, separated by ;
+    [A] label -> [B]            a label on the association
+
+The **shape** of a box is a prefix inside it:
+
+    [<actor>Developer]     [<usecase>Load a plugin]     [<state>queued]
+    [<package>orknux|…]    [<note>an aside]             [<database>rows]
+    [<frame>deploy|…]      [<choice>ok?]                [<start>] [<end>]
+
+**Nesting is the thing it does best.** A diagram inside a box's second
+compartment is drawn inside that box:
+
+    [<package>server|
+      [Loader] -> [Sandbox]
+      [Sandbox] o- [Plugin]
+    ]
+
+## Arguments
+
+\`theme\` is \`light\` (the default), \`dark\`, \`mono\` or \`blueprint\`. \`direction\` is \`down\`
+(the default) or \`right\` - use \`right\` when the diagram is a chain rather than a
+tree. Your own \`#\` directives in the source beat both.
+
+\`format\` is \`png\` unless you say otherwise, and png is what you want: Slack
+draws no SVG, so an svg posted to a channel is a file card people have to
+download. Ask for \`svg\` only when something other than a person will read it.
+
+## When it does refuse
+
+The error names the line and the column and what it expected:
+
+    Parse error at line 1 column 9, expected "]" but got end of file
+
+**Fix that line.** Do not rewrite the whole diagram, and do not call again with
+the same source hoping for a different answer. It is nearly always an
+unbalanced bracket: every \`[\` needs its \`]\`, the nested ones included.
+
+The other thing worth knowing does *not* refuse: a \`|\` inside a label starts a
+new compartment, so \`[Send a|b message]\` draws a box in two parts rather than
+one label. Reword it.
+
+If two attempts fail, draw something simpler and say what you left out. A
+diagram of the three boxes that matter is worth more than none.
+
+## Getting it to somebody
+
+The answer carries a **key**, not the picture. Pass the key:
+
+    nomnoml_render(source)  ->  { key: 'nomnoml.1fpehnu', bytes: 18402 }
+    slack_uploadBinary(channel, 'design.png', 'nomnoml.1fpehnu', comment, threadTs)
+
+\`slack_uploadBinary\` takes the key and nothing else - there is no argument to
+put bytes in. The \`editor\` url in the answer opens the diagram in the nomnoml
+editor, which is worth giving somebody who will want to tweak it.`,
+      }),
+    ];
+  }
+
   objects() {
     return [
       new OrknuxObject({
