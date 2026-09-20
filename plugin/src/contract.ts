@@ -430,6 +430,9 @@ function ungrantedHelpers(): OrknuxHelpers {
       pngFromSvg: (): { error: string } => ({
         error: 'there is no renderer here: only a call made inside the sandbox can draw one',
       }),
+      pngFromPdf: (): { error: string } => ({
+        error: 'there is no renderer here: only a call made inside the sandbox can draw one',
+      }),
     },
     log: {
       debug: say('debug'),

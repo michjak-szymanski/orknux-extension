@@ -632,6 +632,24 @@ export type OrknuxBinaryResponse =
 /** What `orknux.session.store.put` answered: stored, or refused in a sentence. */
 export type OrknuxStorePut = { ok: true; error?: undefined } | { error: string; ok?: undefined };
 
+/**
+ * One page of a PDF, drawn — or the sentence saying why it was not.
+ *
+ * `pages` is the document's own page count rather than this page's number, so
+ * a caller that asked for the first of six is told there are six without
+ * having to ask again.
+ */
+export type OrknuxDrawnPdfPage =
+  | { base64: string; bytes: number; width: number; height: number; pages: number; error?: undefined }
+  | {
+      error: string;
+      base64?: undefined;
+      bytes?: undefined;
+      width?: undefined;
+      height?: undefined;
+      pages?: undefined;
+    };
+
 /** A picture drawn from markup, or the sentence saying why none was. */
 export type OrknuxDrawnPng =
   | { base64: string; bytes: number; error?: undefined }
@@ -925,6 +943,22 @@ export interface OrknuxHelpers {
      * declares is the size that is drawn.
      */
     pngFromSvg(svg: string, width?: number): OrknuxDrawnPng;
+
+    /**
+     * One page of a PDF, drawn as a PNG — `RENDER_PDF`.
+     *
+     * What something that just made a document uses to look at what it
+     * actually produced. A PDF is bytes and a model that can see reads
+     * pictures, so without this an agent reports that the report is ready
+     * because that is what it did, rather than because that is what came out.
+     *
+     * `pdf` is the document as base64, which is the shape a plugin that made
+     * one already holds it in. `page` counts from one and defaults to the
+     * first; `width` sets the picture's width in pixels and defaults to
+     * something a screen can read. The answer carries the page count as well,
+     * so a caller that asked for page one of six learns there are six.
+     */
+    pngFromPdf(pdf: string, page?: number, width?: number): OrknuxDrawnPdfPage;
   };
 
   /**

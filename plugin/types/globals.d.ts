@@ -41,7 +41,8 @@ type OrknuxCapability =
   | 'SLACK_MENTION'
   | 'SLACK_SEARCH'
   | 'NETWORK_REQUEST'
-  | 'RENDER_PNG';
+  | 'RENDER_PNG'
+  | 'RENDER_PDF';
 
 /** The kinds of connection a workspace can hold. */
 type ConnectionType = 'SLACK' | 'SMTP' | 'HTTP';
@@ -210,6 +211,24 @@ type OrknuxBinaryResponse =
     };
 
 /** A picture drawn from markup, or the sentence saying why none was. */
+/**
+ * One page of a PDF, drawn - or the sentence saying why it was not.
+ *
+ * Richer than `OrknuxDrawnPng` on purpose: the caller here is checking a
+ * layout, and "how wide did it come out" and "is there a page two" are the two
+ * questions it has next.
+ */
+type OrknuxDrawnPdfPage =
+  | { base64: string; bytes: number; width: number; height: number; pages: number; error?: undefined }
+  | {
+      error: string;
+      base64?: undefined;
+      bytes?: undefined;
+      width?: undefined;
+      height?: undefined;
+      pages?: undefined;
+    };
+
 type OrknuxDrawnPng =
   | { base64: string; bytes: number; error?: undefined }
   | { error: string; base64?: undefined; bytes?: undefined };
@@ -555,6 +574,27 @@ declare const orknux: {
      * declares is the size that is drawn.
      */
     pngFromSvg(svg: string, width?: number): OrknuxDrawnPng;
+
+    /**
+     * One page of a PDF, drawn as a PNG - `RENDER_PDF`.
+     *
+     * What something that just made a document uses to look at what it
+     * actually produced. A PDF is bytes and a model that can see reads
+     * pictures, so without this an agent reports that the report is ready
+     * because that is what it did, rather than because that is what came out.
+     *
+     * Its own grant rather than `RENDER_PNG`: the reach is the same, which is
+     * nothing, but the parser is not - a PDF carries an embedded-file model,
+     * an encryption model and a font stack, and an operator may reasonably
+     * draw markup without handing documents to one.
+     *
+     * `pdf` is the document as base64, which is the shape a plugin that made
+     * one already holds it in. `page` counts from one and defaults to the
+     * first; a page past the end is refused by name rather than rounded into
+     * the first. `width` sets the picture's width in pixels, left out for
+     * 96 dpi.
+     */
+    pngFromPdf(pdf: string, page?: number, width?: number): OrknuxDrawnPdfPage;
   };
 
   log: {

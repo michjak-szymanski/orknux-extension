@@ -220,4 +220,5 @@ export const CAPABILITIES = [
   'SLACK_SEARCH',
   'NETWORK_REQUEST',
   'RENDER_PNG',
+  'RENDER_PDF',
 ] as const;
