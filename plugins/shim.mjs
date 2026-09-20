@@ -49,6 +49,33 @@ if (typeof globalThis.self === 'undefined') {
 }
 
 /*
+ * And a second name for it, because a library takes the first one away.
+ *
+ * beautiful-mermaid constructs ELK with `self` deleted - deliberately, and it
+ * puts it back afterwards:
+ *
+ *   const held = globalThis.self;
+ *   if ('self' in globalThis && typeof globalThis.document === 'undefined') delete globalThis.self;
+ *   elk = new ELK();
+ *   globalThis.self = held;
+ *
+ * which is how it stops elkjs taking its web-worker path in Node. In a browser
+ * `window` is still there and in Node `global` is, so the sniff elkjs's own
+ * bundle does has something left to find either way. Here it had exactly one
+ * name and that was the one being removed, so elk's module resolved its global
+ * to `{}` - and died on `A.Math.max` the moment a flowchart needed laying out.
+ * Every `graph TD` failed with `Cannot read property 'max' of undefined` while
+ * sequence diagrams, which need no layout engine, rendered perfectly.
+ *
+ * `global` rather than `window`, for the reason above: `window` says there is
+ * a DOM, and there is not. `global` says what this sandbox actually is - a
+ * JavaScript engine with no page - and it is the first name elkjs looks for.
+ */
+if (typeof globalThis.global === 'undefined') {
+  globalThis.global = globalThis;
+}
+
+/*
  * Somewhere for a library to talk to, and a way to defer work.
  *
  * Neither is switched on in this sandbox. `console` is a permission - it
