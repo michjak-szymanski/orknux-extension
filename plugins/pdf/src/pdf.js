@@ -322,14 +322,15 @@ function noteUnsettable(text) {
     }
   }
   if (missing.length === 0) {
-    return;
+    return '';
   }
-  orknux.log.warn(
-    `this document contains characters the bundled face cannot set, and they will be blank: ` +
-      `${missing.join(' ')}. It sets Latin alphabets - ASCII, Latin-1, Latin Extended-A - which ` +
-      'covers Polish, Czech, Hungarian, Turkish, Romanian and the Nordic and Baltic languages, ' +
-      'and not Cyrillic, Greek, CJK or emoji.',
-  );
+  const said =
+    `these characters cannot be set and are blank in the document: ${missing.join(' ')}. ` +
+    'It sets Latin alphabets - ASCII, Latin-1, Latin Extended-A - which covers Polish, Czech, ' +
+    'Hungarian, Turkish, Romanian and the Nordic and Baltic languages, and not Cyrillic, Greek, ' +
+    'CJK or emoji.';
+  orknux.log.warn(said);
+  return said;
 }
 
 /**
@@ -763,9 +764,15 @@ refused by name.
 
 ## When a diagram will not draw
 
-**The document is not lost, and you do not have to do anything.** A diagram
-that will not draw leaves a note in the page where it would have been, and the
-rest of the document is written normally. You get a PDF back.
+**The document is not lost, and the answer tells you what happened.** A diagram
+that will not draw leaves a note in the page where it would have been, the rest
+of the document is written normally, and \`problems\` in the answer says what was
+left out.
+
+**Read \`problems\` every time.** It is empty when nothing went wrong. When it is
+not, say so - to whoever asked, in the message you send with the file. Handing
+somebody a report as though it were whole, when a diagram is missing out of the
+middle of it, is worse than any error.
 
 If the diagram matters enough to try again, try **once**: simplify the source -
 plain \`-->\` arrows, short labels, nothing exotic inside \`[...]\`. If that fails
@@ -803,6 +810,16 @@ reads; the diagram is what they look at afterwards.`,
         name: 'Document',
         description: 'A PDF that was written.',
         properties: [
+          {
+            name: 'problems',
+            kind: 'array',
+            of: 'string',
+            description:
+              'What went wrong without stopping the document - a diagram that would not draw, ' +
+              'characters the face cannot set. Empty when nothing did. A document came back ' +
+              'either way, so this is the only place a caller learns that part of it is missing: ' +
+              'read it, and say so rather than passing the file on as though it were whole.',
+          },
           {
             name: 'base64',
             kind: 'string',
@@ -863,7 +880,9 @@ reads; the diagram is what they look at afterwards.`,
           'subset to exactly that; Cyrillic, Greek, CJK and emoji are not set and come back ' +
           'blank. A ' +
           'report writer, not a browser: no CSS, no raster images, no links; i/em render regular. ' +
-          'Answers the file as base64, its page and byte counts, and a short key it is kept ' +
+          'Answers problems - what went wrong without stopping the document, empty when nothing ' +
+          'did, and the only place you will learn a diagram was left out - the file as base64, ' +
+          'its page and byte counts, and a short key it is kept ' +
           'under for this session - hand THAT to slack_uploadBinary as contentKey with a .pdf ' +
           'filename, never the base64, which does not survive being written back out - with ' +
           'its page and byte counts. title is the document\'s title metadata.',
@@ -876,6 +895,18 @@ reads; the diagram is what they look at afterwards.`,
           if (typeof html !== 'string' || html.trim().length === 0) {
             throw new Error('there is no html to lay out');
           }
+          /*
+           * What went wrong without stopping the document.
+           *
+           * Answered, not only drawn and logged. A note in the page is for
+           * whoever reads the PDF; the log is for whoever runs the server;
+           * neither is read by the thing that called this. An answer that
+           * looks like success while something in it silently did not happen
+           * is the worst of the three outcomes - so it comes back in the
+           * answer, where the caller cannot miss it.
+           */
+          const problems = [];
+
           const blocks = blocksOf(html);
           if (!blocks.some((block) => block.kind === 'hr' || block.kind === 'diagram' || block.runs.length > 0)) {
             throw new Error('the html holds no text to lay out');
@@ -902,7 +933,10 @@ reads; the diagram is what they look at afterwards.`,
            * character that reaches the page came from it - a diagram's labels
            * included, since those are written in the source too.
            */
-          noteUnsettable(html);
+          const unsettable = noteUnsettable(html);
+          if (unsettable !== '') {
+            problems.push(unsettable);
+          }
 
           if (/[^\u0000-\u007f]/.test(html)) {
             doc.orknuxFace = 'DejaVu';
@@ -963,6 +997,7 @@ reads; the diagram is what they look at afterwards.`,
                  */
                 const said = failure instanceof Error ? failure.message : String(failure);
                 orknux.log.warn(`a diagram could not be drawn and was left out: ${said}`);
+                problems.push(`a diagram was not drawn: ${said}`);
 
                 const note = `[diagram not drawn: ${said}]`;
                 doc.setFont(faceOf(doc), 'normal');
@@ -1045,6 +1080,7 @@ reads; the diagram is what they look at afterwards.`,
           const kept = orknux.session.store.put(key, encoded);
 
           return {
+            problems: problems,
             base64: encoded,
             pages: doc.getNumberOfPages(),
             bytes: bytes.length,

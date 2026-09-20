@@ -811,6 +811,24 @@ test('the pdf plugin writes a pdf out of html, diagrams and all, without a DOM',
   assert.equal(refused.pages, 1, 'the document is still written');
   const inked = Buffer.from(refused.base64, 'base64').toString('latin1');
   assert.ok(inked.includes('diagram not drawn'), 'and says where the drawing would have been');
+
+  /*
+   * And the answer says so, which is the part that matters: a note in the page
+   * is for whoever reads the PDF and the log is for whoever runs the server,
+   * and neither is read by the thing that called this. An answer that looks
+   * like success while a diagram is missing out of the middle of the document
+   * is worse than the error this replaced.
+   */
+  assert.equal(refused.problems.length, 1, 'the answer reports it');
+  assert.match(refused.problems[0], /a diagram was not drawn/);
+
+  /* Nothing wrong, nothing reported. */
+  assert.deepEqual(declared.run('<p>All fine.</p>', '').problems, []);
+
+  /* A letter the bundled face cannot set is the same kind of thing. */
+  const cyrillic = declared.run('<p>Привет</p>', '');
+  assert.equal(cyrillic.problems.length, 1, 'unsettable characters are reported too');
+  assert.match(cyrillic.problems[0], /cannot be set and are blank/);
   /* Words are placed one at a time, so the prose is checked a word at a time. */
   for (const word of ['Report', 'rest']) {
     assert.ok(inked.includes(word), `${word} survived the diagram failing`);
