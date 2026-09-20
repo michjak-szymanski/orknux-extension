@@ -4,7 +4,7 @@
   "name": "PDF",
   "author": "Orknux",
   "summary": "Compose PDF documents from a workflow, diagrams drawn in.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "icon": "icon.svg",
   "descriptionPath": "README.md",
   "path": "pdf.js"

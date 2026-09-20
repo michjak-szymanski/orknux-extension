@@ -56,7 +56,43 @@ const LINK_THEMES = ['default', 'dark', 'forest', 'neutral'];
 
 /** The rendered SVG with the one outward reference — the Inter @import — taken out. */
 function offline(svg) {
-  return svg.replace(/^\s*@import url\([^)]*\);\s*$/m, '');
+  return drawableAnywhere(svg.replace(/^\s*@import url\([^)]*\);\s*$/m, ''));
+}
+
+/**
+ * The same drawing, in SVG a 1.1 renderer can read.
+ *
+ * `orient="auto-start-reverse"` is SVG 2. Every browser understands it and
+ * Batik - which is what draws the PNG on the server - does not: it reads the
+ * value as an angle, fails on the word, and refuses the whole document with
+ * `For input string: "auto-start-reverse"`. So every sequence diagram rendered
+ * fine and every attempt to turn one into a picture failed.
+ *
+ * What the value means is "orient auto, then turn it round", which is exactly
+ * a 180 degree rotation about the marker's own reference point. Rewriting it
+ * that way is not an approximation: the marker points where it always did, and
+ * the document no longer uses a word from a later specification to say so.
+ *
+ * Done here rather than in the renderer because this is the half that knows
+ * what it drew. A renderer rewriting somebody else's markers would be guessing.
+ */
+function drawableAnywhere(svg) {
+  return svg.replace(
+    /<marker([^>]*?)orient="auto-start-reverse"([^>]*)>([\s\S]*?)<\/marker>/g,
+    (whole, before, after, inside) => {
+      const attributes = `${before}${after}`;
+      const at = (name) => {
+        const found = attributes.match(new RegExp(`${name}="([^"]*)"`));
+        return found === null ? 0 : Number(found[1]) || 0;
+      };
+
+      return (
+        `<marker${before}orient="auto"${after}>` +
+        `<g transform="rotate(180 ${at('refX')} ${at('refY')})">${inside}</g>` +
+        '</marker>'
+      );
+    },
+  );
 }
 
 /**
@@ -100,8 +136,19 @@ export default class Mermaid extends OrknuxPlugin {
   }
 
   capabilities() {
-    // None: the renderer is bundled into this very file, and SVG is text.
-    return [];
+    /*
+     * Drawing is the server's to do, and only drawing.
+     *
+     * The diagram is built in this file - the layout engine is bundled here -
+     * but turning the result into a picture needs a rasteriser, and this
+     * sandbox has neither one nor the WebAssembly to bring one. So the one
+     * thing asked for is the one thing that cannot be done here.
+     *
+     * It reaches nothing: what crosses is markup this plugin just produced,
+     * and what comes back is bytes computed from it. No connection, no
+     * address, no credential.
+     */
+    return ['RENDER_PNG'];
   }
 
   /* What a drawing comes back as, and what a link to one looks like. */
@@ -114,9 +161,19 @@ export default class Mermaid extends OrknuxPlugin {
           {
             name: 'svg',
             kind: 'string',
-            description: 'The SVG itself. Upload it with a .svg filename and it shows as an image.',
+            description:
+              'The SVG markup, where svg was asked for. Empty for png. Slack hosts an SVG as a ' +
+              'file but draws none, so it arrives as a file card - ask for png when somebody ' +
+              'should see the diagram in the message.',
           },
-          { name: 'bytes', kind: 'number', description: 'How long that text is.' },
+          {
+            name: 'png',
+            kind: 'string',
+            description:
+              'The picture as base64, where png was asked for. Empty for svg. Hand it to ' +
+              'slack_uploadBinary as the base64, or save_artifact with base64 true.',
+          },
+          { name: 'bytes', kind: 'number', description: 'How long the answer is.' },
           {
             name: 'key',
             kind: 'string',
@@ -158,16 +215,21 @@ export default class Mermaid extends OrknuxPlugin {
           'flowchart/graph, sequenceDiagram, stateDiagram-v2, classDiagram and erDiagram; another ' +
           'kind (pie, gantt, mindmap, ...) is refused by name - use links for those. theme names a ' +
           'palette (zinc-light, zinc-dark, tokyo-night, catppuccin-mocha, catppuccin-latte, nord, ' +
-          '...), left out for the light default. Answers the svg, its byte count, and a short key ' +
-          'the drawing is kept under. To put it on Slack call slack_upload with a .svg filename ' +
-          'and pass that key as contentKey - do not copy the svg out and paste it in, which is ' +
-          'thousands of characters that have to come back perfect and do not.',
+          '...), left out for the light default. format is png (the default) for a picture people ' +
+          'can see, or svg for the markup; width sets the picture width in pixels, left out for ' +
+          'the size the diagram declares. Answers png as base64 or svg as text, the byte count, ' +
+          'and a short key the answer is kept under for this session. To put it on Slack pass ' +
+          'that key - slack_uploadBinary takes it for a png, slack_upload for an svg - rather ' +
+          'than copying the answer out and pasting it in, which is thousands of characters that ' +
+          'have to come back perfect and do not.',
         params: [
           { name: 'source', type: 'string' },
           { name: 'theme', type: 'string', required: false, default: '' },
+          { name: 'format', type: 'string', required: false, default: 'png' },
+          { name: 'width', type: 'number', required: false, default: 0 },
         ],
         returnType: 'Drawing',
-        run: (source, theme) => {
+        run: (source, theme, format, width) => {
           if (typeof source !== 'string' || source.trim().length === 0) {
             throw new Error('there is no diagram source to render');
           }
@@ -196,6 +258,11 @@ export default class Mermaid extends OrknuxPlugin {
             throw new Error(`could not render the diagram: ${said}`);
           }
 
+          const asked = typeof format === 'string' && format.length > 0 ? format.toLowerCase() : 'png';
+          if (asked !== 'png' && asked !== 'svg') {
+            throw new Error(`no format called ${format}: it is png or svg`);
+          }
+
           const held = offline(svg);
 
           /*
@@ -218,14 +285,46 @@ export default class Mermaid extends OrknuxPlugin {
            * because a workflow node - no session, no store - has nowhere
            * else to read it from.
            */
+          /*
+           * PNG unless somebody asked for the markup, because a picture is
+           * what a person can see.
+           *
+           * Slack draws no SVG at all - it hosts one as a file card - so the
+           * format that makes a diagram visible is the one that should happen
+           * without being asked for. svg is still there for a caller that
+           * wants the markup itself: to edit it, to put it in a document, or
+           * to hand it somewhere that does draw it.
+           *
+           * The drawing is the server's work. This sandbox has no WebAssembly
+           * and no rasteriser, so `orknux.render.pngFromSvg` is not a
+           * convenience over something the plugin could do itself - it is the
+           * only way this answer exists.
+           */
+          if (asked === 'png') {
+            const drawn = orknux.render.pngFromSvg(held, typeof width === 'number' && width > 0 ? width : undefined);
+            if (drawn.error !== undefined) {
+              throw new Error(`could not draw the diagram: ${drawn.error}`);
+            }
+
+            const key = keyFor(drawn.base64);
+            const kept = orknux.session.store.put(key, drawn.base64);
+            return {
+              svg: '',
+              png: drawn.base64,
+              bytes: drawn.bytes,
+              key: kept.error === undefined ? key : '',
+            };
+          }
+
           const key = keyFor(held);
           const kept = orknux.session.store.put(key, held);
 
           return {
             svg: held,
+            png: '',
             bytes: held.length,
             // Empty where there is no session to keep it in, which is exactly
-            // when a caller has to fall back to the svg above.
+            // when a caller has to fall back to the answer above.
             key: kept.error === undefined ? key : '',
           };
         },
@@ -234,7 +333,9 @@ export default class Mermaid extends OrknuxPlugin {
       new OrknuxFunction({
         name: 'links',
         description:
-          'Turns mermaid source into links that render it elsewhere: image is a PNG and svg an SVG ' +
+          'Turns mermaid source into links that render it elsewhere - and image is the way to get ' +
+          'a diagram somebody can actually see in a Slack message, since Slack draws no SVG: give ' +
+          'that url to slack_uploadFromUrl. image is a PNG and svg an SVG ' +
           'from mermaid.ink, editor opens the source in the mermaid live editor, and markdown is the ' +
           'image ready to paste into a GitHub comment. The source travels inside the links and the ' +
           'reader\'s browser does the rendering - so this handles every diagram kind, including the ' +
