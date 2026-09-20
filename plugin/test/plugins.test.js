@@ -1115,14 +1115,13 @@ test('the nomnoml plugin declares what the server would accept, and renders offl
   assert.deepEqual(validate(inspected), []);
   assert.deepEqual(inspected.parameters, []);
   /*
-   * Nothing, in both lists, which is the whole argument for this plugin over
-   * every other diagramming library: the renderer is bundled in, so the
-   * server is never asked to fetch anything — and it measures text from
-   * metrics it carries rather than through a builtin behind a permission, so
-   * there is nothing to grant either.
+   * No permission at all — it measures text from metrics it carries rather
+   * than through a builtin behind one — and exactly one capability, for the
+   * one thing this sandbox cannot do: turn the markup into a picture. The
+   * layout is still entirely local; nothing is ever fetched.
    */
   assert.deepEqual(inspected.permissions, []);
-  assert.deepEqual(inspected.capabilities, []);
+  assert.deepEqual(inspected.capabilities, ['RENDER_PNG']);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
     ['render'],
@@ -1138,7 +1137,7 @@ test('the nomnoml plugin declares what the server would accept, and renders offl
   const render = functions.find((declared) => declared.name === 'render').run;
 
   /* Drawn right here, in a Node with no DOM — the sandbox's own situation. */
-  const drawn = render('[<actor>User] -> [<usecase>Load a plugin]', '', '');
+  const drawn = render('[<actor>User] -> [<usecase>Load a plugin]', '', '', 'svg', 0);
   assert.ok(drawn.svg.includes('<svg'), 'renders svg');
   assert.ok(drawn.svg.includes('Load a plugin'), 'the nodes are in the drawing');
   assert.equal(drawn.bytes, drawn.svg.length);
@@ -1148,27 +1147,41 @@ test('the nomnoml plugin declares what the server would accept, and renders offl
   assert.ok(!/https?:\/\/(?!www\.w3\.org)/.test(drawn.svg), 'no remote reference');
 
   /* A theme is directives put in front of the source, so it colours the result. */
-  assert.ok(render('[a] -> [b]', 'dark', '').svg.includes('#1e232b'), 'the theme colours the drawing');
+  assert.ok(
+    render('[a] -> [b]', 'dark', '', 'svg', 0).svg.includes('#1e232b'),
+    'the theme colours the drawing',
+  );
 
   /*
    * And the caller's own directives beat the argument, because they come
    * after it — the argument is the convenience, the source is the statement.
    */
-  const asked = render('[a] -> [b]', '', 'right');
-  const said = render('#direction: down\n[a] -> [b]', '', 'right');
+  const asked = render('[a] -> [b]', '', 'right', 'svg', 0);
+  const said = render('#direction: down\n[a] -> [b]', '', 'right', 'svg', 0);
   assert.notEqual(asked.svg, said.svg, 'a direction in the source overrides the argument');
 
-  assert.throws(() => render('[a] -> [b]', 'solarized', ''), /no theme called solarized/);
-  assert.throws(() => render('[a] -> [b]', '', 'sideways'), /no direction called sideways/);
-  assert.throws(() => render('[a] ->', '', ''), /could not render the diagram: Parse error/);
-  assert.throws(() => render('   ', '', ''), /no diagram source/);
+  assert.throws(() => render('[a] -> [b]', 'solarized', '', 'svg', 0), /no theme called solarized/);
+  assert.throws(() => render('[a] -> [b]', '', 'sideways', 'svg', 0), /no direction called sideways/);
+  assert.throws(() => render('[a] -> [b]', '', '', 'jpeg', 0), /no format called jpeg/);
+  assert.throws(() => render('[a] ->', '', '', 'svg', 0), /could not render the diagram: Parse error/);
+  assert.throws(() => render('   ', '', '', 'svg', 0), /no diagram source/);
 
   /* The editor url escapes the way nomnoml's own does — quotes spelled out. */
   assert.ok(
-    render("[<note>it's here]", '', '').editor.startsWith('https://www.nomnoml.com/#view/'),
+    render("[<note>it's here]", '', '', 'svg', 0).editor.startsWith('https://www.nomnoml.com/#view/'),
     'the editor url points at the editor',
   );
-  assert.ok(render("[<note>it's here]", '', '').editor.includes('%27'), 'an apostrophe is escaped');
+  assert.ok(
+    render("[<note>it's here]", '', '', 'svg', 0).editor.includes('%27'),
+    'an apostrophe is escaped',
+  );
+
+  /*
+   * A picture is the default, and out here there is no renderer to draw one —
+   * so the fallback's sentence is what a caller gets, rather than a drawing
+   * that silently is not one.
+   */
+  assert.throws(() => render('[a] -> [b]'), /could not draw the diagram: there is no renderer here/);
 
   /* Outside a session the fallback store keeps nothing, and the key says so. */
   assert.equal(drawn.key, '', 'no session, no key');
@@ -1184,11 +1197,46 @@ test('the nomnoml plugin declares what the server would accept, and renders offl
     get: (key) => (held.has(key) ? held.get(key) : null),
   };
   try {
-    const kept = render('[a] -> [b]', '', '');
+    const kept = render('[a] -> [b]', '', '', 'svg', 0);
     assert.ok(kept.key.startsWith('nomnoml.'), 'the key is named for its plugin');
     assert.equal(held.get(kept.key), kept.svg, 'what is kept is what was answered');
     /* Content-derived, so the same diagram twice overwrites itself rather than piling up. */
-    assert.equal(render('[a] -> [b]', '', '').key, kept.key, 'the same source lands on the same key');
+    assert.equal(
+      render('[a] -> [b]', '', '', 'svg', 0).key,
+      kept.key,
+      'the same source lands on the same key',
+    );
+
+    /*
+     * And with a renderer, the picture is what comes back: png carries the
+     * base64, svg is empty, and the key names the bytes rather than the
+     * markup — because the png is what a caller goes on to upload.
+     */
+    const renderer = globalThis.orknux.render;
+    let drawnFrom = null;
+    let widthAsked;
+    globalThis.orknux.render = {
+      pngFromSvg: (svg, width) => {
+        drawnFrom = svg;
+        widthAsked = width;
+        return { base64: 'UE5H', bytes: 3 };
+      },
+    };
+    try {
+      const picture = render('[a] -> [b]', 'dark', '', 'png', 640);
+      assert.equal(picture.png, 'UE5H', 'the picture comes back as base64');
+      assert.equal(picture.svg, '', 'and the markup does not come with it');
+      assert.equal(picture.bytes, 3, 'the byte count is the picture(s)');
+      assert.equal(held.get(picture.key), 'UE5H', 'the key names the picture, not the markup');
+      assert.ok(drawnFrom.includes('#1e232b'), 'the themed markup is what was drawn');
+      assert.equal(widthAsked, 640, 'the width is passed through');
+
+      /* A width of zero is no width at all, which is the size the svg declares. */
+      render('[a] -> [b]', '', '', 'png', 0);
+      assert.equal(widthAsked, undefined, 'zero asks for no particular width');
+    } finally {
+      globalThis.orknux.render = renderer;
+    }
   } finally {
     globalThis.orknux.session.store = store;
   }

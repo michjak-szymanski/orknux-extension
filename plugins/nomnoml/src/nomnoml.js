@@ -14,18 +14,23 @@
  * `plugins/build.mjs` at about seventy kilobytes, which is a twentieth of
  * what the mermaid plugin carries.
  *
- * It asks for nothing at all: no capability, because nothing is fetched, and
- * no permission, because it never reaches for a builtin behind one. The SVG
- * it produces is self-contained — no font import, no remote reference — so
- * the drawing is as offline as the drawing of it was.
+ * It asks for no permission at all: it never reaches for a builtin behind
+ * one, measuring text from metrics it carries rather than through a DOM. The
+ * SVG it produces is self-contained — no font import, no remote reference —
+ * so the drawing is as offline as the drawing of it was.
  *
- * ## Why there is no png here
+ * ## The one thing it does ask the server for
  *
- * Because this sandbox cannot draw one, and this plugin will not pretend
- * otherwise. Turning SVG into a picture needs a rasteriser, and there is
- * neither one here nor the WebAssembly to bring one. The mermaid plugin
- * answers pngs through a server capability; when that capability is in this
- * package's contract, the same few lines belong here.
+ * Drawing, and only drawing. A diagram nobody can see is not much use, and
+ * Slack - like most places one is read - draws no SVG at all: it hosts one as
+ * a file and shows a card. Turning markup into a picture needs a rasteriser,
+ * and there is neither one in this sandbox nor the WebAssembly to bring one,
+ * so `RENDER_PNG` is the one capability here.
+ *
+ * It reaches nothing: markup this plugin just produced goes out, and bytes
+ * computed from it come back. No connection, no address, no credential. And
+ * `format: svg` still answers the markup without the server being asked
+ * anything at all.
  *
  * This file is a build product's *source* — `plugins/nomnoml/nomnoml.js` is
  * what the server loads, and editing that by hand is editing a bundle.
@@ -112,8 +117,15 @@ export default class Nomnoml extends OrknuxPlugin {
   }
 
   capabilities() {
-    // None either. Nothing is fetched, at any time, from anywhere.
-    return [];
+    /*
+     * Drawing is the server's to do, and only drawing.
+     *
+     * The diagram is laid out in this file - the engine is bundled here - but
+     * turning the result into a picture needs a rasteriser this sandbox does
+     * not have and cannot be given. Nothing is fetched, at any time, from
+     * anywhere; what crosses is markup this plugin just wrote.
+     */
+    return ['RENDER_PNG'];
   }
 
   objects() {
@@ -126,18 +138,25 @@ export default class Nomnoml extends OrknuxPlugin {
             name: 'svg',
             kind: 'string',
             description:
-              'The SVG markup. Slack hosts an SVG as a file but draws none, so it arrives as a ' +
-              'file card rather than as a picture in the message.',
+              'The SVG markup, where svg was asked for. Empty for png. Slack hosts an SVG as a ' +
+              'file but draws none, so it arrives as a file card rather than as a picture.',
           },
-          { name: 'bytes', kind: 'number', description: 'How long that markup is.' },
+          {
+            name: 'png',
+            kind: 'string',
+            description:
+              'The picture as base64, where png was asked for - which is the default. Empty for ' +
+              'svg. Hand it to slack_uploadBinary as the base64.',
+          },
+          { name: 'bytes', kind: 'number', description: 'How long the answer is.' },
           {
             name: 'key',
             kind: 'string',
             description:
-              'Where this drawing is kept for the rest of this session. Hand it to slack_upload ' +
-              'as contentKey instead of copying the svg out - the bytes never leave the server, ' +
-              'so nothing can be truncated on the way. Empty where there was no session to keep ' +
-              'it in.',
+              'Where this drawing is kept for the rest of this session. Pass it rather than ' +
+              'copying the answer out - slack_uploadBinary takes it for a png, slack_upload as ' +
+              'contentKey for an svg - so the bytes never leave the server and nothing can be ' +
+              'truncated on the way. Empty where there was no session to keep it in.',
           },
           {
             name: 'editor',
@@ -169,17 +188,22 @@ export default class Nomnoml extends OrknuxPlugin {
           'nests by being written inside a box\'s second compartment. theme is light (the ' +
           'default), dark, mono or blueprint; direction is down (the default) or right; your own ' +
           '# directives in the source override both. For flowcharts and sequence diagrams use ' +
-          'mermaid_render instead - this draws neither. Answers the svg, its byte count, a short ' +
-          'key the drawing is kept under for this session, and a url that opens it in the ' +
-          'nomnoml editor. To put it on Slack call slack_upload with a .svg filename and pass ' +
-          'that key as contentKey, rather than copying the svg out and pasting it in.',
+          'mermaid_render instead - this draws neither. format is png (the default) for a ' +
+          'picture people can see, or svg for the markup; width sets the picture width in ' +
+          'pixels, left out for the size the diagram declares. Answers png as base64 or svg as ' +
+          'text, the byte count, a short key the answer is kept under for this session, and a ' +
+          'url that opens the diagram in the nomnoml editor. To put it on Slack pass that key - ' +
+          'slack_uploadBinary takes it for a png, slack_upload as contentKey for an svg - rather ' +
+          'than copying the answer out and pasting it in.',
         params: [
           { name: 'source', type: 'string' },
           { name: 'theme', type: 'string', required: false, default: '' },
           { name: 'direction', type: 'string', required: false, default: '' },
+          { name: 'format', type: 'string', required: false, default: 'png' },
+          { name: 'width', type: 'number', required: false, default: 0 },
         ],
         returnType: 'Drawing',
-        run: (source, theme, direction) => {
+        run: (source, theme, direction, format, width) => {
           if (typeof source !== 'string' || source.trim().length === 0) {
             throw new Error('there is no diagram source to render');
           }
@@ -203,6 +227,13 @@ export default class Nomnoml extends OrknuxPlugin {
               throw new Error(`no direction called ${direction}: it is ${DIRECTIONS.join(' or ')}`);
             }
             directives += `#direction: ${named}\n`;
+          }
+
+          /* Checked here rather than after the drawing, so a typo costs nothing. */
+          const asked =
+            typeof format === 'string' && format.length > 0 ? format.trim().toLowerCase() : 'png';
+          if (asked !== 'png' && asked !== 'svg') {
+            throw new Error(`no format called ${format}: it is png or svg`);
           }
 
           let svg;
@@ -236,11 +267,48 @@ export default class Nomnoml extends OrknuxPlugin {
            * should not have to fetch it, and because a workflow node - no
            * session, no store - has nowhere else to read it from.
            */
+          /*
+           * A picture unless somebody asked for the markup, because a picture
+           * is what a person can see.
+           *
+           * Slack draws no SVG at all - it hosts one as a file card - and it
+           * is where most of these end up, so the format that makes a diagram
+           * visible is the one that should happen without being asked for.
+           * svg is still there for a caller that wants the markup itself: to
+           * edit it, to put it in a document, or to hand it somewhere that
+           * does draw it.
+           *
+           * The drawing is the server's work. This sandbox has no rasteriser
+           * and no WebAssembly to bring one, so `orknux.render.pngFromSvg` is
+           * not a convenience over something this plugin could do itself - it
+           * is the only way that answer exists.
+           */
+          if (asked === 'png') {
+            const drawn = orknux.render.pngFromSvg(
+              svg,
+              typeof width === 'number' && width > 0 ? width : undefined,
+            );
+            if (drawn.error !== undefined) {
+              throw new Error(`could not draw the diagram: ${drawn.error}`);
+            }
+
+            const drawnKey = keyFor(drawn.base64);
+            const drawnKept = orknux.session.store.put(drawnKey, drawn.base64);
+            return {
+              svg: '',
+              png: drawn.base64,
+              bytes: drawn.bytes,
+              key: drawnKept.error === undefined ? drawnKey : '',
+              editor: editorUrl(source),
+            };
+          }
+
           const key = keyFor(svg);
           const kept = orknux.session.store.put(key, svg);
 
           return {
             svg: svg,
+            png: '',
             bytes: svg.length,
             key: kept.error === undefined ? key : '',
             editor: editorUrl(source),

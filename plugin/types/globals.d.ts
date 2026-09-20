@@ -40,7 +40,8 @@ type OrknuxCapability =
   | 'SLACK_READ_USER'
   | 'SLACK_MENTION'
   | 'SLACK_SEARCH'
-  | 'NETWORK_REQUEST';
+  | 'NETWORK_REQUEST'
+  | 'RENDER_PNG';
 
 /** The kinds of connection a workspace can hold. */
 type ConnectionType = 'SLACK' | 'SMTP' | 'HTTP';
@@ -207,6 +208,11 @@ type OrknuxBinaryResponse =
       size?: undefined;
       contentType?: undefined;
     };
+
+/** A picture drawn from markup, or the sentence saying why none was. */
+type OrknuxDrawnPng =
+  | { base64: string; bytes: number; error?: undefined }
+  | { error: string; base64?: undefined; bytes?: undefined };
 
 /** What `orknux.session.store.put` answered: stored, or refused in a sentence. */
 type OrknuxStorePut = { ok: true; error?: undefined } | { error: string; ok?: undefined };
@@ -525,6 +531,32 @@ declare const orknux: {
    * below the installation's threshold is dropped where it was written, so
    * tracing can stay in.
    */
+  /**
+   * Drawing an SVG into a picture, which is the one thing about a diagram
+   * this sandbox cannot do for itself.
+   *
+   * A capability rather than a builtin because it is the server's work:
+   * rasterising needs a rasteriser, and there is neither one here nor the
+   * WebAssembly to bring one. What it reaches is nothing - markup goes out,
+   * bytes computed from it come back. No connection, no address, no
+   * credential - which is why `RENDER_PNG` is the narrowest thing on the
+   * capability list rather than the widest.
+   *
+   * Wanted because Slack, and most places a diagram is read, draw no SVG at
+   * all: they host one as a file and show a card. A picture is what a person
+   * sees.
+   */
+  render: {
+    /**
+     * The SVG drawn as a PNG, answered as base64 and its byte count.
+     *
+     * `width` sets the picture's width in pixels, leaving the height to
+     * follow the drawing's own proportions; left out, the size the SVG
+     * declares is the size that is drawn.
+     */
+    pngFromSvg(svg: string, width?: number): OrknuxDrawnPng;
+  };
+
   log: {
     debug(...parts: unknown[]): void;
     info(...parts: unknown[]): void;

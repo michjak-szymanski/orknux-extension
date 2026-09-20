@@ -219,4 +219,5 @@ export const CAPABILITIES = [
   'SLACK_MENTION',
   'SLACK_SEARCH',
   'NETWORK_REQUEST',
+  'RENDER_PNG',
 ] as const;

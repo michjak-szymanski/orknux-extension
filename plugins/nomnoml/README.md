@@ -3,7 +3,7 @@
 The UML-shaped half of what people draw about software: classes with their
 fields, actors and use cases, packages inside packages, state machines, and a
 note pinned beside the thing it is about. Written in nomnoml's compact syntax,
-rendered to SVG **here**, offline, in the sandbox.
+laid out **here**, offline, in the sandbox, and answered as a picture.
 
 The companion to the Mermaid plugin rather than its replacement. Mermaid draws
 flowcharts and sequences; this draws the structural diagrams mermaid is awkward
@@ -13,13 +13,22 @@ at, and the two syntaxes barely overlap.
 
 | Function | Answers |
 |---|---|
-| `render(source, theme, direction)` | A `Drawing`: the `svg`, its `bytes`, a short `key` the drawing is kept under for the session, and an `editor` url that opens it for hand-tweaking. |
+| `render(source, theme, direction, format, width)` | A `Drawing`: the `png` as base64 **or** the `svg` as text, its `bytes`, a short `key` the answer is kept under for the session, and an `editor` url that opens the diagram for hand-tweaking. |
 
 ```
 nomnoml_render('[<actor>User] -> [<usecase>Load a plugin]\n[Server|check();grant()] o- [Plugin]')
-  → { svg: '<svg …>', bytes: 3825, key: 'nomnoml.1fpehnu',
+  → { png: 'iVBORw0KGgo…', svg: '', bytes: 18402, key: 'nomnoml.1fpehnu',
       editor: 'https://www.nomnoml.com/#view/…' }
 ```
+
+**A picture is the default**, because a picture is what a person can see —
+Slack draws no SVG at all, it hosts one as a file and shows a card. Ask for
+`format: 'svg'` when you want the markup itself: to edit it, to put it in a
+document, or to hand it somewhere that does draw it.
+
+`width` sets the picture's width in pixels and lets the height follow the
+drawing's own proportions; left out, the size the diagram declares is the size
+that is drawn. It means nothing for `svg`.
 
 ## The syntax, in one table
 
@@ -67,8 +76,11 @@ to reach the next tool call, and a few kilobytes of that does not survive the
 trip.
 
 ```
-nomnoml_render('[a] -> [b]')          → { …, key: 'nomnoml.1fpehnu' }
-slack_upload('C123', 'design.svg', '', 'the shape of it', '', 'nomnoml.1fpehnu')
+nomnoml_render('[a] -> [b]')                     → { …, key: 'nomnoml.1fpehnu' }
+slack_uploadBinary('C123', 'design.png', 'nomnoml.1fpehnu', 'the shape of it', '')
+
+nomnoml_render('[a] -> [b]', '', '', 'svg')      → { …, key: 'nomnoml.w39dw' }
+slack_upload('C123', 'design.svg', '', 'the shape of it', '', 'nomnoml.w39dw')
 ```
 
 The key is content-derived, so rendering the same diagram twice lands on the
@@ -76,23 +88,25 @@ same key and simply overwrites itself. It comes back **empty** where there was
 no session to keep it in — a workflow node, for instance — which is exactly
 when the `svg` in the answer is the only copy there is.
 
-**Slack draws no SVG.** It hosts one as a file and shows a card, not a picture.
-That is a Slack limitation rather than this plugin's; see below.
-
 ## What it asks for, and why
 
-**Nothing.** No capability, because nothing is fetched at any time from
-anywhere. No permission, because the library never reaches for a builtin behind
-one — it measures text from metrics it carries rather than through a DOM, lays
-the graph out itself, and writes markup. It is arithmetic on a string.
+**No permission at all.** The library never reaches for a builtin behind one —
+it measures text from metrics it carries rather than through a DOM, lays the
+graph out itself, and writes markup. It is arithmetic on a string. The Mermaid
+plugin asks for `TEXT_ENCODING`; this asks for nothing.
 
-That makes it, alongside confluence and todo, one of the few plugins here an
-administrator can accept without weighing what it can reach — and the only
-diagramming one. The Mermaid plugin asks for `TEXT_ENCODING`; this asks for
-nothing at all.
+**One capability: `RENDER_PNG`,** for the single thing this sandbox cannot do
+for itself. Rasterising needs a rasteriser, and there is neither one here nor
+the WebAssembly to bring one.
+
+It is the narrowest thing on the capability list rather than the widest.
+Nothing is fetched, at any time, from anywhere: markup this plugin has just
+written goes out, and bytes computed from it come back. No connection, no
+address, no credential. And `format: 'svg'` answers without asking the server
+anything at all.
 
 The SVG is self-contained too: no font `@import`, no remote reference. The
-drawing is as offline as the drawing of it was.
+layout is as offline as it ever was — only the drawing of the picture is not.
 
 ## Why it fits where other renderers do not
 
@@ -111,16 +125,6 @@ Two properties are load-bearing. It is **synchronous**, so `run` can return the
 drawing rather than a promise nothing here can await. And it needs **no
 document**, because it measures text from font metrics rather than by asking a
 browser.
-
-## Why there is no png
-
-This sandbox cannot draw one, and the plugin will not pretend otherwise:
-rasterising SVG needs a rasteriser, and there is neither one here nor the
-WebAssembly to bring one.
-
-The Mermaid plugin answers PNGs through a server-side capability. When that
-capability is part of this package's contract, the same few lines belong here —
-and then Slack gets a picture in the message rather than a file card.
 
 ## How it is laid out
 

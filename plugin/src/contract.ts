@@ -421,6 +421,16 @@ function ungrantedHelpers(): OrknuxHelpers {
         get: (): null => null,
       },
     },
+    /*
+     * And no rasteriser out here either, refused in the same shape the other
+     * doors use: a sentence rather than a thrown error, so a plugin can say
+     * something useful about it instead of failing mid-answer.
+     */
+    render: {
+      pngFromSvg: (): { error: string } => ({
+        error: 'there is no renderer here: only a call made inside the sandbox can draw one',
+      }),
+    },
     log: {
       debug: say('debug'),
       info: say('info'),
