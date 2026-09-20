@@ -22,7 +22,9 @@
 
 import { build } from 'esbuild';
 import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import subsetFont from 'subset-font';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 
@@ -51,6 +53,56 @@ const BUILT = [
  */
 const SHIM = readFileSync(here + 'shim.mjs', 'utf8');
 
+/*
+ * The letters a bundled font is allowed to carry.
+ *
+ * DejaVuSans is 739 kB because it sets Cyrillic, Greek, Armenian, the
+ * mathematical operators and a great deal else. A report sets none of them,
+ * and jsPDF parses and writes the whole file into every document that asks
+ * for the face - which was most of the ten seconds a PDF was taking in the
+ * sandbox before it gave up.
+ *
+ * So the build keeps what the plugin will actually set. ASCII, Latin-1 and
+ * Latin Extended-A is every language written in a Latin alphabet with
+ * diacritics: Polish, Czech, Hungarian, Turkish, Romanian, the Nordics, the
+ * Baltics. After them, the punctuation that prose written by a model actually
+ * contains - the dashes it uses instead of hyphens, the quotes it curls, the
+ * bullet, the ellipsis, the euro.
+ *
+ * What this gives up is real and is the point of writing it down: Cyrillic,
+ * Greek, CJK and anything else outside that range will not set. A document
+ * needing those needs a different face, which is a decision about what this
+ * plugin promises rather than a bug in it.
+ */
+const SETTABLE = (() => {
+  let letters = '';
+  for (let point = 0x20; point <= 0x7e; point += 1) letters += String.fromCodePoint(point);
+  for (let point = 0xa0; point <= 0xff; point += 1) letters += String.fromCodePoint(point);
+  for (let point = 0x100; point <= 0x17f; point += 1) letters += String.fromCodePoint(point);
+  return letters + '\u2010\u2011\u2012\u2013\u2014\u2015\u2018\u2019\u201c\u201d\u2022\u2026\u20ac\u2192';
+})();
+
+/*
+ * Subsetting happens here rather than in a file somebody has to regenerate:
+ * nothing is written to disk, the bundle is the only artifact, and the same
+ * input gives the same bytes - which the release workflow depends on, because
+ * it rebuilds every plugin and refuses any difference.
+ */
+const subsetTtf = {
+  name: 'subset-ttf',
+  setup(builder) {
+    builder.onLoad({ filter: /\.ttf$/ }, async (asked) => {
+      const whole = await readFile(asked.path);
+      const kept = await subsetFont(whole, SETTABLE, { targetFormat: 'truetype' });
+      console.log(
+        `  ${asked.path.split('/').pop()}  ${Math.round(whole.length / 1024)} KB -> ` +
+          `${Math.round(kept.length / 1024)} KB`,
+      );
+      return { contents: kept, loader: 'base64' };
+    });
+  },
+};
+
 for (const job of BUILT) {
   const built = await build({
     entryPoints: [here + job.entry],
@@ -69,8 +121,14 @@ for (const job of BUILT) {
       fs: here + 'stub.mjs',
       path: here + 'stub.mjs',
     },
-    /* A font file crosses into the bundle as the base64 its plugin feeds jsPDF. */
+    /*
+     * A font file crosses into the bundle as the base64 its plugin feeds
+     * jsPDF - through `subsetTtf` above, which throws away the letters this
+     * plugin will never set. The loader stays as the answer for anything the
+     * plugin does not intercept.
+     */
     loader: { '.ttf': 'base64' },
+    plugins: [subsetTtf],
     target: ['es2022'],
     charset: 'utf8',
     legalComments: 'none',

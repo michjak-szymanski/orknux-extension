@@ -268,6 +268,44 @@ function blocksOf(html) {
 }
 
 /**
+ * Anything in the text the bundled face has no glyph for.
+ *
+ * `plugins/build.mjs` subsets DejaVu down to what this plugin actually sets -
+ * ASCII, Latin-1, Latin Extended-A and the punctuation prose uses - because
+ * carrying all 739 kB of it was most of the time a PDF took. What that gives
+ * up is everything else: Cyrillic, Greek, CJK, emoji.
+ *
+ * Given up quietly is the part worth fixing. A glyph the face lacks is drawn
+ * as nothing at all, so a Russian paragraph comes back as a blank page rather
+ * than as a refusal - and a blank page looks like this plugin working. So the
+ * characters are named, once, in the log.
+ *
+ * Said rather than thrown: one stray character should not cost somebody the
+ * whole document, and a report whose body sets perfectly apart from an emoji
+ * in a heading is still the report they asked for.
+ */
+const SETTABLE = /[\u0000-\u007f\u00a0-\u017f\u2010-\u2015\u2018\u2019\u201c\u201d\u2022\u2026\u20ac\u2192]/;
+
+function noteUnsettable(text) {
+  const missing = [];
+  for (const character of text) {
+    if (!SETTABLE.test(character) && !missing.includes(character)) {
+      missing.push(character);
+      if (missing.length === 8) break;
+    }
+  }
+  if (missing.length === 0) {
+    return;
+  }
+  orknux.log.warn(
+    `this document contains characters the bundled face cannot set, and they will be blank: ` +
+      `${missing.join(' ')}. It sets Latin alphabets - ASCII, Latin-1, Latin Extended-A - which ` +
+      'covers Polish, Czech, Hungarian, Turkish, Romanian and the Nordic and Baltic languages, ' +
+      'and not Cyrillic, Greek, CJK or emoji.',
+  );
+}
+
+/**
  * The face this document is being set in.
  *
  * Carried on the document rather than in a variable up here, because it is a
@@ -683,7 +721,10 @@ export default class Pdf extends OrknuxPlugin {
           'Lays HTML out as a PDF on A4: h1-h3, p, br, hr, ul/ol lists, b/strong - and mermaid ' +
           'diagrams, drawn into the page as vectors: put the diagram source in <pre ' +
           'class="mermaid">...</pre> (flowchart/graph, sequenceDiagram, stateDiagram-v2, ' +
-          'classDiagram, erDiagram). Full Unicode text - Polish, Czech, the lot - set in DejaVu. A ' +
+          'classDiagram, erDiagram). Latin alphabets with their diacritics - Polish, Czech, ' +
+          'Hungarian, Turkish, Romanian, the Nordics and Baltics - set in DejaVu, carried ' +
+          'subset to exactly that; Cyrillic, Greek, CJK and emoji are not set and come back ' +
+          'blank. A ' +
           'report writer, not a browser: no CSS, no raster images, no links; i/em render regular. ' +
           'Answers the file as base64, its page and byte counts, and a short key it is kept ' +
           'under for this session - hand THAT to slack_uploadBinary as contentKey with a .pdf ' +
@@ -724,6 +765,8 @@ export default class Pdf extends OrknuxPlugin {
            * character that reaches the page came from it - a diagram's labels
            * included, since those are written in the source too.
            */
+          noteUnsettable(html);
+
           if (/[^\u0000-\u007f]/.test(html)) {
             doc.orknuxFace = 'DejaVu';
             doc.addFileToVFS('DejaVuSans.ttf', DEJAVU);

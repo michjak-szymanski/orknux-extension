@@ -15,6 +15,7 @@
     "dejavu-fonts-ttf": "^2.37.3",
     "jspdf": "^3.0.0",
     "nomnoml": "^1.7.0",
-    "simple-icons": "^16.31.0"
+    "simple-icons": "^16.31.0",
+    "subset-font": "^2.7.0"
   }
 }
