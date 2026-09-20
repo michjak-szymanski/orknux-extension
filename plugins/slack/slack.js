@@ -982,14 +982,17 @@ Three rules:
 
 ## Sending is saying: do not say it twice
 
-**A call that posts is the message.** \`post\` sends \`text\`; the uploads send
-\`comment\` with the file under it. That is the thing the reader sees.
+**Your answer is already a message.** You do not post it and there is no call
+for it: the run takes what you say at the end of your turn and puts it in the
+conversation. That is the one thing to understand here, because everything else
+follows from it.
 
-Whatever you write *after* one of those calls is a **second message** in the
-same conversation. So a turn that uploads a picture with "Here is the diagram
-you asked for" and then answers "Here is the diagram you asked for" has sent
-that sentence twice, to somebody who needed it once. Narrating what you just
-did is how it happens, and it happens almost every time.
+So a call that posts is a message *as well*. \`post\` sends \`text\`; the
+uploads send \`comment\` with the file under it. A turn that uploads a picture
+with "Here is the diagram you asked for" and then answers "Here is the diagram
+you asked for" has sent that sentence twice, to somebody who needed it once.
+Narrating what you just did is how it happens, and it happens almost every
+time.
 
 Say it once, in the call. Afterwards add only what the call did not already
 say - and often there is nothing, which is the correct amount.
@@ -1086,7 +1089,7 @@ adding a message to anybody's unread count.`,
           'character wrong and the whole call is rejected before anything runs, so the argument ' +
           'that invited that is gone. Also pass a filename whose extension says what the bytes ' +
           'are (report.pdf, chart.png), the channel id, what the sharing message should say, and ' +
-          'This call posts the message itself - the comment is its text. Anything you say after it becomes a SECOND message in the same conversation, so repeating the comment there shows the reader the same thing twice, which is exactly what happens when you describe what you just did. Put what you want said in the comment, and afterwards add only what the comment did not already say - often that is nothing. ' +
+          'This call posts a message - the comment is its text. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Describing what you just sent is therefore sending it twice. Put what you want said in the comment, and afterwards add only what the comment did not already say - often that is nothing. ' +
           'a threadTs - or an empty channel to only upload, whose permalink then goes in a later ' +
           'post\'s attachments. Text is not bytes: an SVG, a CSV, JSON, markdown or any source ' +
           'you could read goes to upload instead, as it stands. Answers the file\'s id and ' +
@@ -1273,7 +1276,7 @@ adding a message to anybody's unread count.`,
           'url. The maps upload first and need the botToken parameter; permalinks need nothing. ' +
           'Pass an empty array for ' +
           'none. Pass the connection the event came in on, or an empty string to use the configured ' +
-          'one. An empty string is always safe: a connection named by an older event may since have been deleted. This call posts the message itself - text is its words. Anything you say after it becomes a SECOND message in the same conversation, so repeating yourself there shows the reader the same thing twice, which is exactly what happens when you describe what you just sent. Say it once, here. Answers the channel and the new message\'s ts.',
+          'one. An empty string is always safe: a connection named by an older event may since have been deleted. This call posts a message - text is its words. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Say it once, here. Answers the channel and the new message\'s ts.',
         params: [
           { name: 'connection', type: 'string' },
           { name: 'channel', type: 'string' },
@@ -1405,7 +1408,7 @@ adding a message to anybody's unread count.`,
           'the message, upload a PNG with uploadFromUrl instead. Pass the channel id (not a #name), a ' +
           'filename whose extension says what the content is (report.csv, diagram.mmd), the content ' +
           'itself, what the sharing message should say, and a threadTs to share inside a thread - ' +
-          'This call posts the message itself - the comment is its text. Anything you say after it becomes a SECOND message in the same conversation, so repeating the comment there shows the reader the same thing twice, which is exactly what happens when you describe what you just did. Put what you want said in the comment, and afterwards add only what the comment did not already say - often that is nothing. ' +
+          'This call posts a message - the comment is its text. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Describing what you just sent is therefore sending it twice. Put what you want said in the comment, and afterwards add only what the comment did not already say - often that is nothing. ' +
           'empty for the channel itself. Pass an empty channel to only upload: the answered permalink ' +
           'then goes in a later post\'s attachments. Text only - a PDF or an image cannot travel this ' +
           'way; give remoteFile its url instead. Where a tool answered a key for what it made, ' +
@@ -1463,7 +1466,7 @@ adding a message to anybody's unread count.`,
           'kilobytes of base64 does not survive being written into a tool call - it arrives with a ' +
           'character wrong and the whole call is rejected as malformed - so copying the bytes out ' +
           'of one answer and into the next argument is the one thing that reliably fails. Only ' +
-          'This call posts the message itself - the comment is its text. Anything you say after it becomes a SECOND message in the same conversation, so repeating the comment there shows the reader the same thing twice, which is exactly what happens when you describe what you just did. Put what you want said in the comment, and afterwards add only what the comment did not already say - often that is nothing. ' +
+          'This call posts a message - the comment is its text. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Describing what you just sent is therefore sending it twice. Put what you want said in the comment, and afterwards add only what the comment did not already say - often that is nothing. ' +
           'Only ' +
           'pass base64 directly when the bytes came from somewhere that answered no key. Either ' +
           'way you must pass a filename whose extension says what the bytes are (report.pdf, ' +
@@ -1512,7 +1515,7 @@ adding a message to anybody's unread count.`,
           'bigger file wants remoteFile, which points without copying. Pass the channel id, the url, ' +
           'a filename - or empty to name it from the url and its content type - what the sharing ' +
           'message should say, and a threadTs - or an empty channel to only upload. ' +
-          'This call posts the message itself - the comment is its text. Anything you say after it becomes a SECOND message in the same conversation, so repeating the comment there shows the reader the same thing twice, which is exactly what happens when you describe what you just did. Put what you want said in the comment, and afterwards add only what the comment did not already say - often that is nothing. ' +
+          'This call posts a message - the comment is its text. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Describing what you just sent is therefore sending it twice. Put what you want said in the comment, and afterwards add only what the comment did not already say - often that is nothing. ' +
           'Answers the ' +
           'file\'s id and permalink. Needs the botToken parameter.',
         params: [
@@ -1532,7 +1535,7 @@ adding a message to anybody's unread count.`,
         description:
           'Attaches a file that already lives at a url - a PDF, a rendered diagram image, anything ' +
           'binary - to Slack as a remote file, and shares it to a channel. ' +
-          'This call posts the message itself - the title and comment are its text. Anything you say after it becomes a SECOND message in the same conversation, so repeating the comment there shows the reader the same thing twice, which is exactly what happens when you describe what you just did. Put what you want said in the comment, and afterwards add only what the comment did not already say - often that is nothing. ' +
+          'This call posts a message - the title and comment are its text. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Describing what you just sent is therefore sending it twice. Put what you want said in the comment, and afterwards add only what the comment did not already say - often that is nothing. ' +
           'Slack keeps a pointer and ' +
           'shows a preview card; the bytes stay where they are, so the url must be reachable by ' +
           'whoever clicks. Pass the file\'s url, a title people will see, the channel id to share ' +
