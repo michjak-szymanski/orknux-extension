@@ -442,8 +442,13 @@ test('the mermaid plugin declares what the server would accept, and renders offl
   assert.deepEqual(validate(inspected), []);
   assert.deepEqual(inspected.parameters, []);
   assert.deepEqual(inspected.permissions, ['TEXT_ENCODING']);
-  /* The renderer is bundled in, so nothing is asked of the server at all. */
-  assert.deepEqual(inspected.capabilities, []);
+  /*
+   * The layout engine is bundled in, so nothing is ever fetched — and the one
+   * capability is for the one thing this sandbox cannot do for itself: turn
+   * the markup into a picture. It reaches nothing; markup goes out and bytes
+   * computed from it come back.
+   */
+  assert.deepEqual(inspected.capabilities, ['RENDER_PNG']);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
     ['render', 'links'],
@@ -463,18 +468,58 @@ test('the mermaid plugin declares what the server would accept, and renders offl
    * situation — and its SVG must carry no outward reference: the library's
    * Google Fonts @import is stripped on the way out.
    */
-  const drawn = one('render').run('graph TD\n  A[start] --> B{ok?}\n  B -->|yes| C[done]', '');
+  const drawn = one('render').run(
+    'graph TD\n  A[start] --> B{ok?}\n  B -->|yes| C[done]',
+    '',
+    'svg',
+    0,
+  );
   assert.ok(drawn.svg.includes('<svg'), 'renders svg');
   assert.ok(drawn.svg.includes('start'), 'the nodes are in the drawing');
   assert.ok(!drawn.svg.includes('@import'), 'no outward reference survives');
   assert.equal(drawn.bytes, drawn.svg.length);
 
-  const themed = one('render').run('sequenceDiagram\n  A->>B: hi', 'nord');
+  const themed = one('render').run('sequenceDiagram\n  A->>B: hi', 'nord', 'svg', 0);
   assert.ok(themed.svg.includes('#2e3440'), 'the theme colors the drawing');
 
-  assert.throws(() => one('render').run('graph TD\n  A-->B', 'nope'), /no theme called nope/);
-  assert.throws(() => one('render').run('pie\n  "a" : 1', ''), /could not render the diagram/);
-  assert.throws(() => one('render').run('   ', ''), /no diagram source/);
+  assert.throws(
+    () => one('render').run('graph TD\n  A-->B', 'nope', 'svg', 0),
+    /no theme called nope/,
+  );
+  assert.throws(
+    () => one('render').run('pie\n  "a" : 1', '', 'svg', 0),
+    /could not render the diagram/,
+  );
+  assert.throws(() => one('render').run('   ', '', 'svg', 0), /no diagram source/);
+
+  /*
+   * A picture is what `render` answers when nothing says otherwise, because a
+   * picture is what a person can see — and out here there is no renderer to
+   * draw one, so the fallback's own sentence is what comes back rather than a
+   * drawing that silently is not one.
+   */
+  assert.throws(
+    () => one('render').run('graph TD\n  A-->B', ''),
+    /could not draw the diagram: there is no renderer here/,
+  );
+
+  /* Given a renderer, the picture is the answer and the markup is not. */
+  const renderer = globalThis.orknux.render;
+  let drawnFrom = null;
+  globalThis.orknux.render = {
+    pngFromSvg: (svg) => {
+      drawnFrom = svg;
+      return { base64: 'UE5H', bytes: 3 };
+    },
+  };
+  try {
+    const picture = one('render').run('graph TD\n  A-->B', '', 'png', 0);
+    assert.equal(picture.png, 'UE5H', 'the picture comes back as base64');
+    assert.equal(picture.svg, '', 'and the markup does not come with it');
+    assert.ok(drawnFrom.includes('<svg'), 'what was drawn is the markup it just rendered');
+  } finally {
+    globalThis.orknux.render = renderer;
+  }
 
   /*
    * `links` still carries the state json the mermaid sites read — decoding
