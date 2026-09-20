@@ -48,6 +48,59 @@ if (typeof globalThis.self === 'undefined') {
   globalThis.self = globalThis;
 }
 
+/*
+ * Somewhere for a library to talk to, and a way to defer work.
+ *
+ * Neither is switched on in this sandbox. `console` is a permission - it
+ * writes to the server's own log, so a plugin asks for it and somebody
+ * accepts - and there is no event loop here at all, so no `setTimeout`.
+ *
+ * A bundled renderer expects both to exist and does not check. Mermaid's
+ * flowchart path was failing outright on `console is not defined` while its
+ * sequence-diagram path worked, so `graph TD` simply did not render and the
+ * reason was a log line nobody was going to read.
+ *
+ * A plugin that genuinely wants to log declares CONSOLE and gets the real
+ * one - this only ever fills a hole. What is written here goes nowhere on
+ * purpose: a library's debug chatter is not the installation's log, and
+ * routing it there would make every diagram drawn write to it.
+ */
+if (typeof globalThis.console !== 'object' || globalThis.console === null) {
+  const nothing = () => undefined;
+  globalThis.console = {
+    log: nothing, info: nothing, warn: nothing, error: nothing,
+    debug: nothing, trace: nothing, dir: nothing, table: nothing,
+    group: nothing, groupEnd: nothing, groupCollapsed: nothing,
+    time: nothing, timeEnd: nothing, timeLog: nothing,
+    count: nothing, countReset: nothing, assert: nothing,
+  };
+}
+
+/*
+ * Run now rather than later, because there is no later.
+ *
+ * A sandbox call is one synchronous turn: nothing here waits, and whatever a
+ * timer would have run after the function returned would simply never run.
+ * Calling it straight away is the closest honest thing - layout code uses
+ * these to yield, not to wait for anything real - and it means the work
+ * happens inside the call that asked for it, where its time is bounded like
+ * everything else.
+ *
+ * The handle is a number nothing can cancel, which is true: it has already
+ * run by the time there is anything to cancel.
+ */
+if (typeof globalThis.setTimeout !== 'function') {
+  globalThis.setTimeout = (run, _after, ...rest) => {
+    if (typeof run === 'function') run(...rest);
+    return 0;
+  };
+  globalThis.clearTimeout = () => undefined;
+  globalThis.setInterval = () => {
+    throw new Error('setInterval has no meaning here: a sandbox call is one turn and then it ends');
+  };
+  globalThis.clearInterval = () => undefined;
+}
+
 if (typeof globalThis.TextEncoder !== 'function') {
   /** UTF-8, the only encoding anything here asks for. */
   globalThis.TextEncoder = class TextEncoder {
@@ -92,7 +145,40 @@ if (typeof globalThis.TextEncoder !== 'function') {
   };
 }
 
-if (typeof globalThis.TextDecoder !== 'function') {
+/*
+ * Whether the decoder already here can read latin1.
+ *
+ * Two different decoders can be in place by the time this runs. Without the
+ * TEXT_ENCODING permission there is none at all and the one below is used.
+ * With it, GraalJS installs its own - which reads utf-8 and refuses latin1
+ * outright, 'RangeError: Unsupported encoding: latin1'.
+ *
+ * jsPDF reads its font tables as latin1, so on an installation that granted
+ * the permission every PDF failed, while one that had not granted it worked.
+ * A conditional that only asks whether a decoder exists cannot tell those
+ * apart; this asks whether the one that exists does the job.
+ */
+function decodesLatin1() {
+  if (typeof globalThis.TextDecoder !== 'function') return false;
+  try {
+    new globalThis.TextDecoder('latin1');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+if (!decodesLatin1()) {
+  /*
+   * The engine's own, kept for the encoding it does handle.
+   *
+   * Where the permission was granted there is a real decoder here, and it is
+   * better than this one at utf-8 - it streams, it handles a byte order mark,
+   * and it is not a loop written in a shim. Only latin1 is missing, so only
+   * latin1 is answered below and everything else is handed straight back to it.
+   */
+  const engines = typeof globalThis.TextDecoder === 'function' ? globalThis.TextDecoder : null;
+
   globalThis.TextDecoder = class TextDecoder {
     constructor(label = 'utf-8') {
       const asked = String(label).toLowerCase();
@@ -109,6 +195,9 @@ if (typeof globalThis.TextDecoder !== 'function') {
       } else {
         throw new RangeError(`this sandbox decodes utf-8 and latin1 only, not ${label}`);
       }
+
+      // Anything but latin1 goes to the engine where there is one.
+      this.engine = this.label === 'latin1' || engines === null ? null : new engines(label);
     }
 
     get encoding() {
@@ -119,6 +208,8 @@ if (typeof globalThis.TextDecoder !== 'function') {
       if (input === undefined) return '';
       const bytes =
         input instanceof Uint8Array ? input : new Uint8Array(input.buffer ?? input);
+
+      if (this.engine !== null) return this.engine.decode(input);
 
       if (this.label === 'latin1') {
         let said = '';
