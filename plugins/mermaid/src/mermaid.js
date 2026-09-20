@@ -381,8 +381,15 @@ draws no SVG**, so an svg posted to a channel arrives as a file card somebody
 has to download. Ask for \`svg\` only when something other than a person reads
 it - a document that embeds the markup, a file somebody will edit.
 
-\`width\` sets the picture's width in pixels; left out, the diagram's own size is
-used. \`theme\` is a palette by name: \`zinc-light\`, \`zinc-dark\`, \`tokyo-night\`,
+**Leave \`width\` out.** Left out, the plugin picks the size - twice the
+diagram's own units, with the long side brought up to 1200 - which is the size
+its text is readable at. Naming a width turns that off and you get exactly the
+number you asked for: a diagram that laid itself out 800 units wide, asked for
+800, comes back 800 pixels wide with text at eight, which is the "why is it so
+small" this paragraph used to cause. Name one only when something downstream
+needs an exact width.
+
+\`theme\` is a palette by name: \`zinc-light\`, \`zinc-dark\`, \`tokyo-night\`,
 \`catppuccin-mocha\`, \`catppuccin-latte\`, \`nord\`, \`dracula\`, \`github-dark\`,
 \`solarized-light\`, \`one-dark\` and others - left out for the light default. A
 name it does not know is refused with the list.
