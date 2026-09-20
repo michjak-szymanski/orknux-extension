@@ -864,9 +864,17 @@ test('the mermaid plugin declares what the server would accept, and renders offl
   const renderer = globalThis.orknux.render;
   let drawnFrom = null;
   globalThis.orknux.render = {
-    pngFromSvg: (svg) => {
+    /* Stands in for the server: scales the viewBox to the width it was handed. */
+    pngFromSvg: (svg, width) => {
       drawnFrom = svg;
-      return { base64: 'UE5H', bytes: 3 };
+      const box = /viewBox="\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/.exec(svg);
+      const drawn = width ?? Number(box[1]);
+      return {
+        base64: 'UE5H',
+        bytes: 3,
+        width: Math.round(drawn),
+        height: Math.round((drawn / Number(box[1])) * Number(box[2])),
+      };
     },
   };
   try {
@@ -874,6 +882,47 @@ test('the mermaid plugin declares what the server would accept, and renders offl
     assert.equal(picture.png, 'UE5H', 'the picture comes back as base64');
     assert.equal(picture.svg, '', 'and the markup does not come with it');
     assert.ok(drawnFrom.includes('<svg'), 'what was drawn is the markup it just rendered');
+
+    /*
+     * And the size, which is the whole of what a caller has to judge a
+     * drawing by. Two boxes declare about 152 by 202, and the long side is
+     * brought to the floor rather than the width - a width floor would have
+     * drawn this 1200 across and 1600 down for no legibility it did not
+     * already have.
+     */
+    assert.equal(
+      Math.max(picture.width, picture.height),
+      1200,
+      'the long side reaches the floor, whichever side that turns out to be',
+    );
+
+    /*
+     * The shape this plugin got wrong. Sixteen linked nodes declare about 300
+     * by 1475, and asking for 1200 wide drew that 5890 down - past any
+     * sensible ceiling, so the server brought the whole thing back to
+     * something nobody could read. The budget is on the area, which is the
+     * only cap that sees a tall drawing and a wide one the same way.
+     */
+    const long = 'graph TD\n' + Array.from(
+      { length: 16 },
+      (_, at) => `  N${at}[A reasonably long node label ${at}] --> N${at + 1}[Another ${at + 1}]`,
+    ).join('\n');
+    const tall = one('render').run(long, '', 'png', 0);
+    assert.ok(tall.height > tall.width * 2, 'a tall diagram is still tall');
+    assert.ok(
+      tall.width * tall.height <= 4e6,
+      `a tall diagram covered ${tall.width * tall.height} pixels`,
+    );
+    /* And never below the size it laid itself out at, where its text lives. */
+    assert.ok(tall.width >= 300, `a tall diagram was shrunk to ${tall.width} wide`);
+
+    /* The markup answer says what it declares, since nothing drew it. */
+    const markup = one('render').run('graph TD\n  A-->B', '', 'svg', 0);
+    assert.ok(markup.width > 0 && markup.height > 0, 'svg reports the size it declares');
+    assert.ok(
+      markup.width < 400 && markup.height < 400,
+      'and it is the markup(s) own size, not a drawn one',
+    );
   } finally {
     globalThis.orknux.render = renderer;
   }
@@ -1814,7 +1863,15 @@ test('the nomnoml plugin declares what the server would accept, and renders offl
       pngFromSvg: (svg, width) => {
         drawnFrom = svg;
         widthAsked = width;
-        return { base64: 'UE5H', bytes: 3 };
+        /* Stands in for the server: scales the viewBox to the width it was handed. */
+        const box = /viewBox="\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/.exec(svg);
+        const drawn = width ?? Number(box[1]);
+        return {
+          base64: 'UE5H',
+          bytes: 3,
+          width: Math.round(drawn),
+          height: Math.round((drawn / Number(box[1])) * Number(box[2])),
+        };
       },
     };
     try {
@@ -1831,9 +1888,49 @@ test('the nomnoml plugin declares what the server would accept, and renders offl
        * renderer declared. Two boxes declare about eighty points, and a
        * picture eighty pixels wide is one Slack scales up into a blur -
        * redrawing vector larger costs a bigger file and nothing else.
+       *
+       * The long side is what reaches the floor, not the width. These two
+       * boxes are 82 by 160, so a width floor would have drawn them 1200
+       * across and 2341 down - taller than the budget for no gain, because
+       * the side that has to be legible is already past it.
        */
-      render('[a] -> [b]', '', '', 'png', 0);
-      assert.equal(widthAsked, 1200, 'zero asks for the floor, not for nothing');
+      const tiny = render('[a] -> [b]', '', '', 'png', 0);
+      assert.equal(widthAsked, 615, 'the long side reaches the floor, and the width follows');
+      assert.equal(Math.max(tiny.width, tiny.height), 1200, 'which is what the floor is measured on');
+
+      /*
+       * And the two shapes that made this a rule about area rather than
+       * width. Both were shipped and both came out wrong.
+       *
+       * Wide: fourteen unconnected pairs lay out side by side and declare
+       * 4074 by 192. A cap of 2400 on
+       * the width drew that at 0.59x - smaller than it laid itself out, which
+       * is where text stops existing - and Slack fitted the resulting sliver
+       * to its column. Nothing may be drawn below 1x now, whatever it costs.
+       */
+      const chain = Array.from(
+        { length: 14 },
+        (_, at) => `[node ${at} with a fairly long label|field: string] -> [node ${at + 1}]`,
+      ).join('\n');
+      const wide = render(chain, '', '', 'png', 0);
+      assert.ok(wide.width / 4074 >= 1, `a wide diagram was shrunk to ${wide.width / 4074}x`);
+      assert.ok(wide.width * wide.height <= 4e6, 'and is still inside the area budget');
+
+      /*
+       * Tall: the other direction, where asking for a width says nothing at
+       * all. A diagram five times longer than it is wide drawn 1200 across is
+       * 5890 down, and a server ceiling then brings the whole thing back to
+       * something unreadable. The budget is on the area, so it catches both.
+       */
+      const linked = Array.from({ length: 16 }, (_, at) => `[step ${at}] -> [step ${at + 1}]`)
+        .join('\n');
+      const tall = render(linked, '', '', 'png', 0);
+      assert.ok(tall.width * tall.height <= 4e6, `a tall diagram covered ${tall.width * tall.height}`);
+      assert.ok(tall.height / tall.width > 1, 'and is still the shape it was drawn in');
+
+      /* What comes back is what the renderer said, not what was asked for. */
+      assert.equal(tiny.width, 615, 'the answer carries the drawn size');
+      assert.ok(tiny.height > tiny.width, 'both sides of it');
     } finally {
       globalThis.orknux.render = renderer;
     }

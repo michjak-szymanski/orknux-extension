@@ -13,11 +13,12 @@ at, and the two syntaxes barely overlap.
 
 | Function | Answers |
 |---|---|
-| `render(source, theme, direction, format, width)` | A `Drawing`: the `png` as base64 **or** the `svg` as text, its `bytes`, a short `key` the answer is kept under for the session, and an `editor` url that opens the diagram for hand-tweaking. |
+| `render(source, theme, direction, format, width)` | A `Drawing`: the `png` as base64 **or** the `svg` as text, its `bytes`, the `width` and `height` it came out at, a short `key` the answer is kept under for the session, and an `editor` url that opens the diagram for hand-tweaking. |
 
 ```
 nomnoml_render('[<actor>User] -> [<usecase>Load a plugin]\n[Server|check();grant()] o- [Plugin]')
-  → { png: 'iVBORw0KGgo…', svg: '', bytes: 18402, key: 'nomnoml.1fpehnu',
+  → { png: 'iVBORw0KGgo…', svg: '', bytes: 18402, width: 1200, height: 934,
+      key: 'nomnoml.1fpehnu',
       editor: 'https://www.nomnoml.com/#view/…' }
 ```
 
@@ -26,9 +27,38 @@ Slack draws no SVG at all, it hosts one as a file and shows a card. Ask for
 `format: 'svg'` when you want the markup itself: to edit it, to put it in a
 document, or to hand it somewhere that does draw it.
 
-`width` sets the picture's width in pixels and lets the height follow the
-drawing's own proportions; left out, the size the diagram declares is the size
-that is drawn. It means nothing for `svg`.
+## How big it comes out
+
+`width` in pixels, and the height follows the drawing's own proportions. Left
+out, the plugin picks — and what it picks is a **scale**, not a width, because
+a width says nothing about how large a diagram is when the other side is free
+to be eighteen times longer.
+
+Twice the size the diagram laid itself out at, since text in these is set at
+about ten units and twenty pixels is where it stops being a guess. Then:
+
+- a diagram smaller than 1200 on its long side is brought up to it, because a
+  two-node picture has room to spare;
+- the area is capped at four megapixels, which is the only cap that treats a
+  tall drawing and a wide one the same way;
+- and nothing is ever drawn **smaller** than it laid itself out, whatever that
+  costs — below 1× the text is gone, and a big file the server refuses is a
+  better answer than a small one nobody can read.
+
+Both of those clauses are scars. A fourteen-node chain declares 4074 × 192;
+under the old width cap it was drawn at 0.59× and arrived as a 132-pixel
+sliver that Slack fitted to its column. A sixteen-node flowchart declares
+300 × 1475; asked for 1200 wide it came back 5890 tall, and a server ceiling
+shrank the whole thing back down.
+
+The answer carries `width` and `height` **as drawn** — read off the file, not
+echoed back from the request — so a ceiling that had an opinion is visible
+rather than something you notice later in Slack. When they come back wildly
+lopsided, the fix is to redraw the diagram in the other direction rather than
+to ask for more pixels: no picture is legible in a chat column at 18:1.
+
+For `svg` the two fields report what the markup declares for itself, since
+nothing drew it.
 
 ## The syntax, in one table
 

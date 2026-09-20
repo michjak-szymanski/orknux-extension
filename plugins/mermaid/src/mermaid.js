@@ -135,6 +135,41 @@ function keyedOnly(made) {
 }
 
 /**
+ * The size a drawing declares for itself, both sides of it.
+ *
+ * The viewBox rather than the width attribute, and the root element rather
+ * than the document: a search for `width="..."` anywhere in the markup finds
+ * the first rectangle in the body just as happily as the drawing, and mermaid
+ * writes its own root as a percentage besides. The viewBox is the one place
+ * an SVG states its own coordinate space.
+ */
+function intrinsic(svg) {
+  const close = svg.indexOf('>');
+  const root = close === -1 ? svg : svg.slice(0, close);
+
+  const box = /viewBox="\s*([-\d.]+)[\s,]+([-\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/.exec(root);
+  if (box !== null) {
+    const width = Number(box[3]);
+    const height = Number(box[4]);
+    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+      return { width: width, height: height };
+    }
+  }
+
+  /* No viewBox, so the declared size is all there is to go on. */
+  const wide = /\bwidth="([\d.]+)"/.exec(root);
+  const tall = /\bheight="([\d.]+)"/.exec(root);
+  if (wide === null || tall === null) {
+    return null;
+  }
+  const width = Number(wide[1]);
+  const height = Number(tall[1]);
+  return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+    ? { width: width, height: height }
+    : null;
+}
+
+/**
  * How wide to draw, when the caller did not say.
  *
  * A renderer sizes an SVG for layout, not for looking at: a two-node flowchart
@@ -143,22 +178,49 @@ function keyedOnly(made) {
  * - every line is computed again at the new size - so the only cost of asking
  * for more is the file, and a diagram nobody can read costs more than that.
  *
- * Twice the declared size, floored so the smallest diagram still arrives
- * legible and capped so a wide one does not turn into a wall. A caller who
- * names a width gets exactly it.
+ * ## Why a width is not the thing to decide
+ *
+ * This asked for a width and nothing else, and both ways that goes wrong were
+ * shipped. A fourteen-node nomnoml chain declares 4074 by 224; asked for 2400
+ * wide it came back 2400 by 132, a sliver that Slack fits to its column and
+ * renders as a smear - the "too small" that started this. A sixteen-node
+ * mermaid flowchart declares 300 by 1475; asked for 1200 wide it came back
+ * 1200 by 5890, which is where a server ceiling takes over and shrinks the
+ * whole thing back down again.
+ *
+ * Both are the same mistake: a width says nothing about how large a drawing
+ * is when the other side is free to be eighteen times longer.
+ *
+ * ## What is decided instead
+ *
+ * A scale - how many pixels a drawing gets per unit it drew in - and the
+ * width is whatever that comes to.
+ *
+ * Twice, to start with, because text in these diagrams is set at about ten
+ * units and twenty pixels is the size it stops being a guess. Then the long
+ * side is brought up to `longest` where the whole diagram is smaller than
+ * that, since a two-node picture has room to spare. Then `pixels` caps the
+ * area, which is the only cap that treats a tall drawing and a wide one the
+ * same. And never below 1: a drawing rendered smaller than it laid itself out
+ * has lost its text, and no ceiling is worth that - better to hand the server
+ * something too big and let it say so.
+ *
+ * A caller who names a width gets exactly it, ceilings and all.
  */
-const PNG_WIDTH = { least: 1200, most: 2400 };
+const PNG = { scale: 2, longest: 1200, pixels: 4e6 };
 
 function drawnWidth(svg, asked) {
   if (typeof asked === 'number' && asked > 0) {
     return asked;
   }
-  const found = /\bwidth="([\d.]+)"/.exec(svg);
-  const natural = found === null ? 0 : Number(found[1]);
-  if (!Number.isFinite(natural) || natural <= 0) {
-    return PNG_WIDTH.least;
+  const size = intrinsic(svg);
+  if (size === null) {
+    return PNG.longest;
   }
-  return Math.min(Math.max(Math.round(natural * 2), PNG_WIDTH.least), PNG_WIDTH.most);
+
+  let scale = Math.max(PNG.scale, PNG.longest / Math.max(size.width, size.height));
+  scale = Math.min(scale, Math.sqrt(PNG.pixels / (size.width * size.height)));
+  return Math.round(size.width * Math.max(scale, 1));
 }
 
 /**
@@ -332,6 +394,22 @@ drawn here - change the tool, not the diagram.`,
           },
           { name: 'bytes', kind: 'number', description: 'How long the answer is.' },
           {
+            name: 'width',
+            kind: 'number',
+            description:
+              'How wide the picture came out, in pixels - read off the file rather than echoed ' +
+              'back from the request, so a server ceiling that brought it down shows here. For ' +
+              'an svg it is the size the markup declares.',
+          },
+          {
+            name: 'height',
+            kind: 'number',
+            description:
+              'How tall it came out. Worth a glance beside width: a diagram far longer one way ' +
+              'than the other is one a chat column will shrink to nothing, and redrawing it in ' +
+              'the other direction is what fixes that rather than a larger picture.',
+          },
+          {
             name: 'key',
             kind: 'string',
             description:
@@ -394,10 +472,13 @@ drawn here - change the tool, not the diagram.`,
           'kind (pie, gantt, mindmap, ...) is refused by name - use links for those. theme names a ' +
           'palette (zinc-light, zinc-dark, tokyo-night, catppuccin-mocha, catppuccin-latte, nord, ' +
           '...), left out for the light default. format is png (the default) for a picture people ' +
-          'can see, or svg for the markup; width sets the picture width in pixels, left out for ' +
-          'twice what the diagram declares, which is what makes it legible rather than a postage ' +
-          'stamp Slack scales up. Answers png as base64 or svg as text, the byte count, ' +
-          'and a short key the answer is kept under for this session. To put it on Slack pass ' +
+          'can see, or svg for the markup; width sets the picture width in pixels, left out to ' +
+          'be sized for reading - twice what the diagram laid itself out at, brought up where ' +
+          'that is still small, and capped on area rather than on either side. Answers png as ' +
+          'base64 or svg as text, the byte count, the width and height it actually came out at, ' +
+          'and a short key the answer is kept under for this session. Those two are worth a ' +
+          'look: a drawing far longer one way than the other is one a chat column shrinks to ' +
+          'nothing, and redrawing it in the other direction is the fix rather than more pixels. To put it on Slack pass ' +
           'that key - slack_uploadBinary takes it for a png, slack_upload for an svg - rather ' +
           'than copying the answer out and pasting it in, which is thousands of characters that ' +
           'have to come back perfect and do not.',
@@ -491,6 +572,14 @@ drawn here - change the tool, not the diagram.`,
               svg: '',
               png: drawn.base64,
               bytes: drawn.bytes,
+              /*
+               * What came back, not what was asked for. The two differ
+               * whenever a server ceiling had an opinion, and that difference
+               * is the whole reason a caller can tell a drawing that came out
+               * legible from one that did not.
+               */
+              width: drawn.width,
+              height: drawn.height,
               key: kept.error === undefined ? key : '',
             };
           }
@@ -498,10 +587,15 @@ drawn here - change the tool, not the diagram.`,
           const key = keyFor(held);
           const kept = orknux.session.store.put(key, held);
 
+          /* Markup has no drawn size, so what it declares for itself is the honest answer. */
+          const declared = intrinsic(held) ?? { width: 0, height: 0 };
+
           return {
             svg: held,
             png: '',
             bytes: held.length,
+            width: Math.round(declared.width),
+            height: Math.round(declared.height),
             // Empty where there is no session to keep it in, which is exactly
             // when a caller has to fall back to the answer above.
             key: kept.error === undefined ? key : '',
