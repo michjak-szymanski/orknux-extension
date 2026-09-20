@@ -573,6 +573,20 @@ export default class Slack extends OrknuxPlugin {
   objects() {
     return [
       new OrknuxObject({
+        name: 'MessageFile',
+        description:
+          'A file attached to a message in a thread. Narrower than Attachment on purpose: these are ' +
+          'the four things reading a thread learns about a file, and a shape promising a permalink ' +
+          'that never arrives is worse than one that does not mention it.',
+        properties: [
+          { name: 'id', kind: 'string', description: 'What readAttachment takes.' },
+          { name: 'name', kind: 'string', description: 'The filename.' },
+          { name: 'mimetype', kind: 'string', description: 'What decides whether readAttachment answers text or bytes.' },
+          { name: 'size', kind: 'number', description: 'In bytes.' },
+        ],
+      }),
+
+      new OrknuxObject({
         name: 'Message',
         description: 'One message in a thread.',
         properties: [
@@ -583,6 +597,14 @@ export default class Slack extends OrknuxPlugin {
             name: 'parent',
             kind: 'boolean',
             description: 'Whether this is the message the thread hangs under, rather than a reply.',
+          },
+          {
+            name: 'files',
+            kind: 'array',
+            of: 'MessageFile',
+            description:
+              'What was attached to it, empty where nothing was. Pass a file id to readAttachment for ' +
+              'its content - this is how a file somebody uploaded earlier in the thread is found.',
           },
         ],
       }),
@@ -1025,8 +1047,10 @@ adding a message to anybody's unread count.`,
       new OrknuxFunction({
         name: 'readThread',
         description:
-          'Reads a Slack thread: the messages under one parent, oldest first, and how many replies the ' +
-          'whole thread holds. Pass the channel id and the thread\'s ts (threadTs on an event; a message\'s ' +
+          'Reads a Slack thread: the messages under one parent, oldest first, what each of them has ' +
+          'attached, and how many replies the whole thread holds. A message somebody uploaded a file ' +
+          'to carries it under files, with the id readAttachment takes - so a question about "the ' +
+          'file" is answered by reading the thread rather than by guessing a timestamp. Pass the channel id and the thread\'s ts (threadTs on an event; a message\'s ' +
           'own ts when it is the parent). Pass the connection the event came in on, or an empty string to ' +
           'use the configured one. An empty string is always safe: a connection named by an older event may since have been deleted. limit caps how many messages come back.',
         params: [
