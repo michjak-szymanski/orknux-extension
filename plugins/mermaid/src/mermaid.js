@@ -170,6 +170,91 @@ export default class Mermaid extends OrknuxPlugin {
     return ['RENDER_PNG'];
   }
 
+  /*
+   * Mermaid is the syntax a model already knows, and that is the problem.
+   *
+   * It knows all of mermaid - pie charts, gantt, mindmaps, journeys - and this
+   * draws five kinds. A model that writes one of the others gets a refusal
+   * naming what it takes, which is recoverable, but only if it knows `links`
+   * exists and answers every kind. That is what this is for.
+   */
+  skills() {
+    return [
+      new OrknuxSkill({
+        name: 'Drawing with mermaid',
+        description: 'The five kinds this draws, what to do with the rest, and how a diagram reaches somebody.',
+        content: `# Drawing with mermaid
+
+\`mermaid_render\` draws mermaid source here, in the sandbox - no browser, no
+service, nothing fetched. It draws **five kinds**:
+
+\`flowchart\` / \`graph\` · \`sequenceDiagram\` · \`stateDiagram-v2\` ·
+\`classDiagram\` · \`erDiagram\`
+
+## Any other kind
+
+\`pie\`, \`gantt\`, \`mindmap\`, \`journey\`, \`quadrantChart\`, \`timeline\` and the rest are
+refused by name. That is not the end of it - **\`mermaid_links\` handles every
+kind**, because the source travels inside the url and the reader's own browser
+does the drawing:
+
+    mermaid_links(source)  ->  { image, svg, editor, markdown }
+
+\`image\` is a PNG url. Give it to \`slack_uploadFromUrl\` and the channel gets a
+picture; paste \`markdown\` into a GitHub comment and it renders there. The price
+is that the reader's browser reaches mermaid.ink, which \`render\` never does.
+
+So: \`render\` for the five, \`links\` for everything else. Do not translate a pie
+chart into a flowchart.
+
+## Which tool at all
+
+| You are drawing | Use |
+|---|---|
+| A process, steps, decisions | \`mermaid_render\`, \`flowchart\` |
+| Who called whom, in order | \`mermaid_render\`, \`sequenceDiagram\` |
+| Classes, packages, actors, what contains what | \`nomnoml_render\` |
+| A pie chart, a gantt, a mindmap | \`mermaid_links\` |
+
+## The arguments
+
+\`format\` is \`png\` unless you say otherwise, and png is what you want: **Slack
+draws no SVG**, so an svg posted to a channel arrives as a file card somebody
+has to download. Ask for \`svg\` only when something other than a person reads
+it - a document that embeds the markup, a file somebody will edit.
+
+\`width\` sets the picture's width in pixels; left out, the diagram's own size is
+used. \`theme\` is a palette by name: \`zinc-light\`, \`zinc-dark\`, \`tokyo-night\`,
+\`catppuccin-mocha\`, \`catppuccin-latte\`, \`nord\`, \`dracula\`, \`github-dark\`,
+\`solarized-light\`, \`one-dark\` and others - left out for the light default. A
+name it does not know is refused with the list.
+
+## Getting it to somebody
+
+The answer carries a **key**, not the picture. Pass the key:
+
+    mermaid_render(source)  ->  { key: 'mermaid.1k3af9', bytes: 18402 }
+    slack_uploadBinary(channel, 'flow.png', 'mermaid.1k3af9', comment, threadTs)
+
+\`slack_uploadBinary\` takes that key and nothing else - there is no argument to
+put bytes in. A picture is thousands of characters of base64 and does not
+survive being written back out by you; the key is a dozen and what it names
+never leaves the server.
+
+## When it will not draw
+
+The error says what is wrong, and there are only two kinds of wrong:
+
+- **a kind this does not draw** - the message lists the five. Use \`links\`.
+- **a syntax error** - the message names it. Fix that line.
+
+Both are answers, not bugs. Do not call again with the same source, and do not
+rewrite a working diagram because the first attempt used a kind that is not
+drawn here - change the tool, not the diagram.`,
+      }),
+    ];
+  }
+
   /* What a drawing comes back as, and what a link to one looks like. */
   objects() {
     return [
