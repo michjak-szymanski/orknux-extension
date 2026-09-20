@@ -3,6 +3,7 @@
   "key": "pdf",
   "name": "PDF",
   "author": "Orknux",
+  "category": "documents",
   "summary": "Compose PDF documents from a workflow, diagrams drawn in.",
   "version": "0.6.0",
   "icon": "icon.svg",

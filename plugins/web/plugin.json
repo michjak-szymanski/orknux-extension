@@ -3,6 +3,7 @@
   "key": "web",
   "name": "Web Search",
   "author": "Orknux",
+  "category": "web",
   "summary": "Search the web from a workflow or an agent, and read what comes back.",
   "version": "0.4.0",
   "icon": "icon.svg",

@@ -3,6 +3,7 @@
   "key": "markdown",
   "name": "Markdown",
   "author": "Orknux",
+  "category": "documents",
   "summary": "Turn the markdown a model writes into Slack mrkdwn, or into plain text.",
   "version": "0.2.0",
   "icon": "icon.svg",
