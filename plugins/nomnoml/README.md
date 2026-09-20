@@ -51,6 +51,21 @@ sliver that Slack fitted to its column. A sixteen-node flowchart declares
 300 × 1475; asked for 1200 wide it came back 5890 tall, and a server ceiling
 shrank the whole thing back down.
 
+**The size is written into the SVG as well as asked for.** Batik reads a
+document's own `width` and `height` and fits the viewBox into them, so a root
+carrying only a viewBox has no size at all and falls back to Batik's default
+400 × 400 — which turns a request for 1200 into a 1200 × 400 canvas with the
+drawing letterboxed in the middle of it. This plugin once stripped the
+intrinsic size deliberately, on exactly the opposite theory, and that is the
+picture that came back 178 pixels wide in an 800-pixel frame.
+
+**And `transparent` is spelled `none` on the way out.** It is a CSS colour and
+SVG 1.1 has no such keyword, so a strict renderer falls back to the property's
+initial value — black for `fill`. nomnoml marks its background rect
+`fill="transparent"`, and what came back was a solid black slab behind every
+diagram: invisible on a dark chat theme, which is why it went unnoticed, and
+obvious anywhere else.
+
 The answer carries `width` and `height` **as drawn** — read off the file, not
 echoed back from the request — so a ceiling that had an opinion is visible
 rather than something you notice later in Slack. When they come back wildly

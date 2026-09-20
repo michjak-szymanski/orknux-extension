@@ -190,44 +190,87 @@ function intrinsic(svg) {
  */
 const PNG = { scale: 2, longest: 1200, pixels: 4e6 };
 
-function drawnWidth(svg, asked) {
-  if (typeof asked === 'number' && asked > 0) {
-    return asked;
-  }
+function drawnSize(svg, asked) {
   const size = intrinsic(svg);
   if (size === null) {
-    return PNG.longest;
+    /* Nothing to scale from, so the floor is the whole answer. */
+    return { width: PNG.longest, height: 0 };
   }
 
-  let scale = Math.max(PNG.scale, PNG.longest / Math.max(size.width, size.height));
-  scale = Math.min(scale, Math.sqrt(PNG.pixels / (size.width * size.height)));
-  return Math.round(size.width * Math.max(scale, 1));
+  /* A caller who names a width gets exactly it, and the height follows. */
+  let scale = typeof asked === 'number' && asked > 0 ? asked / size.width : PNG.scale;
+  if (!(typeof asked === 'number' && asked > 0)) {
+    scale = Math.max(scale, PNG.longest / Math.max(size.width, size.height));
+    scale = Math.min(scale, Math.sqrt(PNG.pixels / (size.width * size.height)));
+    scale = Math.max(scale, 1);
+  }
+
+  return {
+    width: Math.max(1, Math.round(size.width * scale)),
+    height: Math.max(1, Math.round(size.height * scale)),
+  };
 }
 
 /**
- * The same drawing with its intrinsic size taken off, leaving the viewBox.
+ * The same drawing, declaring the size it should be drawn at.
  *
- * Handed a width, a rasteriser is supposed to scale the document to it. Handed
- * a document that also declares `width="140"`, some place that 140-pixel
- * drawing inside the canvas you asked for and leave the rest empty - which
- * looks like the diagram shrinking, because relative to the picture it did.
+ * ## The mistake this replaces, because it was an expensive one
  *
- * The viewBox is what says how to scale, and it stays. Without a competing
- * intrinsic size there is nothing to letterbox against, so the drawing fills
- * the width it was asked for whichever way the rasteriser is built.
+ * This used to take the intrinsic `width` and `height` *off*, on the reasoning
+ * that a document declaring 140 pixels would be placed inside the canvas you
+ * asked for and letterboxed, and that a lone viewBox would be free to scale.
  *
- * Only on the way to a picture. The svg answer keeps its width and height,
- * because something embedding markup wants to know how big it is.
+ * Exactly backwards, and measured this time. Batik - which is what draws these
+ * - reads the document's own size first and fits the viewBox into that. A root
+ * carrying only a viewBox has no size, so Batik falls back to its default
+ * document of 400 by 400: a width of 1200 then produces 1200 by 400 with the
+ * drawing centred in it, whatever shape the drawing is. That is the picture
+ * that came back 178 wide in an 800-pixel canvas with three hundred pixels of
+ * nothing down each side.
+ *
+ * With `width` and `height` present the same request produces 1200 by 2697,
+ * which is the drawing at the size it was asked for.
+ *
+ * ## So the size is written in rather than taken out
+ *
+ * Both sides, computed from the scale, and the viewBox left alone - so the
+ * document's own aspect ratio equals the viewBox's and there is nothing for a
+ * renderer to letterbox against. The `width` handed to the renderer says the
+ * same thing a second time, and the two agreeing is the point: whichever one a
+ * rasteriser reads, it reads the same number.
+ *
+ * Only on the way to a picture. The svg answer keeps the size the layout gave
+ * it, because that is what it measured and what something embedding the markup
+ * will lay out against.
  */
-function scalable(svg) {
+function sized(svg, width, height) {
   const close = svg.indexOf('>');
-  if (close === -1 || !/viewBox=/.test(svg.slice(0, close))) {
+  if (close === -1 || width <= 0 || height <= 0) {
     return svg;
   }
   const root = svg
     .slice(0, close)
     .replace(/\s(?:width|height)="[^"]*"/g, '');
-  return root + svg.slice(close);
+  return `${root} width="${width}" height="${height}"${svg.slice(close)}`;
+}
+
+/**
+ * Paint keywords an SVG rasteriser is entitled not to know.
+ *
+ * `transparent` is a CSS colour and SVG 1.1 has no such keyword, so a strict
+ * renderer refuses the value and falls back to the property's initial one -
+ * which for `fill` is **black**. nomnoml marks its background rect
+ * `fill="transparent" stroke="transparent"`, and what came back was that
+ * rectangle painted solid black behind the whole diagram. It reads as a
+ * transparent background on a dark chat theme, which is exactly why it went
+ * unnoticed, and as a black slab anywhere else.
+ *
+ * `none` is the SVG spelling of the same intention and every renderer takes
+ * it. Only on the paint properties, and only as a whole attribute value: the
+ * word inside a gradient or a stylesheet is somebody else's business.
+ */
+function painted(svg) {
+  return svg.replace(/\b(fill|stroke|stop-color|flood-color)="transparent"/g, '$1="none"');
 }
 
 export default class Nomnoml extends OrknuxPlugin {
@@ -566,7 +609,11 @@ editor, which is worth giving somebody who will want to tweak it.`,
            * is the only way that answer exists.
            */
           if (asked === 'png') {
-            const drawn = orknux.render.pngFromSvg(scalable(svg), drawnWidth(svg, width));
+            const want = drawnSize(svg, width);
+            const drawn = orknux.render.pngFromSvg(
+              painted(sized(svg, want.width, want.height)),
+              want.width,
+            );
             if (drawn.error !== undefined) {
               throw new Error(`could not draw the diagram: ${drawn.error}`);
             }

@@ -31,6 +31,55 @@ const everyPlugin = readdirSync(fileURLToPath(new URL('../../plugins/', import.m
   .filter((name) => existsSync(shipped(name)))
   .sort();
 
+
+/**
+ * What a drawing has to say for itself before a rasteriser will scale it.
+ *
+ * This is the assertion that was missing twice. Batik - which is what draws
+ * these - reads the document's own width and height and fits the viewBox into
+ * them; a root carrying only a viewBox has no size, so Batik falls back to its
+ * default document of 400 by 400, and a width of 1200 then produces 1200 by
+ * 400 with the drawing letterboxed in the middle of it. A plugin once stripped
+ * the intrinsic size deliberately, believing the opposite, and these tests
+ * could not tell: they only ever looked at the number it asked for, never at
+ * the markup it handed over.
+ */
+function handedOver(markup, asked) {
+  const root = markup.slice(0, markup.indexOf('>'));
+
+  const box = /viewBox="\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/.exec(root);
+  assert.ok(box, 'the markup handed over has no viewBox');
+
+  const wide = /\bwidth="([\d.]+)"/.exec(root);
+  const tall = /\bheight="([\d.]+)"/.exec(root);
+  assert.ok(wide, 'the markup handed over declares no width, so it will be letterboxed');
+  assert.ok(tall, 'the markup handed over declares no height, so it will be letterboxed');
+
+  const width = Number(wide[1]);
+  const height = Number(tall[1]);
+  assert.equal(width, asked, 'the markup says a different width than was asked for');
+
+  /* And the same shape as the viewBox, so there is nothing to letterbox against. */
+  const drawn = Number(box[1]) / Number(box[2]);
+  assert.ok(
+    Math.abs(width / height - drawn) < 0.02,
+    `the markup is ${(width / height).toFixed(3)} where its viewBox is ${drawn.toFixed(3)}`,
+  );
+
+  /*
+   * `transparent` is a CSS colour and SVG 1.1 has none, so a strict renderer
+   * falls back to the initial value - black for `fill`. nomnoml marks its
+   * background rect that way, and what came back was a solid black slab behind
+   * the diagram: invisible on a dark chat theme, obvious anywhere else.
+   */
+  assert.ok(
+    !/(?:fill|stroke|stop-color|flood-color)="transparent"/.test(markup),
+    'a paint is left as transparent, which a strict renderer draws black',
+  );
+
+  return { width, height };
+}
+
 test('the github plugin declares what the server would accept', async () => {
   const inspected = await inspect(shipped('github'));
 
@@ -882,6 +931,7 @@ test('the mermaid plugin declares what the server would accept, and renders offl
     assert.equal(picture.png, 'UE5H', 'the picture comes back as base64');
     assert.equal(picture.svg, '', 'and the markup does not come with it');
     assert.ok(drawnFrom.includes('<svg'), 'what was drawn is the markup it just rendered');
+    handedOver(drawnFrom, picture.width);
 
     /*
      * And the size, which is the whole of what a caller has to judge a
@@ -908,6 +958,7 @@ test('the mermaid plugin declares what the server would accept, and renders offl
       (_, at) => `  N${at}[A reasonably long node label ${at}] --> N${at + 1}[Another ${at + 1}]`,
     ).join('\n');
     const tall = one('render').run(long, '', 'png', 0);
+    handedOver(drawnFrom, tall.width);
     assert.ok(tall.height > tall.width * 2, 'a tall diagram is still tall');
     assert.ok(
       tall.width * tall.height <= 4e6,
@@ -1882,6 +1933,7 @@ test('the nomnoml plugin declares what the server would accept, and renders offl
       assert.equal(held.get(picture.key), 'UE5H', 'the key names the picture, not the markup');
       assert.ok(drawnFrom.includes('#1e232b'), 'the themed markup is what was drawn');
       assert.equal(widthAsked, 640, 'the width is passed through');
+      assert.equal(handedOver(drawnFrom, 640).width, 640, 'and reaches the markup');
 
       /*
        * A width of zero asks for the legible default, not for the size the
@@ -1896,6 +1948,7 @@ test('the nomnoml plugin declares what the server would accept, and renders offl
        */
       const tiny = render('[a] -> [b]', '', '', 'png', 0);
       assert.equal(widthAsked, 615, 'the long side reaches the floor, and the width follows');
+      handedOver(drawnFrom, 615);
       assert.equal(Math.max(tiny.width, tiny.height), 1200, 'which is what the floor is measured on');
 
       /*
@@ -1913,6 +1966,7 @@ test('the nomnoml plugin declares what the server would accept, and renders offl
         (_, at) => `[node ${at} with a fairly long label|field: string] -> [node ${at + 1}]`,
       ).join('\n');
       const wide = render(chain, '', '', 'png', 0);
+      handedOver(drawnFrom, widthAsked);
       assert.ok(wide.width / 4074 >= 1, `a wide diagram was shrunk to ${wide.width / 4074}x`);
       assert.ok(wide.width * wide.height <= 4e6, 'and is still inside the area budget');
 
@@ -1925,6 +1979,7 @@ test('the nomnoml plugin declares what the server would accept, and renders offl
       const linked = Array.from({ length: 16 }, (_, at) => `[step ${at}] -> [step ${at + 1}]`)
         .join('\n');
       const tall = render(linked, '', '', 'png', 0);
+      handedOver(drawnFrom, widthAsked);
       assert.ok(tall.width * tall.height <= 4e6, `a tall diagram covered ${tall.width * tall.height}`);
       assert.ok(tall.height / tall.width > 1, 'and is still the shape it was drawn in');
 
