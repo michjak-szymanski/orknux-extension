@@ -840,26 +840,10 @@ arrives with the asterisks showing, \`[text](url)\` as literal brackets,
 \`# Heading\` as a hash and a space. You cannot see the message afterwards, so
 nothing tells you it happened.
 
-**\`slack_post\` fixes the shapes that are never valid mrkdwn**, on the way out,
-without being asked:
-
-    **bold**  ->  *bold*          [text](url)  ->  <url|text>
-    ~~gone~~  ->  ~gone~          # Heading    ->  *Heading*
-    *  item   ->  •  item         - item       ->  •  item
-
-Code spans and fences are left exactly as written, so a message explaining
-\`**bold**\` still says \`**bold**\`.
-
-**What it deliberately does not touch** is a single \`*\` or \`_\`, because those
-are already mrkdwn - \`*bold*\` and \`_italic_\` are correct and rewriting them
-would break the messages that were right. So text you wrote as mrkdwn goes out
-as you wrote it.
-
-### Write mrkdwn where nothing is posting for you
-
-Your reply in a thread may go to the channel as it stands, with no
-\`slack_post\` call anywhere to tidy it. Then the only fix is to have written
-mrkdwn in the first place:
+**Write mrkdwn. Every time, in everything you write for Slack** - the answer
+you are composing right now included. Most replies reach a channel exactly as
+you wrote them, with nothing in between to tidy them up, so the only thing that
+works is having written it right:
 
 | you want | write | not |
 |---|---|---|
@@ -867,12 +851,33 @@ mrkdwn in the first place:
 | italic | \`_italic_\` | \`*italic*\` |
 | strikethrough | \`~struck~\` | \`~~struck~~\` |
 | a link | \`<https://x.com|text>\` | \`[text](https://x.com)\` |
-| a bullet | \`•\` or \`-\` | \`*\` |
+| a bullet | \`•\` then two spaces, or \`-\` | \`*\` |
 | a heading | a bold line on its own | \`#\` |
 
-There are **no headings and no tables** in mrkdwn at all. A table in a message
-somebody reads on a phone is unreadable whatever the syntax - make it a short
-list.
+A list of repositories, written properly:
+
+    Here is the list:
+
+    •  *orknux-extension*: plugins and the SDK
+    •  *orknux-server*: the platform itself
+    •  *orknux-ui*
+
+and not \`*  **orknux-extension**:\`, which arrives with every asterisk showing.
+
+There are **no headings and no tables** in mrkdwn at all. A \`#\` line is literal
+text. A table on a phone-width screen is unreadable whatever the syntax - make
+it a short list.
+
+### If you are calling slack_post
+
+It converts the shapes that are never valid mrkdwn on the way out, without
+being asked - \`**bold**\`, \`~~struck~~\`, \`[text](url)\`, \`#\` headings and \`*\` or
+\`-\` bullets. Code spans and fences are left exactly as written, and a single
+\`*\` or \`_\` is never touched, because those are already mrkdwn and rewriting
+them would break the messages that were right.
+
+That is a safety net for text that reaches it, not a reason to write markdown.
+Your own replies do not pass through it.
 
 ## Never write a mention by hand
 
