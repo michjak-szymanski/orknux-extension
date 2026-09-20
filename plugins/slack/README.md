@@ -108,6 +108,11 @@ signatures differ by one argument:
 | **function** — a workflow step calls this | `uploadBinary(channel, filename, base64, comment, threadTs, contentKey)` |
 | **tool** — an agent calls this | `uploadBinary(channel, filename, contentKey, comment, threadTs)` |
 
+`post` is split the same way and for the same reason: its `attachments` take a
+map, and a map could carry `base64`. The tool refuses that and names
+`contentKey`; the function still takes bytes. `readAttachment` is the third —
+its tool answers the key for a file and the text for text.
+
 The function keeps its `base64`. A workflow has no session, so a key was never
 on offer to it, and taking the argument away would close the only door it has.
 

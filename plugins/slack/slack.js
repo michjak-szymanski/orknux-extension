@@ -388,17 +388,37 @@ function attaching(settings, attachments) {
     const content = at(one, 'content');
     const base64 = at(one, 'base64');
     const url = at(one, 'url');
+    const contentKey = at(one, 'contentKey');
 
     let hosted;
-    if (typeof content === 'string') {
-      hosted = uploadedText(settings, named, content, '', '', '');
+    if (typeof contentKey === 'string' && contentKey.length > 0) {
+      /*
+       * The way bytes reach this function without being typed: a key the tool
+       * that made them answered, and what it names never left the server.
+       */
+      const held = orknux.session.store.get(contentKey);
+      if (typeof held !== 'string' || held.length === 0) {
+        throw new Error(
+          `nothing is kept under ${contentKey} in this session: make the file again and pass the ` +
+            'key that answer carried',
+        );
+      }
+      hosted = uploadedBytes(settings, named, held, '', '', '');
     } else if (typeof base64 === 'string') {
+      /*
+       * Still here, for the workflow node that has bytes and no session to
+       * have kept them in. The agents' `post` refuses this before it arrives -
+       * see `tools()` - because a model always has a key and typing bytes into
+       * a tool call is the thing that does not survive.
+       */
       hosted = uploadedBytes(settings, named, base64, '', '', '');
+    } else if (typeof content === 'string') {
+      hosted = uploadedText(settings, named, content, '', '', '');
     } else if (typeof url === 'string') {
       hosted = uploadedFromUrl(settings, url, named, '', '', '');
     } else {
       throw new Error(
-        'an attachment map says which file by content, base64 or url, and none of the three was set',
+        'an attachment map says which file by contentKey, content or url, and none was set',
       );
     }
     if (typeof hosted.permalink === 'string' && hosted.permalink.length > 0) {
@@ -861,12 +881,44 @@ adding a message to anybody's unread count.`,
    */
   tools() {
     const read = this.functions().find((one) => one.name === 'readAttachment');
+    const posted = this.functions().find((one) => one.name === 'post');
     return [
       new OrknuxFunctionTool({ function: 'readMessage' }),
       new OrknuxFunctionTool({ function: 'whoIs' }),
       new OrknuxFunctionTool({ function: 'mention' }),
       new OrknuxFunctionTool({ function: 'readThread' }),
-      new OrknuxFunctionTool({ function: 'post' }),
+      /*
+       * The third tool here that is not its function, and the last way base64
+       * could reach a model: `attachments` takes maps, and one of them could
+       * carry bytes. It takes a `contentKey` instead now, and the function
+       * behind this still takes bytes for the workflow node that has no
+       * session and therefore never had a key.
+       */
+      new OrknuxTool({
+        name: 'post',
+        description:
+          posted.description +
+          ' An attachment that is not already on Slack is named, never typed: give the map a ' +
+          'contentKey - the key mermaid_render, nomnoml_render or pdf_fromHtml answered beside ' +
+          'the bytes - or a url for a file that lives at one. A map carrying base64 is refused ' +
+          'here, because a few kilobytes of it written into a tool call arrives a character wrong ' +
+          'and the whole call is rejected before anything runs.',
+        params: posted.params,
+        returnType: posted.returnType,
+        run: (connection, channel, text, threadTs, attachments) => {
+          for (const one of Array.isArray(attachments) ? attachments : []) {
+            if (one !== null && typeof one === 'object' && typeof at(one, 'base64') === 'string') {
+              throw new Error(
+                'an attachment cannot carry base64 here: pass contentKey instead, the key the ' +
+                  'tool that made the bytes answered. mermaid_render, nomnoml_render and ' +
+                  'pdf_fromHtml all answer one. For a file that already lives at a url, give the ' +
+                  'attachment that url and it is fetched without either of us handling it.',
+              );
+            }
+          }
+          return posted.run(connection, channel, text, threadTs, attachments);
+        },
+      }),
       new OrknuxFunctionTool({ function: 'react' }),
       new OrknuxFunctionTool({ function: 'search' }),
       new OrknuxFunctionTool({ function: 'upload' }),

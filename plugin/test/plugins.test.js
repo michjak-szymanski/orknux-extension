@@ -204,6 +204,19 @@ test('the slack plugin declares what the server would accept', async () => {
      * to a model should be what a model can use. Its arguments are the
      * function's; only the answer differs, which is why it cannot be a proxy.
      */
+    /*
+     * And the third: `post` takes an attachment as a map, and one of those
+     * could carry base64 - the last way bytes could be typed into a call by a
+     * model. Its tool refuses that and names contentKey instead; the function
+     * still takes bytes, for the workflow node with no session to have kept
+     * them in.
+     */
+    if (declared.name === 'post') {
+      assert.equal(declared.proxyOf, null, "the agents' post is its own tool");
+      const behind = inspected.functions.find((one) => one.name === 'post');
+      assert.deepEqual(declared.params, behind.params, 'taking the same arguments');
+      continue;
+    }
     if (declared.name === 'readAttachment') {
       assert.equal(declared.proxyOf, null, "the agents' readAttachment is its own tool");
       const behind = inspected.functions.find((one) => one.name === 'readAttachment');
@@ -223,6 +236,41 @@ test('the slack plugin declares what the server would accept', async () => {
   assert.ok(
     bytes.params.some((param) => param.name === 'base64'),
     'the workflow surface keeps its base64',
+  );
+});
+
+test('the agents post refuses an attachment carrying bytes', async () => {
+  const url = new URL(`../../plugins/slack/slack.js`, import.meta.url);
+  const { default: Slack } = await import(url.href);
+  const made = new Slack();
+  const tool = made.tools().find((one) => one.name === 'post' && one.run !== undefined);
+  const behind = made.functions().find((one) => one.name === 'post');
+
+  /*
+   * The refusal names the fix, because a model reads it at the moment it
+   * matters - which a description, read once at the top, does not manage.
+   */
+  assert.throws(
+    () => tool.run('', 'C1', 'hi', '', [{ filename: 'a.png', base64: 'UE5H' }]),
+    /cannot carry base64 here: pass contentKey/,
+  );
+
+  /*
+   * A key gets past it and reaches the token check, which is as far as
+   * anything gets here without a Slack to talk to. The function takes the
+   * bytes it refuses, and reaches the same place.
+   */
+  assert.throws(
+    () => tool.run('', 'C1', 'hi', '', [{ filename: 'a.png', contentKey: 'k' }]),
+    /nothing is kept under k in this session/,
+    'a key goes down the key path, and says so when it names nothing',
+  );
+
+  /* And the function takes the bytes its tool refuses, reaching the token check. */
+  assert.throws(
+    () => behind.run('', 'C1', 'hi', '', [{ filename: 'a.png', base64: 'UE5H' }]),
+    /botToken parameter is not set/,
+    'the workflow surface still carries bytes',
   );
 });
 
