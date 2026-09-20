@@ -3,7 +3,11 @@
   "key": "prometheus",
   "name": "Prometheus",
   "author": "Orknux",
-  "category": "observability",
+  "tags": [
+    "observability",
+    "metrics",
+    "monitoring"
+  ],
   "summary": "Ask what the system is doing, from a condition or an agent.",
   "version": "0.4.0",
   "icon": "icon.svg",

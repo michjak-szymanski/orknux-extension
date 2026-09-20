@@ -5,6 +5,10 @@
   "summary": "Says hello, and says it in the language the workflow asked for.",
   "version": "1.0.0",
   "author": "Somebody",
+  "tags": [
+    "utilities",
+    "text"
+  ],
   "icon": "icon.svg",
   "descriptionPath": "README.md"
 }

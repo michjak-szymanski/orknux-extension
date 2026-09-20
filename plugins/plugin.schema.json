@@ -40,6 +40,16 @@
       "maxLength": 120,
       "description": "Who wrote it, for display. Advisory only: the listing's author is the account that published it, which is the one thing here nobody can type."
     },
+    "tags": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]{0,31}$"
+      },
+      "description": "What this is about, for filtering a list that is going to get long.\n\nSeveral rather than one, because a plugin is usually about more than one thing and filing it under a single heading means choosing which of its readers to lose: the Jira plugin is issues, and Atlassian, and project management, and somebody looking for any of the three should arrive at it. A single `category` was the earlier shape here and was wrong for exactly that reason.\n\nLowercase, hyphenated, at most eight, no duplicates. The vocabulary is deliberately not fixed here: what a useful tag is depends on what gets published, and a list written ahead of the plugins would be a list of guesses that nobody may change. Whoever shows the marketplace can count what publishers actually use and offer the common ones -- which is a fact about the catalogue rather than an opinion about it.\n\nAdvisory, like everything else here: nothing is checked against the code, and a tag is prose in a list rather than a claim about what the plugin will ask to be allowed. Absent is untagged, which is findable by name and by search and by nothing else."
+    },
     "icon": {
       "type": "string",
       "maxLength": 400,
@@ -64,6 +74,10 @@
       "summary": "Says hello, and says it in the language the workflow asked for.",
       "version": "1.0.0",
       "author": "Somebody",
+      "tags": [
+        "utilities",
+        "text"
+      ],
       "icon": "icon.svg",
       "descriptionPath": "README.md",
       "path": "greeter.js"

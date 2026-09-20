@@ -3,7 +3,11 @@
   "key": "date",
   "name": "Dates & Working Calendar",
   "author": "Orknux",
-  "category": "utilities",
+  "tags": [
+    "utilities",
+    "time",
+    "calendar"
+  ],
   "summary": "Business days, working hours and date arithmetic that gets month ends and daylight saving right.",
   "version": "0.3.0",
   "icon": "icon.svg",

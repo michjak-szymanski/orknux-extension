@@ -3,7 +3,12 @@
   "key": "confluence",
   "name": "Confluence",
   "author": "Orknux",
-  "category": "documents",
+  "tags": [
+    "documents",
+    "wiki",
+    "atlassian",
+    "search"
+  ],
   "summary": "Search the wiki beside the work, and open its pages as text.",
   "version": "0.4.0",
   "icon": "icon.svg",

@@ -3,7 +3,11 @@
   "key": "todo",
   "name": "Todo",
   "author": "Orknux",
-  "category": "utilities",
+  "tags": [
+    "utilities",
+    "planning",
+    "agents"
+  ],
   "summary": "A todo list for the agent's own plan, kept in the session store.",
   "version": "0.2.0",
   "icon": "icon.svg",

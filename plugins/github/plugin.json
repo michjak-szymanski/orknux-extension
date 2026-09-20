@@ -3,7 +3,12 @@
   "key": "github",
   "name": "GitHub",
   "author": "Orknux",
-  "category": "source-control",
+  "tags": [
+    "source-control",
+    "code-review",
+    "ci",
+    "agents"
+  ],
   "summary": "Webhook checks, search, files, builds and comments against GitHub.",
   "version": "1.2.0",
   "icon": "icon.svg",

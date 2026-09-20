@@ -3,7 +3,11 @@
   "key": "mermaid",
   "name": "Mermaid",
   "author": "Orknux",
-  "category": "diagrams",
+  "tags": [
+    "diagrams",
+    "images",
+    "offline"
+  ],
   "summary": "Render Mermaid diagrams as a picture, offline, inside the sandbox.",
   "version": "0.7.1",
   "icon": "icon.svg",

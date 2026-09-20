@@ -3,7 +3,11 @@
   "key": "teams",
   "name": "Microsoft Teams",
   "author": "Orknux",
-  "category": "chat",
+  "tags": [
+    "chat",
+    "messaging",
+    "microsoft"
+  ],
   "summary": "Microsoft Teams messages, wrapped for workflows and agents.",
   "version": "1.1.0",
   "icon": "icon.svg",

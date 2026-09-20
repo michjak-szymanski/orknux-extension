@@ -3,7 +3,11 @@
   "key": "jira",
   "name": "Jira",
   "author": "Orknux",
-  "category": "issues",
+  "tags": [
+    "issues",
+    "atlassian",
+    "project-management"
+  ],
   "summary": "Find issues by JQL, open one whole, comment, move it through its workflow, and raise new ones.",
   "version": "0.5.0",
   "icon": "icon.svg",
