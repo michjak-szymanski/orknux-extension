@@ -48,63 +48,6 @@ if (typeof globalThis.self === 'undefined') {
   globalThis.self = globalThis;
 }
 
-if (typeof globalThis.global === 'undefined') {
-  globalThis.global = globalThis;
-}
-
-/*
- * Somewhere for a library to talk to, and a way to defer work.
- *
- * Neither is switched on in this sandbox. `console` is a permission - it
- * writes to the server's own log, so a plugin asks for it and somebody
- * accepts - and there is no event loop here at all, so no `setTimeout`.
- *
- * A bundled renderer expects both to exist and does not check. Mermaid's
- * flowchart path was failing outright on `console is not defined` while its
- * sequence-diagram path worked, so `graph TD` simply did not render and the
- * reason was a log line nobody was going to read.
- *
- * A plugin that genuinely wants to log declares CONSOLE and gets the real
- * one - this only ever fills a hole. What is written here goes nowhere on
- * purpose: a library's debug chatter is not the installation's log, and
- * routing it there would make every diagram drawn write to it.
- */
-if (typeof globalThis.console !== 'object' || globalThis.console === null) {
-  const nothing = () => undefined;
-  globalThis.console = {
-    log: nothing, info: nothing, warn: nothing, error: nothing,
-    debug: nothing, trace: nothing, dir: nothing, table: nothing,
-    group: nothing, groupEnd: nothing, groupCollapsed: nothing,
-    time: nothing, timeEnd: nothing, timeLog: nothing,
-    count: nothing, countReset: nothing, assert: nothing,
-  };
-}
-
-/*
- * Run now rather than later, because there is no later.
- *
- * A sandbox call is one synchronous turn: nothing here waits, and whatever a
- * timer would have run after the function returned would simply never run.
- * Calling it straight away is the closest honest thing - layout code uses
- * these to yield, not to wait for anything real - and it means the work
- * happens inside the call that asked for it, where its time is bounded like
- * everything else.
- *
- * The handle is a number nothing can cancel, which is true: it has already
- * run by the time there is anything to cancel.
- */
-if (typeof globalThis.setTimeout !== 'function') {
-  globalThis.setTimeout = (run, _after, ...rest) => {
-    if (typeof run === 'function') run(...rest);
-    return 0;
-  };
-  globalThis.clearTimeout = () => undefined;
-  globalThis.setInterval = () => {
-    throw new Error('setInterval has no meaning here: a sandbox call is one turn and then it ends');
-  };
-  globalThis.clearInterval = () => undefined;
-}
-
 if (typeof globalThis.TextEncoder !== 'function') {
   /** UTF-8, the only encoding anything here asks for. */
   globalThis.TextEncoder = class TextEncoder {
