@@ -2,22 +2,17 @@
 
 What the server draws for a plugin, and why it has to be the server.
 
-## Status, before anything else
+## Status
 
 | what | the server today |
 |------|------------------|
-| `RENDER_PNG` as a capability | **accepted** |
-| `render.pngFromSvg(svg, width?)` | **accepted** — mirrored, shipped, in use |
-| `render.pngFromPdf(base64, page?, width?)` | **proposed** — this document |
+| `RENDER_PNG` | **accepted** — `pngFromSvg`, mirrored, three plugins draw through it |
+| `RENDER_PDF` | **accepted** — `pngFromPdf`, mirrored |
+| a plugin using `pngFromPdf` | **not written yet** — the last section is what it would be |
 
-The first two are live and three plugins draw through them. The third is not,
-and is not mirrored: `limits.ts` and `types/globals.d.ts` do not name it, so a
-plugin calling it fails `check` here exactly as the upload would refuse it.
-That is deliberate. A mirror that accepts what the server rejects is the one
-direction this package may not be wrong in, and the cost of being wrong is a
-plugin that passes every local check and cannot be installed.
-
-When it lands, the mirror follows, and the plugin half is about thirty lines.
+Both capabilities are live and both are in `limits.ts` and
+`types/globals.d.ts`, so a plugin declaring either passes `check` here exactly
+as the upload accepts it.
 
 ## Why the server draws
 
@@ -25,92 +20,98 @@ The sandbox has no rasteriser and cannot be given one. There is no DOM and no
 canvas, no WebAssembly to carry a decoder in, and the source ceiling is 5 MB —
 a PDF rasteriser is an order of magnitude past that before it does anything.
 
-So drawing is a capability rather than a library, and `RENDER_PNG` already
-says so. What crosses is bytes a plugin just produced and what comes back is
-bytes computed from them: no connection, no address, no credential. It is the
-narrowest thing on the capability list, and that argument does not change when
-the input is a PDF rather than an SVG.
+So drawing is a capability rather than a library. What crosses is bytes a
+plugin just produced and what comes back is bytes computed from them: no
+connection, no address, no credential.
 
-**No new capability.** `pngFromPdf` belongs under `RENDER_PNG` because it
-reaches exactly what `pngFromSvg` reaches, which is nothing. A second grant
-would make an administrator weigh a distinction that does not exist.
+## Two grants, not one
 
-## The proposal
+This document proposed `pngFromPdf` under `RENDER_PNG`, on the grounds that it
+reaches exactly what `pngFromSvg` reaches, which is nothing. That argument was
+answered, and the answer is better:
+
+> Its own grant rather than `RENDER_PNG`: the reach is the same, which is
+> nothing, but the parser is not — a PDF carries an embedded-file model, an
+> encryption model and a font stack, and an operator may reasonably draw
+> markup without handing documents to one.
+
+Reach is not the only thing a grant is about. An SVG rasteriser and a PDF
+rasteriser have the same blast radius and very different attack surfaces, and
+an administrator who accepts the first has not thereby accepted the second.
+The recorded reasoning is worth keeping because the mistake is easy to repeat:
+*it reaches nothing* answers the question of what a capability can get at, and
+says nothing about what it can be handed.
+
+## What is there
 
 ```ts
 render: {
+  /** The SVG drawn as a PNG — `RENDER_PNG`. */
   pngFromSvg(svg: string, width?: number): OrknuxDrawnPng;
 
-  /**
-   * One page of a PDF, drawn as a picture.
-   *
-   * @param base64 the document, as `pdf_fromHtml` answers it
-   * @param page   which page, 1-indexed. Out of range is an error, not page 1
-   * @param width  the picture's width in pixels; the page's own proportions
-   *               decide the height. Left out, the page is drawn at 96 dpi
-   */
-  pngFromPdf(base64: string, page?: number, width?: number): OrknuxDrawnPng;
+  /** One page of a PDF, drawn as a PNG — `RENDER_PDF`. */
+  pngFromPdf(pdf: string, page?: number, width?: number): OrknuxDrawnPdfPage;
 }
 ```
 
-`OrknuxDrawnPng` already exists and needs no change:
+`pdf` is the document as base64, which is the shape a plugin that made one
+already holds it in. `page` counts from one and defaults to the first; a page
+past the end is refused by name rather than rounded into the first. `width` is
+the picture's width in pixels, left out for 96 dpi.
 
 ```ts
-type OrknuxDrawnPng =
-  | { base64: string; bytes: number; error?: undefined }
-  | { error: string; base64?: undefined; bytes?: undefined };
+type OrknuxDrawnPdfPage =
+  | { base64: string; bytes: number; width: number; height: number; pages: number; error?: undefined }
+  | { error: string; base64?: undefined; /* …and the rest undefined */ };
 ```
 
-### What it should refuse, and how
+The three fields beyond the picture are the reason this is worth having over a
+bare image. `pages` is the **document's** page count rather than this page's
+number, so one call establishes both that the page exists and how many more
+there are — a caller checking a document does not have to probe for the end.
+`width` and `height` are the drawn picture's, which is what tells you whether
+a page came out portrait when it should not have.
 
-A refusal is data rather than a thrown error, the way every other door here
-answers, so a plugin can say something useful about it:
+A refusal is data rather than a throw, the way every door here answers, and
+outside the sandbox the fallback says so in a sentence:
 
-| when | `error` should say |
-|---|---|
-| the base64 is not a PDF | that it is not a PDF, rather than a parser's own words |
-| `page` is past the end | how many pages there are, so a caller can correct it |
-| `page` is below 1 | pages are counted from one |
-| the document is larger than the cap | the cap, in megabytes |
-| `width` is past the cap | the cap, in pixels |
-
-Naming the actual number in the last four matters more than it sounds: the
-caller is usually a model, and "page 7 of 3" is a sentence it can act on where
-"invalid page" is a sentence it guesses at.
-
-### Bounds worth picking now
-
-| | suggested | why |
-|---|---|---|
-| document size | 10 MB of decoded bytes | what `http.upload` already caps at, so one number to remember |
-| width | 4096 px | past a screen, and the point where a picture stops being a check and starts being a file |
-| pages per call | one | a caller wanting three asks three times, and each answer stays small enough to cross |
+    there is no renderer here: only a call made inside the sandbox can draw one
 
 ## What it is for
 
-**Checking the page, which nothing can do today.** A plugin lays a document
-out and answers how many pages it made; whether the diagram overflowed its
-column, whether a heading landed alone at the foot of a page, whether a glyph
-came out blank — nobody can see. A model that can look at page one can tell
-the difference between a report and a mess, and can say so before sending it
-to somebody.
+Looking at what was actually produced, which nothing could do before.
 
-It also closes a gap the `problems` field only half covers. `pdf_fromHtml`
-reports what it knows went wrong — a diagram that refused, a character the
-face cannot set. It cannot report what went wrong silently, and layout goes
-wrong silently by nature.
+`pdf_fromHtml` reports what it *knows* went wrong — a diagram that refused, a
+character the bundled face cannot set — in its `problems` field. It cannot
+report what went wrong silently, and layout goes wrong silently by nature: a
+heading stranded at the foot of a page, a diagram crowding its column, a table
+that ran off the side. The contract puts it plainly:
 
-## What the plugin half looks like
+> a model that can see reads pictures, so without this an agent reports that
+> the report is ready because that is what it did, rather than because that is
+> what came out.
 
-A function and a tool on the pdf plugin, taking the key rather than the bytes,
-because the bytes are what does not survive being written back out:
+## The plugin half, when it is written
 
-```js
-pdf_preview(contentKey, page, width) -> { png, bytes, key }
+A function and a tool on the pdf plugin, and the split is the one three slack
+calls already use:
+
+```
+function (workflows)  pdf_preview(base64, page, width)
+tool     (agents)     pdf_preview(contentKey, page, width)
 ```
 
-The document comes out of the session store, the page comes back as a picture
-under its own key, and `slack_uploadBinary` takes that key like any other. The
-plugin would declare `RENDER_PNG`, which it does not today — `pdf` is
-currently the only diagram-adjacent plugin asking for no capability at all,
-and this would change that. Worth saying out loud before it does.
+The **tool takes a key and has nowhere to put bytes**. A model always has one —
+`pdf_fromHtml` answers a key beside the document — and a few hundred thousand
+characters of base64 typed into a tool call arrives a character wrong and is
+rejected before anything runs. The **function keeps taking base64**, because a
+workflow node has no session and so never had a key, and refusing there would
+close its only door.
+
+The page comes back under its own key, so `slack_uploadBinary` takes it like
+any other picture.
+
+One consequence worth stating before it happens: `pdf` currently asks for **no
+capability at all**, and this would make it ask for `RENDER_PDF`. That is a
+real change to what an administrator is accepting, and it is the kind of thing
+that should be a decision rather than a side effect.

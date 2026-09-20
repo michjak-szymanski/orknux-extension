@@ -118,12 +118,15 @@ produced and what comes back is bytes computed from them - no connection, no
 address, no credential - which is worth remembering when weighing whether
 something else belongs under the same grant rather than a new one.
 
-`plugin/RENDERING.md` has the shape of it, and carries one proposal:
-`pngFromPdf`, for looking at a page nobody can currently see. Proposed, and
-deliberately **not** mirrored - `limits.ts` and `types/globals.d.ts` do not
-name it, so a plugin calling it fails `check` here exactly as the upload would
-refuse it. That is the rule this whole package exists for, and a proposal is
-not an exception to it.
+There are two grants rather than one. `RENDER_PDF` is its own, and the reason
+is worth keeping: the reach is identical - nothing - but the parser is not. A
+PDF carries an embedded-file model, an encryption model and a font stack, and
+an operator may reasonably draw markup without handing documents to one. Reach
+answers what a capability can get at and says nothing about what it can be
+handed.
+
+`plugin/RENDERING.md` has both, what they answer, and the plugin half of
+`pngFromPdf` that is not written yet.
 
 ## Crypto is arithmetic, not a grant
 
