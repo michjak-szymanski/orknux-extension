@@ -279,6 +279,85 @@ export default class Markdown extends OrknuxPlugin {
   }
 
   /* The agents' surface: both, because a model writes markdown without being asked to. */
+  /*
+   * Where the asterisks come from.
+   *
+   * A model writes markdown because markdown is what writing looks like. Slack
+   * reads mrkdwn, which is near enough to look the same and different enough
+   * that \`**bold**\` arrives with its asterisks showing - and the model cannot
+   * see the message it sent, so nothing corrects it.
+   *
+   * The slack plugin's own skill says to run text through \`toSlack\` before
+   * \`slack_post\`. That covers the case with a call in it. It does not cover
+   * the commoner one: an agent answering in a thread, whose reply is posted as
+   * it stands, with no call anywhere to convert it. That is what this is for.
+   */
+  skills() {
+    return [
+      new OrknuxSkill({
+        name: 'Writing so Slack reads it',
+        description: 'Why a message arrives full of asterisks, and the two different fixes.',
+        content: `# Writing so Slack reads it
+
+Slack does not read markdown. It reads **mrkdwn**, which looks near enough to
+be mistaken for it and is not, so a message written as markdown arrives with
+its punctuation showing:
+
+    what you wrote          what the reader sees
+    **orknux-server**       **orknux-server**
+    * a bullet              * a bullet
+    [docs](https://x.com)   [docs](https://x.com)
+    # A heading             # A heading
+
+You cannot see the message you sent, so nothing tells you this happened.
+
+## Which fix depends on how your text gets there
+
+**If you are calling \`slack_post\`** - run what you composed through
+\`markdown_toSlack\` first and post the result. One call, and it handles
+everything:
+
+    markdown_toSlack("**bold**, a [link](https://x.com), and:\n* one\n* two")
+      ->  "*bold*, a <https://x.com|link>, and:\n•  one\n•  two"
+
+**If your reply is posted as it stands** - you are answering in a thread and
+what you write goes to the channel verbatim - then there is no call to convert
+through. **Write mrkdwn directly.** This is the case that catches people,
+because there is no tool involved to remind you.
+
+## mrkdwn, in full
+
+| you want | write | not |
+|---|---|---|
+| bold | \`*bold*\` | \`**bold**\` |
+| italic | \`_italic_\` | \`*italic*\` |
+| strikethrough | \`~struck~\` | \`~~struck~~\` |
+| a link | \`<https://x.com|text>\` | \`[text](https://x.com)\` |
+| a bullet | \`•\` and a space, or \`-\` | \`*\` |
+| code | \`\`code\`\` | the same - backticks are backticks |
+| a heading | a bold line | \`#\` |
+| a quote | \`>\` | the same |
+
+**There are no headings and no tables.** A \`#\` line is literal text. Make a
+heading a bold line on its own; make a table a short list, because a table in
+a phone-width message is unreadable whatever the syntax.
+
+## Somewhere that renders nothing
+
+\`markdown_toText\` is the other direction: emphasis gone, links become
+\`text (url)\`, headings become their words, code keeps its content. For an email
+subject, a commit message, a log line, a webhook field - anywhere the
+punctuation would be read as punctuation.
+
+## One habit worth keeping
+
+Write the message, then ask where it is going, then convert or compose
+accordingly. Deciding afterwards is how \`**bold**\` reaches a channel: the text
+was already written and the thought was already elsewhere.`,
+      }),
+    ];
+  }
+
   tools() {
     return [
       new OrknuxFunctionTool({ function: 'toSlack' }),
