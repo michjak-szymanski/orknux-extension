@@ -72,6 +72,21 @@ there are — a caller checking a document does not have to probe for the end.
 `width` and `height` are the drawn picture's, which is what tells you whether
 a page came out portrait when it should not have.
 
+`pngFromSvg` answers the same way, minus the page count:
+
+```ts
+type OrknuxDrawnPng =
+  | { base64: string; bytes: number; width: number; height: number; error?: undefined }
+  | { error: string; base64?: undefined; /* …and the rest undefined */ };
+```
+
+The size is read off the file rather than echoed back from the request. A
+`width` is what was asked for; the drawing's own proportions decide the other
+side and the server's ceilings can bring both down - so a plugin that gets
+back a blank and one that gets back a giant have something to tell them apart
+with. It answered only `base64` and `bytes` until then, which left a bad
+drawing indistinguishable from a good one.
+
 A refusal is data rather than a throw, the way every door here answers, and
 outside the sandbox the fallback says so in a sentence:
 

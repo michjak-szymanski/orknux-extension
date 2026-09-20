@@ -650,10 +650,19 @@ export type OrknuxDrawnPdfPage =
       pages?: undefined;
     };
 
-/** A picture drawn from markup, or the sentence saying why none was. */
+/**
+ * A picture drawn from markup, or the sentence saying why none was.
+ *
+ * `width` and `height` are what the picture came out as, read off the file
+ * rather than echoed back from the request: a width is what was *asked* for,
+ * and the document's aspect ratio and the server's ceilings both have a say in
+ * what arrives. Without them a plugin holding a blank and a plugin holding a
+ * giant look the same, which is the difference between diagnosing a bad
+ * drawing and guessing at one. [OrknuxDrawnPdfPage] has always said.
+ */
 export type OrknuxDrawnPng =
-  | { base64: string; bytes: number; error?: undefined }
-  | { error: string; base64?: undefined; bytes?: undefined };
+  | { base64: string; bytes: number; width: number; height: number; error?: undefined }
+  | { error: string; base64?: undefined; bytes?: undefined; width?: undefined; height?: undefined };
 
 /**
  * A connection argument as the Slack helpers take it: the handle out of
@@ -936,11 +945,15 @@ export interface OrknuxHelpers {
    */
   render: {
     /**
-     * The SVG drawn as a PNG, answered as base64 and its byte count.
+     * The SVG drawn as a PNG: base64, its byte count, and the size it came
+     * out at.
      *
      * `width` sets the picture's width in pixels, leaving the height to
      * follow the drawing's own proportions; left out, the size the SVG
-     * declares is the size that is drawn.
+     * declares is the size that is drawn. The `width` and `height` that come
+     * back are what was actually drawn, which is not always what was asked
+     * for - the proportions decide one side and the server's ceilings can
+     * bring both down.
      */
     pngFromSvg(svg: string, width?: number): OrknuxDrawnPng;
 
