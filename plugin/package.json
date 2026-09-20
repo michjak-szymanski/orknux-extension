@@ -9,9 +9,19 @@
   },
   "keywords": [
     "orknux",
+    "orknux-server",
     "plugin",
+    "plugin-sdk",
+    "plugins",
     "workflow",
-    "sdk"
+    "workflow-automation",
+    "sdk",
+    "ai-agents",
+    "agent-tools",
+    "llm-tools",
+    "typescript",
+    "graaljs",
+    "sandbox"
   ],
   "repository": {
     "type": "git",
@@ -54,5 +64,6 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.9.0"
-  }
+  },
+  "homepage": "https://orknux.ai"
 }
