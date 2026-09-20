@@ -1,0 +1,15 @@
+{
+  "0.9.3": "A picture's size is decided by a **scale**, not a width. A sixteen-node flowchart declares 300 by 1475; asked for 1200 wide it came back 5890 tall and a server ceiling shrank the whole thing back down. Now: twice what the diagram laid itself out at, the long side floored at 1200, the area capped at four megapixels, and never below 1x. `Drawing` carries the `width` and `height` it actually came out at, read off the file rather than echoed back from the request.",
+  "0.9.2": "The drawing is scaled to the picture rather than placed inside it: the intrinsic `width` and `height` come off the root on the way to the rasteriser, leaving the viewBox to say how to scale. The `svg` answer keeps both, because something embedding markup wants to know how big it is.",
+  "0.9.1": "Drawn wide enough to read. The pictures were coming out at whatever size the renderer declared, and a renderer sizes an SVG for layout rather than for looking at.",
+  "0.9.0": "A skill, **Drawing with mermaid**. A model knows all of mermaid - pie, gantt, mindmap, journey - and this draws five kinds; the skill says which five, and sends the rest to `links` instead of to a refusal.",
+  "0.8.1": "Every `graph TD` failed, and the cause was one line of somebody else's cleanup: beautiful-mermaid constructs ELK with `self` deleted, which left elkjs with no global at all. The sandbox shim provides `global` now.",
+  "0.8.0": "The agents' tool answers the **key** and not the four thousand characters it names. A model reads every character of an answer, and the markup it was reading was already on the server under a twelve-character name.",
+  "0.7.2": "No code changed. `category` became `tags` in every manifest here, and a manifest field is a patch.",
+  "0.7.1": "Answers a picture. `format` is png by default - Slack draws no SVG at all, it hosts one as a file card - and the bytes are kept under a key so nobody has to retype them. `width` sets the picture's size.",
+  "0.5.0": "A drawing travels by key. A tool's answer reaches the next tool call by going through the model, which has to write every character of it back out; a few kilobytes does not survive that, and one that went to Slack arrived with a stray character in the middle.",
+  "0.4.0": "The bundle carries its own floor. A plugin is read before it is granted anything, so the shim that stands in for the platform's globals has to be inside the file rather than handed to it.",
+  "0.3.0": "Optional parameters carry a real default instead of a sentinel. `0` no longer means *the usual number* and an empty string no longer means *use the configured one* - the argument can simply be left out, and the tool descriptions stopped spending a model's attention explaining a convention it kept getting wrong.",
+  "0.2.0": "No change to this plugin. The repository moved its hashing to the platform's crypto API and versioned everything together.",
+  "0.1.0": "First release. Renders mermaid to SVG inside the sandbox - no browser, no DOM, nothing fetched - and links to the live editor for the kinds it does not draw."
+}

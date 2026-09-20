@@ -125,8 +125,9 @@ checked off. It asks the platform for nothing at all.
 
     https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/todo/todo.js
 
-Each folder holds the plugin, its `plugin.json` marketplace manifest and the
-`README.md` that manifest names. `mermaid`, `nomnoml` and `pdf` bundle
+Each folder holds the plugin, its `plugin.json` marketplace manifest, the
+`README.md` that manifest names, and a `changelog.json` saying what each
+released version changed. `mermaid`, `nomnoml` and `pdf` bundle
 libraries, so their source is in `src/` and the file above is the build —
 [AGENTS.md](AGENTS.md) has the details.
 

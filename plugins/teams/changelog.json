@@ -1,0 +1,5 @@
+{
+  "1.1.1": "No code changed. `category` became `tags` in every manifest here, and a manifest field is a patch.",
+  "1.1.0": "Signature verification goes through the platform's crypto API; the hand-written HMAC is gone.",
+  "1.0.0": "First release. Verifies an Outgoing Webhook's HMAC, pulls the sender and the text off an activity, and builds the Graph request bodies and addresses a reply is sent with."
+}

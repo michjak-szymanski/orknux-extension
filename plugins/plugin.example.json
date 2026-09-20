@@ -10,5 +10,9 @@
     "text"
   ],
   "icon": "icon.svg",
-  "descriptionPath": "README.md"
+  "descriptionPath": "README.md",
+  "changelog": {
+    "1.1.0": "Says hello in Welsh, and stops saying it twice.",
+    "1.0.0": "First release."
+  }
 }

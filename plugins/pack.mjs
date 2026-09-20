@@ -15,10 +15,16 @@
  * ## What goes in, and what does not
  *
  * The manifest decides, which is the point of there being one: `path` names
- * the plugin, `descriptionPath` the prose, `icon` the face, and `libraries()`
- * — asked of the plugin itself, the way the server asks — names the files it
- * ships with. Everything is placed at the zip's top level, exactly where the
- * schema says an uploader will look for it.
+ * the plugin, `descriptionPath` the prose, `icon` the face, `changelogPath`
+ * the history, and `libraries()` — asked of the plugin itself, the way the
+ * server asks — names the files it ships with. Everything is placed at the
+ * zip's top level, exactly where the schema says an uploader will look for it.
+ *
+ * Two files travel without being named, and both by a convention the
+ * marketplace itself resolves: `icon-white.svg` beside the named icon, and
+ * `changelog.json` beside the plugin. A zip that left either out would arrive
+ * half-dressed — the listing looks for them whether or not the manifest
+ * mentioned them.
  *
  * `src/` is deliberately not in that list. A built plugin keeps its source
  * beside the artifact under the same name, and shipping `src/mermaid.js` would
@@ -216,6 +222,21 @@ async function packed(key) {
       wanted.push(white);
     }
   }
+  /*
+   * The history, where there is one. `changelogPath` names a file kept
+   * somewhere else; a `changelog.json` beside the plugin is read by the
+   * marketplace whether or not anything named it, so it is packed on the same
+   * terms — found by convention, like the white icon above.
+   */
+  const changelog = typeof manifest.changelogPath === 'string' && manifest.changelogPath.length > 0
+    ? manifest.changelogPath
+    : 'changelog.json';
+  if (existsSync(folder + changelog)) {
+    wanted.push(changelog);
+  } else if (manifest.changelogPath !== undefined) {
+    throw new Error(`${key}: changelogPath names ${changelog}, which is not there`);
+  }
+
   /* And the files the plugin says travel with it, spelled as it declares them. */
   for (const library of inspected.libraries) {
     wanted.push(library.replace(/^\.\//, ''));

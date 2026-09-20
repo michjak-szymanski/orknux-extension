@@ -222,6 +222,39 @@ mention `currentColor`, and each must declare a colour of its own.
 against it and so the test can. `plugins/plugin.example.json` is a filled-in
 one to copy when writing a new plugin.
 
+## The changelog
+
+Each plugin keeps a `changelog.json` beside it: an object keyed by version,
+**newest first**, each value a line or two of markdown saying what that release
+changed.
+
+```json
+{
+  "0.5.0": "`searchImages`, because a picture is sometimes the answer.",
+  "0.4.1": "No code changed. `category` became `tags` in every manifest here."
+}
+```
+
+A file rather than a `changelog` field in the manifest, because slack's runs to
+fourteen entries and would be most of what `plugin.json` says. A file rather
+than a `changelogPath` naming it, because `changelog.json` beside the plugin is
+what the marketplace reads without being told to — a field repeating the
+default is a second place for it to be wrong, and the test refuses one.
+
+**Bump the version and write the entry in the same commit.** A changelog one
+release behind is worse than none: the listing shows a history that looks
+complete and stops exactly where somebody is looking. `manifests.test.js`
+fails when the version being shipped has no entry, which is the only part of
+this a test can hold you to.
+
+Entries are for versions that were **released**. A version bumped and
+superseded before any tag went out was never installable, and a line about it
+in a public listing is noise dressed as history.
+
+Order is the author's and is kept: the marketplace neither parses nor compares
+versions — `2.0.0`, `2026.1` and `v3-beta` are all somebody's idea of one — so
+newest first is a convention here rather than something computed.
+
 There is no catalog above these, and there should not be one: a plugin is
 described in its own folder and nowhere else, so what is on offer is whatever
 carries a `plugin.json`. A list at the root repeating the same prose is one

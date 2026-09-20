@@ -1,0 +1,3 @@
+{
+  "0.1.0": "First release. Calls whichever HTTP API a workspace points it at, with two fences around it: a `hosts` allowlist checked before the request is made, and a credential attached **only** to hosts the workspace named - never to a url a model was talked into by something it read in a page."
+}

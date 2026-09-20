@@ -1,0 +1,6 @@
+{
+  "0.3.1": "No code changed. `category` became `tags` in every manifest here, and a manifest field is a patch.",
+  "0.3.0": "Optional parameters carry a real default instead of a sentinel. `0` no longer means *the usual number* and an empty string no longer means *use the configured one* - the argument can simply be left out, and the tool descriptions stopped spending a model's attention explaining a convention it kept getting wrong.",
+  "0.2.0": "No change to this plugin. The repository moved its hashing to the platform's crypto API and versioned everything together.",
+  "0.1.0": "First release. The working calendar: business days, working hours, and date arithmetic that gets month ends and daylight saving right. It reaches nothing, so it cannot break when an API does."
+}

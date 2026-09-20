@@ -1,0 +1,5 @@
+{
+  "0.2.1": "No code changed. `category` became `tags` in every manifest here, and a manifest field is a patch.",
+  "0.2.0": "No change to this plugin. The repository moved its hashing to the platform's crypto API and versioned everything together.",
+  "0.1.0": "First release. A todo list for the length of one conversation, so a request too complex to hold in one step is split, worked and checked off. It asks the platform for nothing at all."
+}
