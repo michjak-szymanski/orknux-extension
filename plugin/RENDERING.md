@@ -8,7 +8,7 @@ What the server draws for a plugin, and why it has to be the server.
 |------|------------------|
 | `RENDER_PNG` | **accepted** — `pngFromSvg`, mirrored, three plugins draw through it |
 | `RENDER_PDF` | **accepted** — `pngFromPdf`, mirrored |
-| a plugin using `pngFromPdf` | **not written yet** — the last section is what it would be |
+| a plugin using `pngFromPdf` | **written** — `pdf_preview`, the last section |
 
 Both capabilities are live and both are in `limits.ts` and
 `types/globals.d.ts`, so a plugin declaring either passes `check` here exactly
@@ -91,14 +91,14 @@ that ran off the side. The contract puts it plainly:
 > the report is ready because that is what it did, rather than because that is
 > what came out.
 
-## The plugin half, when it is written
+## The plugin half
 
 A function and a tool on the pdf plugin, and the split is the one three slack
 calls already use:
 
 ```
-function (workflows)  pdf_preview(base64, page, width)
-tool     (agents)     pdf_preview(contentKey, page, width)
+function (workflows)  pdf_preview(base64, page, width)      -> Preview
+tool     (agents)     pdf_preview(contentKey, page, width)  -> Preview
 ```
 
 The **tool takes a key and has nowhere to put bytes**. A model always has one —
@@ -108,10 +108,18 @@ rejected before anything runs. The **function keeps taking base64**, because a
 workflow node has no session and so never had a key, and refusing there would
 close its only door.
 
-The page comes back under its own key, so `slack_uploadBinary` takes it like
-any other picture.
+**What it answers is not stripped**, and that is where this parts company with
+every other tool here. The renderers and `fromHtml` answer a model a key and
+keep the bytes, because nobody reads base64 and retyping it is what fails. A
+preview is the exception: the picture *is* the answer, and a preview whose
+picture you cannot see is not one. The key comes back too, so
+`slack_uploadBinary` can show somebody the page.
 
-One consequence worth stating before it happens: `pdf` currently asks for **no
-capability at all**, and this would make it ask for `RENDER_PDF`. That is a
-real change to what an administrator is accepting, and it is the kind of thing
-that should be a decision rather than a side effect.
+`Preview` carries `pages` as the **document's** count rather than this page's
+number, so one call says both that the page exists and how many more there are.
+
+And the consequence that was flagged before it happened, now happened: `pdf`
+asked for **no capability at all** and asks for `RENDER_PDF`. That is a real
+change to what an administrator accepts, and it is why `preview` is a separate
+call rather than something `fromHtml` does on the way out - a workspace that
+only writes documents never draws one and can weigh the grant on its own.

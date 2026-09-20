@@ -846,16 +846,93 @@ test('the pdf plugin declares what the server would accept', async () => {
   assert.deepEqual(validate(inspected), []);
   assert.deepEqual(inspected.parameters, []);
   assert.deepEqual(inspected.permissions, ['TEXT_ENCODING']);
-  /* Writer, fonts and diagram renderer are all bundled in: no capability. */
-  assert.deepEqual(inspected.capabilities, []);
+  /*
+   * Writer, layout, fonts and the diagram renderer are all bundled in, so
+   * making a document asks the server for nothing. Looking at one is the
+   * opposite - rasterising needs a rasteriser - which is the single capability
+   * here, and the reason this plugin stopped asking for none at all.
+   */
+  assert.deepEqual(inspected.capabilities, ['RENDER_PDF']);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
-    ['fromHtml'],
+    ['preview', 'fromHtml'],
   );
   assert.deepEqual(
     inspected.tools.map((declared) => declared.name),
-    ['fromHtml'],
+    ['fromHtml', 'preview'],
   );
+  /* Neither tool is its function: one strips the document, one takes a key. */
+  for (const declared of inspected.tools) {
+    assert.equal(declared.proxyOf, null, `${declared.name} is its own tool`);
+  }
+});
+
+test('pdf preview draws a page: bytes on the function, a key on the tool', async () => {
+  const url = new URL(`../../plugins/pdf/pdf.js`, import.meta.url);
+  const { default: Pdf } = await import(url.href);
+  const made = new Pdf();
+  const fromHtml = made.functions().find((one) => one.name === 'fromHtml').run;
+  const declared = made.functions().find((one) => one.name === 'preview').run;
+  const tool = made.tools().find((one) => one.name === 'preview' && one.run !== undefined);
+
+  const held = new Map();
+  const store = globalThis.orknux.session.store;
+  const render = globalThis.orknux.render;
+  let handed = null;
+
+  globalThis.orknux.session.store = {
+    put: (key, value) => {
+      held.set(key, value);
+      return { ok: true };
+    },
+    get: (key) => (held.has(key) ? held.get(key) : null),
+  };
+  /*
+   * The rasteriser is the server's. Here it records what it was handed and
+   * refuses a page past the end the way the contract says it does - by name,
+   * rather than by rounding into the first.
+   */
+  globalThis.orknux.render = {
+    pngFromPdf: (pdf, page, width) => {
+      handed = { chars: pdf.length, page: page, width: width };
+      if (page > 3) return { error: `page ${page} of 3` };
+      return { base64: 'iVBOR', bytes: 5, width: width ?? 595, height: 842, pages: 3 };
+    },
+  };
+
+  try {
+    const doc = fromHtml('<h1>Report</h1><p>Some prose.</p>', '');
+
+    /* The tool takes the key the document came back with, and nothing else. */
+    const seen = tool.run(doc.key, 1, 800);
+    assert.equal(seen.png, 'iVBOR', 'the picture comes back in full - looking at it is the point');
+    assert.equal(seen.pages, 3, "and the document's page count, not this page's number");
+    assert.equal(seen.width, 800);
+    assert.equal(seen.height, 842);
+    assert.equal(held.get(seen.key), 'iVBOR', 'the picture is kept under its own key');
+    assert.equal(handed.chars, doc.base64.length, 'the whole document reached the renderer');
+
+    /* The function takes the bytes the tool has nowhere to put. */
+    assert.deepEqual(
+      tool.params.map((one) => one.name),
+      ['contentKey', 'page', 'width'],
+    );
+    assert.equal(
+      made.functions().find((one) => one.name === 'preview').params[0].name,
+      'base64',
+      'the workflow surface still takes a document',
+    );
+    assert.equal(declared(doc.base64, 1, 800).png, 'iVBOR');
+
+    /* Each refusal names what to do instead, or what was actually there. */
+    assert.throws(() => tool.run('', 1, 0), /takes a contentKey, not a document/);
+    assert.throws(() => tool.run('pdf.nope', 1, 0), /nothing is kept under pdf.nope/);
+    assert.throws(() => tool.run(doc.key, 7, 0), /could not draw the page: page 7 of 3/);
+    assert.throws(() => declared('', 1, 0), /no document to draw/);
+  } finally {
+    globalThis.orknux.session.store = store;
+    globalThis.orknux.render = render;
+  }
 });
 
 test('the pdf plugin writes a pdf out of html, diagrams and all, without a DOM', async () => {

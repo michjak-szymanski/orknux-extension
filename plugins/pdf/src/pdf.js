@@ -688,6 +688,41 @@ function keyedOnly(made) {
   return { ...made, base64: '' };
 }
 
+/**
+ * One page drawn, kept, and answered - the half both surfaces share.
+ *
+ * The page is kept under a key of its own so it can be handed on without
+ * being typed out, the same way everything else here travels.
+ */
+function drawnPage(base64, page, width) {
+  const packed = typeof base64 === 'string' ? base64.replace(/\s+/g, '') : '';
+  if (packed.length === 0) {
+    throw new Error('there is no document to draw');
+  }
+
+  const asked = typeof page === 'number' && page > 0 ? page : 1;
+  const drawn = orknux.render.pngFromPdf(
+    packed,
+    asked,
+    typeof width === 'number' && width > 0 ? width : undefined,
+  );
+  if (drawn.error !== undefined) {
+    throw new Error(`could not draw the page: ${drawn.error}`);
+  }
+
+  const key = keyFor(drawn.base64);
+  const kept = orknux.session.store.put(key, drawn.base64);
+
+  return {
+    png: drawn.base64,
+    bytes: drawn.bytes,
+    width: drawn.width,
+    height: drawn.height,
+    pages: drawn.pages,
+    key: kept.error === undefined ? key : '',
+  };
+}
+
 export default class Pdf extends OrknuxPlugin {
 
   id() {
@@ -708,8 +743,23 @@ export default class Pdf extends OrknuxPlugin {
   }
 
   capabilities() {
-    // None: the writer, the renderer and the fonts are all inside this file.
-    return [];
+    /*
+     * Drawing a page, and only that.
+     *
+     * The writer, the layout, the renderer and the fonts are all inside this
+     * file, so making a document asks the server for nothing. Looking at one
+     * is the opposite: rasterising needs a rasteriser, and there is neither
+     * one here nor the WebAssembly to bring one.
+     *
+     * Its own grant rather than RENDER_PNG, which this plugin does not want
+     * and does not ask for. The reach is the same - nothing; markup and bytes
+     * go out, bytes come back - but the parser is not, and an operator may
+     * reasonably draw markup without handing documents to a PDF stack.
+     *
+     * Worth knowing when accepting it: this plugin asked for nothing at all
+     * until `preview` existed.
+     */
+    return ['RENDER_PDF'];
   }
 
   /*
@@ -795,6 +845,24 @@ put base64 in. A PDF is hundreds of thousands of characters and does not
 survive being written back out by you; the key is a dozen characters and what
 it names never leaves the server.
 
+## Look at it before you send it
+
+\`pdf_preview\` draws one page as a picture. Pass the key \`fromHtml\` answered,
+the page, and a width if you want one:
+
+    pdf_fromHtml(html, title)   ->  { key: 'pdf.1k7e78y', pages: 2, problems: [] }
+    pdf_preview('pdf.1k7e78y', 1)  ->  { png: '…', width: 595, height: 842, pages: 2 }
+
+\`problems\` tells you what this plugin knows went wrong. Layout goes wrong in
+ways it cannot know - a heading stranded at the foot of a page, a diagram
+crowding its column, a table that ran off the side - and the only way to catch
+that is to look. The picture comes back in full, unlike everything else here,
+because seeing it is the point.
+
+Worth doing whenever the document is going to somebody who matters. Reporting
+that a report is ready because you made one is not the same as reporting it
+because you saw what came out.
+
 ## Before you start
 
 Write the document first and the diagram second. The text is what somebody
@@ -806,6 +874,38 @@ reads; the diagram is what they look at afterwards.`,
   /* What a written document comes back as. */
   objects() {
     return [
+      new OrknuxObject({
+        name: 'Preview',
+        description: 'One page of a document, drawn so somebody can look at it.',
+        properties: [
+          {
+            name: 'png',
+            kind: 'string',
+            description:
+              'The page as a picture, base64. Unlike everything else here this does come back in ' +
+              'full, because seeing it is the point of asking.',
+          },
+          { name: 'bytes', kind: 'number', description: 'How large the picture is.' },
+          { name: 'width', kind: 'number', description: 'The picture\'s width in pixels.' },
+          { name: 'height', kind: 'number', description: 'And its height, which the page decides.' },
+          {
+            name: 'pages',
+            kind: 'number',
+            description:
+              'How many pages the whole document has - not this page\'s number. One call says ' +
+              'both that the page exists and how many more there are.',
+          },
+          {
+            name: 'key',
+            kind: 'string',
+            description:
+              'Where the picture is kept for the rest of this session. Hand it to ' +
+              'slack_uploadBinary as contentKey to show somebody the page. Empty where there was ' +
+              'no session to keep it in.',
+          },
+        ],
+      }),
+
       new OrknuxObject({
         name: 'Document',
         description: 'A PDF that was written.',
@@ -864,11 +964,80 @@ reads; the diagram is what they look at afterwards.`,
         returnType: document.returnType,
         run: (html, title) => keyedOnly(document.run(html, title)),
       }),
+
+      /*
+       * A tool of its own so that it takes a key and not a document.
+       *
+       * A PDF is hundreds of thousands of characters of base64, and an answer
+       * reaches the next call by being written out again by whatever read it -
+       * which is the one thing that does not survive. `fromHtml` answers a key
+       * beside the document; this takes that key. The function behind it keeps
+       * taking base64, for the workflow node that has no session and so never
+       * had a key.
+       *
+       * What it answers is not stripped, and that is the difference from
+       * everything else here: the picture is the point of asking.
+       */
+      new OrknuxTool({
+        name: 'preview',
+        description:
+          'Draws one page of a PDF as a picture, so you can see what a document actually came ' +
+          'out as. Pass contentKey - the key fromHtml answered beside the document - and the ' +
+          'page, counting from one; a page past the end is refused by name. width is the ' +
+          'picture in pixels, left out for 96 dpi. There is deliberately no base64 argument: a ' +
+          'document written into a tool call arrives a character wrong and the call is rejected ' +
+          'before anything runs. Answers the picture, its size, how many pages the document has, ' +
+          'and a key for the picture itself - give that to slack_uploadBinary to show somebody. ' +
+          'Worth doing before you send a document to anybody: problems says what this plugin ' +
+          'knows went wrong, and layout goes wrong in ways it cannot know.',
+        params: [
+          { name: 'contentKey', type: 'string' },
+          { name: 'page', type: 'number', required: false, default: 1 },
+          { name: 'width', type: 'number', required: false, default: 0 },
+        ],
+        returnType: 'Preview',
+        run: (contentKey, page, width) => {
+          if (typeof contentKey !== 'string' || contentKey.length === 0) {
+            throw new Error(
+              'preview takes a contentKey, not a document: make the PDF first and pass the key ' +
+                'that answer carried.',
+            );
+          }
+          const held = orknux.session.store.get(contentKey);
+          if (typeof held !== 'string' || held.length === 0) {
+            throw new Error(
+              `nothing is kept under ${contentKey} in this session: make the document again and ` +
+                'pass the key that answer carried.',
+            );
+          }
+          return drawnPage(held, page, width);
+        },
+      }),
     ];
   }
 
   functions() {
     return [
+      new OrknuxFunction({
+        name: 'preview',
+        description:
+          'Draws one page of a PDF as a picture, so you can see what a document actually came ' +
+          'out as. Pass the document as base64 and the page, counting from one - a page past the ' +
+          'end is refused by name rather than rounded into the first - and a width in pixels, ' +
+          'left out for 96 dpi. Answers the picture as png base64, its width and height, how many ' +
+          'pages the whole document has, and a key the picture is kept under for this session. ' +
+          'Use it on what fromHtml just made: problems tells you what went wrong that this plugin ' +
+          'knows about, and layout goes wrong in ways it does not - a heading stranded at the ' +
+          'foot of a page, a diagram crowding its column, a table that ran off the side.',
+        params: [
+          { name: 'base64', type: 'string' },
+          { name: 'page', type: 'number', required: false, default: 1 },
+          { name: 'width', type: 'number', required: false, default: 0 },
+        ],
+        returnType: 'Preview',
+        run: (base64, page, width) => drawnPage(base64, page, width),
+      }),
+
       new OrknuxFunction({
         name: 'fromHtml',
         description:
