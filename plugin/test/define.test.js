@@ -218,6 +218,37 @@ test('an ungranted helper answers a sentence as data, never a throw', () => {
   assert.equal(answered.error, 'this plugin was not granted NETWORK_REQUEST');
 });
 
+test('and the renderers say what is missing is the renderer, not the grant', () => {
+  /*
+   * A different sentence from the others on purpose, and the difference is
+   * the useful part. `thread` and `get` are refused because this plugin was
+   * not granted something, which is a thing an operator can change. The
+   * renderers are absent because there is no server here at all - a test run,
+   * a bundler, a REPL - and telling somebody to go and grant a capability
+   * would send them to fix the one thing that is not wrong.
+   *
+   * Three doors, and every one of them was outside this test until the third
+   * was added: the plugins that draw already lean on the fallback being data
+   * rather than a throw, because that is how `nomnoml_render` produces "could
+   * not draw the diagram: there is no renderer here" instead of a stack.
+   */
+  for (const [door, call] of [
+    ['pngFromSvg', () => orknux.render.pngFromSvg('<svg/>')],
+    ['pngFromPdf', () => orknux.render.pngFromPdf('JVBERi0=', 1)],
+    ['htmlFromPdf', () => orknux.render.htmlFromPdf('JVBERi0=')],
+  ]) {
+    const answered = call();
+    assert.equal(typeof answered.error, 'string', `${door} threw instead of answering`);
+    assert.match(answered.error, /there is no renderer here/, door);
+    assert.equal(answered.base64, undefined, `${door} answered bytes it does not have`);
+    assert.equal(answered.html, undefined, `${door} answered text it does not have`);
+  }
+
+  /* And reading is not drawing, which the sentence says rather than glossing. */
+  assert.match(orknux.render.htmlFromPdf('JVBERi0=').error, /can read one$/);
+  assert.match(orknux.render.pngFromPdf('JVBERi0=', 1).error, /can draw one$/);
+});
+
 /*
  * The two newest surfaces, which definePlugin did not know about.
  *

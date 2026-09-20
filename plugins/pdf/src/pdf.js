@@ -840,7 +840,9 @@ export default class Pdf extends OrknuxPlugin {
     return [
       new OrknuxSkill({
         name: 'Making a PDF',
-        description: 'What pdf_fromHtml takes, what it will not take, and what to do when a diagram will not draw.',
+        description:
+          'What pdf_fromHtml takes, what it will not take, what to do when a diagram will ' +
+          'not draw, and how to look at a document or read one back.',
         content: `# Making a PDF
 
 \`pdf_fromHtml\` takes HTML and answers a document. It is a report writer, not
@@ -892,6 +894,34 @@ If the diagram matters enough to try again, try **once**: simplify the source -
 plain \`-->\` arrows, short labels, nothing exotic inside \`[...]\`. If that fails
 too, send the document you already have and put the same information in a list
 beside it. Say what was left out.
+
+## Look at it before you send it
+
+\`pdf_preview(key, page)\` draws a page as a picture you can actually see.
+
+\`problems\` reports what this plugin knew went wrong. **Layout goes wrong in
+ways it cannot know** - a heading stranded at the foot of a page, a table that
+ran off the side, a diagram crowding its column. None of that raises anything,
+because nothing failed; the document is simply worse than you think it is.
+
+So for anything going to a person rather than into a file: make it, preview
+page one, look at it, then send it. Otherwise you are reporting that the report
+is ready because that is what you *did*, not because that is what came *out*.
+
+## Reading one
+
+\`pdf_read(key)\` answers what a document **says**, as text - which is the call
+to reach for when somebody sends you a PDF and asks a question about it. Take
+the key from \`slack_readAttachment\`, or from \`pdf_fromHtml\` for one you made.
+
+It answers reading order, not layout: a section per page, a paragraph per
+block. Columns and tables are flattened, so \`read\` is the wrong call for *how
+is this page arranged* - draw it and look instead.
+
+Long documents are refused rather than truncated, and the refusal says how many
+characters there were. Pass \`from\` and \`to\` to take it a range of pages at a
+time; the answer says which range it read and how many pages there are in
+total, so you know what to ask for next.
 
 Do not call the tool a third time with a third shape of the same diagram. Two
 failures mean the diagram rather than the call, and you are holding a document

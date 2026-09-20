@@ -125,8 +125,14 @@ an operator may reasonably draw markup without handing documents to one. Reach
 answers what a capability can get at and says nothing about what it can be
 handed.
 
-`plugin/RENDERING.md` has both, what they answer, and the plugin half of
-`pngFromPdf` that is not written yet.
+`RENDER_PDF` covers both questions about a document - `pngFromPdf` for how a
+page looks and `htmlFromPdf` for what it says - and deliberately so. Same
+parser, same embedded-file and encryption and font models, same risk surface:
+a second capability would ask an operator to weigh a distinction that is not
+there.
+
+`plugin/RENDERING.md` has all three doors, what they answer, and the plugin
+halves now written against them - `pdf_preview` and `pdf_read`.
 
 ## Crypto is arithmetic, not a grant
 
