@@ -123,13 +123,66 @@ jobs:
           } > release-notes.md
           cat release-notes.md
 
+      # The title says what moved, because the tag already says when.
+      #
+      # Worked out by comparing this run's zips against the previous release's,
+      # which is the only place the last published versions are written down: a
+      # shallow checkout has no history to diff, and the marketplace is not this
+      # build's to interrogate. A zip is named `<key>-<version>.zip`, so the
+      # comparison is the file list and nothing else.
+      #
+      # A release that moves no version still happens and says so. The manifest
+      # schema keeps republishing an unchanged version as the way to fix a
+      # description without shoving the listing back to the top of "newest
+      # first", and a title reading "descriptions only" is that being honest
+      # rather than a release pretending to carry something.
+      - name: Name the release
+        if: startsWith(github.ref, 'refs/tags/plugins-v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          now="$(cd plugins/dist && ls *.zip | sed 's/\.zip$//' | sort)"
+
+          previous="$(gh release list --limit 50 --json tagName \
+            --jq '[.[] | select(.tagName | startswith("plugins-v"))][0].tagName' || true)"
+
+          if [ -z "$previous" ]; then
+            count="$(printf '%s\n' "$now" | wc -l | tr -d ' ')"
+            title="Plugins — first release, $count plugins"
+          else
+            was="$(gh release view "$previous" --json assets \
+              --jq '.assets[].name' | sed 's/\.zip$//' | sort)"
+
+            # In this list and not in that one: a key at a version nobody has
+            # published before, which is what "moved" means here.
+            moved="$(comm -23 <(printf '%s\n' "$now") <(printf '%s\n' "$was") \
+              | sed 's/-\([^-]*\)$/ \1/' | paste -sd',' - | sed 's/,/, /g')"
+
+            if [ -z "$moved" ]; then
+              title="Plugins — descriptions only, no version moved"
+            else
+              total="$(printf '%s\n' "$moved" | tr ',' '\n' | wc -l | tr -d ' ')"
+              if [ "$total" -gt 4 ]; then
+                # Four is about what gets read before a title becomes a list.
+                shown="$(printf '%s' "$moved" | cut -d, -f1-4)"
+                title="Plugins — $shown and $((total - 4)) more"
+              else
+                title="Plugins — $moved"
+              fi
+            fi
+          fi
+
+          echo "$title"
+          echo "RELEASE_TITLE=$title" >> "$GITHUB_ENV"
+
       - name: Release
         if: startsWith(github.ref, 'refs/tags/plugins-v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >
           gh release create "$GITHUB_REF_NAME"
-          --title "Plugins $GITHUB_REF_NAME"
+          --title "$RELEASE_TITLE"
           --notes-file release-notes.md
           plugins/dist/*.zip
 
