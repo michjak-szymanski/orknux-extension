@@ -76,6 +76,13 @@ for the diagram kinds it does not draw.
 
     https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/mermaid/mermaid.js
 
+**[nomnoml](plugins/nomnoml/nomnoml.js)** draws the UML-shaped diagrams mermaid
+is awkward at — classes with their fields, actors, packages inside packages,
+state machines — rendered in the sandbox at eighty kilobytes, asking for no
+capability and no permission at all.
+
+    https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/nomnoml/nomnoml.js
+
 **[pdf](plugins/pdf/pdf.js)** lays HTML out as a PDF on A4, mermaid diagrams
 drawn into the page as vectors. Writer, fonts and renderer are all bundled in.
 
@@ -107,8 +114,8 @@ checked off. It asks the platform for nothing at all.
     https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/todo/todo.js
 
 Each folder holds the plugin, its `plugin.json` marketplace manifest and the
-`README.md` that manifest names. `mermaid` and `pdf` bundle libraries, so their
-source is in `src/` and the file above is the build —
+`README.md` that manifest names. `mermaid`, `nomnoml` and `pdf` bundle
+libraries, so their source is in `src/` and the file above is the build —
 [AGENTS.md](AGENTS.md) has the details.
 
 ## Working here
