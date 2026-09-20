@@ -96,6 +96,25 @@ function editorUrl(source) {
   return `https://www.nomnoml.com/#view/${escaped}`;
 }
 
+/**
+ * The same drawing with the bytes taken out, which is what a model wants.
+ *
+ * An answer reaches a model by being read, every character of it, and a
+ * diagram is thousands of them - read to reach a key twelve characters long
+ * that names the same bytes on the server. So the tool below answers the key
+ * and leaves the drawing where it is.
+ *
+ * Unless there was nowhere to leave it: outside a session `put` refuses and
+ * the key comes back empty, and then the bytes in the answer are the only
+ * copy there is. Stripping them there would answer nothing at all.
+ */
+function keyedOnly(drawing) {
+  if (drawing.key.length === 0) {
+    return drawing;
+  }
+  return { ...drawing, svg: '', png: '' };
+}
+
 export default class Nomnoml extends OrknuxPlugin {
 
   id() {
@@ -170,8 +189,30 @@ export default class Nomnoml extends OrknuxPlugin {
     ];
   }
 
+  /*
+   * A tool of its own rather than a proxy, for the same reason `slack`'s
+   * uploadBinary is: what a model should be handed is not what a workflow
+   * node should be handed. The drawing is the function's answer and the key
+   * is this one's, and the only difference between them is the several
+   * thousand characters a model would otherwise read on its way past.
+   */
   tools() {
-    return [new OrknuxFunctionTool({ function: 'render' })];
+    const drawing = this.functions().find((one) => one.name === 'render');
+    return [
+      new OrknuxTool({
+        name: 'render',
+        description:
+          drawing.description +
+          ' The answer carries the key and not the drawing itself: the bytes stay on the server ' +
+          'and the key names them, so pass it to slack_uploadBinary as contentKey rather than ' +
+          'looking for markup here. Where there is no session to keep a drawing in, the drawing ' +
+          'comes back instead, because then it is the only copy there is.',
+        params: drawing.params,
+        returnType: drawing.returnType,
+        run: (source, theme, direction, format, width) =>
+          keyedOnly(drawing.run(source, theme, direction, format, width)),
+      }),
+    ];
   }
 
   functions() {

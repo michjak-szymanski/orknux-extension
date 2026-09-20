@@ -115,6 +115,25 @@ function keyFor(text) {
   return `mermaid.${hash.toString(36)}`;
 }
 
+/**
+ * The same answer with the bytes taken out, which is what a model wants.
+ *
+ * An answer reaches a model by being read, every character of it, and this one
+ * runs to thousands - read on the way to a key a dozen characters long that
+ * names the very same bytes on the server. So the tool below answers the key
+ * and leaves them where they are.
+ *
+ * Unless there was nowhere to leave them: outside a session `put` refuses and
+ * the key comes back empty, and then what is in the answer is the only copy
+ * there is. Stripping it there would answer nothing at all.
+ */
+function keyedOnly(made) {
+  if (made.key.length === 0) {
+    return made;
+  }
+  return { ...made, svg: '', png: '' };
+}
+
 export default class Mermaid extends OrknuxPlugin {
 
   id() {
@@ -199,9 +218,30 @@ export default class Mermaid extends OrknuxPlugin {
   }
 
   /* The agents' surface: both calls, fronted. Proxies, so everything stays the functions' own. */
+  /*
+   * `render` is a tool of its own; `links` is still its function.
+   *
+   * What a model should be handed is not what a workflow node should be
+   * handed - the drawing is the function's answer and the key is the tool's,
+   * and the difference between them is the several thousand characters a
+   * model would otherwise read on its way past. `links` answers four urls and
+   * has nothing to strip, so it stays a proxy.
+   */
   tools() {
+    const drawing = this.functions().find((one) => one.name === 'render');
     return [
-      new OrknuxFunctionTool({ function: 'render' }),
+      new OrknuxTool({
+        name: 'render',
+        description:
+          drawing.description +
+          ' The answer carries the key and not the drawing itself: the bytes stay on the server ' +
+          'and the key names them, so pass it on rather than looking for markup or base64 here. ' +
+          'Where there is no session to keep a drawing in, the drawing comes back instead, ' +
+          'because then it is the only copy there is.',
+        params: drawing.params,
+        returnType: drawing.returnType,
+        run: (source, theme, format, width) => keyedOnly(drawing.run(source, theme, format, width)),
+      }),
       new OrknuxFunctionTool({ function: 'links' }),
     ];
   }

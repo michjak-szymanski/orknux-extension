@@ -568,6 +568,25 @@ function drawnDiagram(doc, svg, left, top, maxWidth, maxHeight) {
   return height * scale;
 }
 
+/**
+ * The same answer with the bytes taken out, which is what a model wants.
+ *
+ * An answer reaches a model by being read, every character of it, and this one
+ * runs to thousands - read on the way to a key a dozen characters long that
+ * names the very same bytes on the server. So the tool below answers the key
+ * and leaves them where they are.
+ *
+ * Unless there was nowhere to leave them: outside a session `put` refuses and
+ * the key comes back empty, and then what is in the answer is the only copy
+ * there is. Stripping it there would answer nothing at all.
+ */
+function keyedOnly(made) {
+  if (made.key.length === 0) {
+    return made;
+  }
+  return { ...made, base64: '' };
+}
+
 export default class Pdf extends OrknuxPlugin {
 
   id() {
@@ -622,8 +641,28 @@ export default class Pdf extends OrknuxPlugin {
   }
 
   /* The agents' surface: the one call, fronted. A proxy, so everything stays the function's own. */
+  /*
+   * A tool of its own rather than a proxy: a PDF is tens of kilobytes of
+   * base64, and a model reads every character of an answer on its way to the
+   * key that names the same bytes on the server. The function keeps answering
+   * both, for the workflow node that has no session to read a key from.
+   */
   tools() {
-    return [new OrknuxFunctionTool({ function: 'fromHtml' })];
+    const document = this.functions().find((one) => one.name === 'fromHtml');
+    return [
+      new OrknuxTool({
+        name: 'fromHtml',
+        description:
+          document.description +
+          ' The answer carries the key and not the document itself: the bytes stay on the server ' +
+          'and the key names them, so pass it to slack_uploadBinary as contentKey rather than ' +
+          'looking for base64 here. Where there is no session to keep a document in, the base64 ' +
+          'comes back instead, because then it is the only copy there is.',
+        params: document.params,
+        returnType: document.returnType,
+        run: (html, title) => keyedOnly(document.run(html, title)),
+      }),
+    ];
   }
 
   functions() {

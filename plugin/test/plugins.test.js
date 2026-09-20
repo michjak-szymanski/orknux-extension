@@ -280,6 +280,90 @@ test('readAttachment answers a key beside what it read', async () => {
   assert.throws(() => read('F1'), /botToken parameter is not set/);
 });
 
+test('the makers of bytes answer their agents a key, not the bytes', async () => {
+  /*
+   * An answer reaches a model by being read, every character of it. A rendered
+   * diagram is four thousand characters and a PDF is three hundred thousand,
+   * all of it read on the way to a key a dozen characters long naming the very
+   * same bytes on the server — so each of these three has a tool of its own
+   * that answers the key and leaves the bytes where they are.
+   *
+   * The function is untouched, because a workflow node has no session to read
+   * a key from and the bytes in its answer are all it will ever get.
+   */
+  const store = globalThis.orknux.session.store;
+  const render = globalThis.orknux.render;
+  const held = new Map();
+  let inSession = true;
+  globalThis.orknux.session.store = {
+    put: (key, value) => {
+      if (!inSession) return { error: 'there is no session store here' };
+      held.set(key, value);
+      return { ok: true };
+    },
+    get: (key) => (held.has(key) ? held.get(key) : null),
+  };
+  /* The rasteriser is the server's; out here it is whatever this says it is. */
+  globalThis.orknux.render = { pngFromSvg: () => ({ base64: 'UE5H'.repeat(500), bytes: 1500 }) };
+
+  try {
+    const cases = [
+      { plugin: 'mermaid', call: 'render', args: ['graph TD\n  A-->B', '', 'svg', 0], payload: 'svg' },
+      { plugin: 'nomnoml', call: 'render', args: ['[a] -> [b]', '', '', 'svg', 0], payload: 'svg' },
+      /*
+       * Not compared across two runs: jsPDF stamps a creation date into the
+       * file, so the same html twice is not the same bytes and not the same
+       * key. That is a fact about PDFs rather than a fault here.
+       */
+      { plugin: 'pdf', call: 'fromHtml', args: ['<h1>Q3</h1>', ''], payload: 'base64', stamped: true },
+    ];
+
+    for (const { plugin, call, args, payload, stamped } of cases) {
+      const url = new URL(`../../plugins/${plugin}/${plugin}.js`, import.meta.url);
+      const { default: Plugin } = await import(url.href);
+      const made = new Plugin();
+      const declared = made.functions().find((one) => one.name === call);
+      const tool = made.tools().find((one) => one.name === call && one.run !== undefined);
+
+      assert.ok(tool, `${plugin}: ${call} is a tool of its own, not a proxy`);
+      assert.deepEqual(tool.params, declared.params, `${plugin}: same arguments either way`);
+      assert.equal(tool.returnType, declared.returnType, `${plugin}: same shape either way`);
+
+      inSession = true;
+      held.clear();
+      const answered = declared.run(...args);
+      const asked = tool.run(...args);
+
+      assert.ok(answered[payload].length > 0, `${plugin}: the function answers the bytes`);
+      assert.equal(asked[payload], '', `${plugin}: the tool does not`);
+      assert.ok(asked.key.startsWith(`${plugin}.`), `${plugin}: and names them instead`);
+      assert.ok(held.get(asked.key).length > 0, `${plugin}: and the store holds what it names`);
+      if (stamped !== true) {
+        assert.equal(
+          held.get(asked.key).length,
+          answered[payload].length,
+          `${plugin}: what the key names is the whole of it`,
+        );
+      }
+      /* Everything that is not the payload survives — the counts, the links. */
+      assert.equal(asked.bytes, answered.bytes, `${plugin}: the size is still answered`);
+
+      /*
+       * And where there is nowhere to keep it, the bytes come back: a key that
+       * names nothing plus no bytes would be an answer to nothing at all.
+       */
+      inSession = false;
+      held.clear();
+      const outside = tool.run(...args);
+      assert.equal(outside.key, '', `${plugin}: no session, no key`);
+      assert.ok(outside[payload].length > 0, `${plugin}: so the bytes are the answer`);
+    }
+  } finally {
+    globalThis.orknux.session.store = store;
+    globalThis.orknux.render = render;
+  }
+});
+
 test('the teams plugin declares what the server would accept', async () => {
   const inspected = await inspect(shipped('teams'));
 

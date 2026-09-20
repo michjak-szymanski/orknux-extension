@@ -10,7 +10,7 @@
     "offline"
   ],
   "summary": "Render UML-flavoured nomnoml diagrams as a picture, offline, inside the sandbox.",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "icon": "icon.svg",
   "descriptionPath": "README.md",
   "path": "nomnoml.js"
