@@ -9,7 +9,7 @@
     "calendar"
   ],
   "summary": "Business days, working hours and date arithmetic that gets month ends and daylight saving right.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "icon": "icon.svg",
   "descriptionPath": "README.md"
 }

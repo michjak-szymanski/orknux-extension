@@ -9,7 +9,7 @@
     "microsoft"
   ],
   "summary": "Microsoft Teams messages, wrapped for workflows and agents.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "icon": "icon.svg",
   "descriptionPath": "README.md"
 }
