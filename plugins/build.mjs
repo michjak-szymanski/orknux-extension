@@ -120,6 +120,20 @@ for (const job of BUILT) {
     alias: {
       fs: here + 'stub.mjs',
       path: here + 'stub.mjs',
+      /*
+       * jsPDF ships three optional features this plugin never calls: `.html()`
+       * through html2canvas, `addSvgAsImage` through canvg, and the sanitizer
+       * both lean on. They are imported at the top of jsPDF regardless, and
+       * came to 314 kB of the bundle - an eighth of it, to support calls that
+       * are not in this file.
+       *
+       * Resolved to the same nothing `fs` and `path` get. Anything that
+       * actually reaches for a function on them still fails, at the call, with
+       * its name in the error.
+       */
+      html2canvas: here + 'stub.mjs',
+      canvg: here + 'stub.mjs',
+      dompurify: here + 'stub.mjs',
     },
     /*
      * A font file crosses into the bundle as the base64 its plugin feeds
