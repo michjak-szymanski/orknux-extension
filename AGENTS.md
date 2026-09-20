@@ -105,6 +105,26 @@ Three things to keep in mind when adding one:
   point. A plugin toolchain that pulled in an argument parser would be a
   dependency in every plugin project for the sake of three flags.
 
+## Drawing is the server's, because nothing here can
+
+`orknux.render.pngFromSvg` turns markup into a picture under `RENDER_PNG`, and
+three plugins draw through it. It is a capability rather than a library for a
+reason that will not change: the sandbox has no rasteriser, no canvas, no
+WebAssembly to carry one in, and a 5 MB ceiling that a rasteriser passes before
+it does anything.
+
+It is also the narrowest grant on the list. What crosses is bytes a plugin just
+produced and what comes back is bytes computed from them - no connection, no
+address, no credential - which is worth remembering when weighing whether
+something else belongs under the same grant rather than a new one.
+
+`plugin/RENDERING.md` has the shape of it, and carries one proposal:
+`pngFromPdf`, for looking at a page nobody can currently see. Proposed, and
+deliberately **not** mirrored - `limits.ts` and `types/globals.d.ts` do not
+name it, so a plugin calling it fails `check` here exactly as the upload would
+refuse it. That is the rule this whole package exists for, and a proposal is
+not an exception to it.
+
 ## Crypto is arithmetic, not a grant
 
 `orknux.crypto` — `hash`, `hmac`, `pbkdf2`, `random`, `timingSafeEqual` —
