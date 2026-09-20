@@ -94,6 +94,16 @@ const DRAWN = [
     ],
   },
   {
+    plugin: 'http',
+    title: 'A plug and its lead',
+    paths: [
+      'M8.5 2.5v5',
+      'M15.5 2.5v5',
+      'M5.5 7.5h13v3a6.5 6.5 0 0 1-13 0Z',
+      'M12 17v4.5',
+    ],
+  },
+  {
     plugin: 'nomnoml',
     title: 'Two boxes and the line between them',
     paths: ['M2.5 3.5h8v6h-8Z', 'M13.5 14.5h8v6h-8Z', 'M6.5 9.5v6a2 2 0 0 0 2 2h5'],

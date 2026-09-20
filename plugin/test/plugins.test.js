@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
+import { existsSync, readdirSync } from 'node:fs';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -17,6 +18,18 @@ import { inspect } from '../dist/tooling.js';
 
 const shipped = (name) =>
   fileURLToPath(new URL(`../../plugins/${name}/${name}.js`, import.meta.url));
+
+/*
+ * Every plugin in the directory, read rather than remembered.
+ *
+ * The sweeps below used to name their plugins in a list, which worked until
+ * somebody added one: nomnoml and http were both written, tested and shipped
+ * while two whole-repository invariants quietly skipped them. A list of what
+ * is here is a thing that stops being true; the directory does not.
+ */
+const everyPlugin = readdirSync(fileURLToPath(new URL('../../plugins/', import.meta.url)))
+  .filter((name) => existsSync(shipped(name)))
+  .sort();
 
 test('the github plugin declares what the server would accept', async () => {
   const inspected = await inspect(shipped('github'));
@@ -1591,6 +1604,31 @@ test('the teams plugin verifies a real signature, and refuses a wrong one', asyn
   assert.equal(configured().run({ authorization: `Bearer ${signed}` }, body), false);
 });
 
+test('the sweeps below are sweeping something', () => {
+  /*
+   * A directory read that finds nothing passes every test that iterates it.
+   * This is the one assertion that would notice - the plugins are named here
+   * so that a rename or a move fails loudly rather than quietly reducing three
+   * whole-repository invariants to nothing at all.
+   */
+  assert.deepEqual(everyPlugin, [
+    'confluence',
+    'date',
+    'github',
+    'http',
+    'jira',
+    'markdown',
+    'mermaid',
+    'nomnoml',
+    'pdf',
+    'prometheus',
+    'slack',
+    'teams',
+    'todo',
+    'web',
+  ]);
+});
+
 test('the sentinel convention is gone from the parameters that could carry a default', async () => {
   /*
    * Thirty-six places used to say "0 for the default" or "an empty string to
@@ -1600,7 +1638,7 @@ test('the sentinel convention is gone from the parameters that could carry a def
    * "pass 0 to mean default" is exactly the instruction a model gets wrong.
    */
   const optional = [];
-  for (const key of ['confluence', 'date', 'github', 'jira', 'mermaid', 'pdf', 'prometheus', 'slack', 'web']) {
+  for (const key of everyPlugin) {
     const inspected = await inspect(shipped(key));
     for (const declared of [...inspected.functions, ...inspected.tools]) {
       for (const param of declared.params) {
@@ -1617,7 +1655,7 @@ test('the sentinel convention is gone from the parameters that could carry a def
    * argument is positional, so "may be left out" means nothing in the middle —
    * validate refuses that, and this is the shipped proof it never happens.
    */
-  for (const key of ['confluence', 'date', 'github', 'jira', 'mermaid', 'pdf', 'prometheus', 'slack', 'web']) {
+  for (const key of everyPlugin) {
     const inspected = await inspect(shipped(key));
     for (const declared of inspected.functions) {
       let seenOptional = false;
@@ -1636,12 +1674,25 @@ test('the sentinel convention is gone from the parameters that could carry a def
 
 test('a default is of the type its parameter declared', async () => {
   /* Refused at load rather than at the call that would have found it. */
-  for (const key of ['github', 'slack', 'web', 'date', 'mermaid', 'pdf', 'confluence', 'jira', 'prometheus']) {
+  for (const key of everyPlugin) {
     const inspected = await inspect(shipped(key));
     for (const declared of inspected.functions) {
       for (const param of declared.params) {
         if (param.default === undefined) continue;
-        const kind = param.type === 'number' ? 'number' : param.type === 'boolean' ? 'boolean' : 'string';
+        /*
+         * A map's default is an object - `{}`, the empty headers `http_get`
+         * starts from. The mapping used to fall through to 'string' for
+         * anything it did not recognise, which would have called that default
+         * wrong the moment a plugin declared one.
+         */
+        const kind =
+          param.type === 'number'
+            ? 'number'
+            : param.type === 'boolean'
+              ? 'boolean'
+              : param.type === 'map' || param.type === 'array'
+                ? 'object'
+                : 'string';
         assert.equal(
           typeof param.default,
           kind,
@@ -1788,5 +1839,263 @@ test('the nomnoml plugin declares what the server would accept, and renders offl
     }
   } finally {
     globalThis.orknux.session.store = store;
+  }
+});
+
+test('the http plugin declares what the server would accept', async () => {
+  const inspected = await inspect(shipped('http'));
+
+  assert.equal(inspected.id, 'http');
+  assert.equal(inspected.apiVersion, 1);
+  assert.deepEqual(validate(inspected), []);
+
+  assert.deepEqual(inspected.permissions, []);
+  /*
+   * The widest capability there is, asked for without naming a service —
+   * which is the whole point of this plugin and the whole of its risk. What
+   * narrows it is `hosts`, and that is a workspace's decision rather than a
+   * declaration, so this is the one plugin whose capability line says less
+   * than its settings do.
+   */
+  assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
+
+  assert.deepEqual(
+    inspected.parameters.map((parameter) => parameter.name),
+    ['baseUrl', 'hosts', 'token', 'authHeader', 'authScheme'],
+  );
+  /* The credential is a secret; the fence is not, because a fence is worth reading. */
+  assert.deepEqual(
+    inspected.parameters.map((parameter) => parameter.secret),
+    [false, false, true, false, false],
+  );
+  assert.deepEqual(
+    inspected.parameters.map((parameter) => parameter.required),
+    [false, false, false, false, false],
+  );
+
+  assert.deepEqual(
+    inspected.functions.map((declared) => declared.name),
+    ['get', 'post', 'request', 'download'],
+  );
+  assert.deepEqual(
+    inspected.tools.map((declared) => declared.name),
+    ['get', 'post', 'request', 'download'],
+  );
+
+  /*
+   * Three answers are untyped maps rather than a declared shape: headers and
+   * a parsed body hold whatever the other end decided to send, and a property
+   * of kind `object` has to name the object it points at. There is no naming
+   * somebody else's JSON, so the fields are named in the descriptions
+   * instead — the same trade `prometheus_query` makes.
+   */
+  assert.deepEqual(
+    inspected.functions.map((declared) => declared.returnType),
+    ['map', 'map', 'map', 'Fetched'],
+  );
+  assert.deepEqual(
+    inspected.objects.map((shape) => shape.name),
+    ['Fetched'],
+  );
+  for (const declared of inspected.functions.slice(0, 3)) {
+    assert.match(
+      declared.description,
+      /status/,
+      `${declared.name} answers a map without saying what is in it`,
+    );
+  }
+});
+
+test('the http plugin fences the host, and keeps the credential inside it', async () => {
+  const url = new URL(`../../plugins/http/http.js`, import.meta.url);
+  const { default: Http } = await import(url.href);
+
+  const configured = (settings) => {
+    const plugin = Object.create(Http.prototype);
+    Object.defineProperty(plugin, 'settings', { value: Object.freeze(settings) });
+    const functions = plugin.functions();
+    return (name) => functions.find((one) => one.name === name);
+  };
+
+  /* Nothing to do with is decided before any setting is read. */
+  assert.throws(() => configured({})('get').run('   ', {}), /there is no url to fetch/);
+  assert.throws(
+    () => configured({})('get').run('/v1/issues', {}),
+    /is not an absolute url, and no baseUrl is configured/,
+  );
+  /* A scheme this cannot speak is refused by name rather than called a path. */
+  assert.throws(
+    () => configured({})('get').run('ftp://files.example.com/x', {}),
+    /ftp is not a scheme this can fetch/,
+  );
+  assert.throws(
+    () => configured({})('request').run('https://api.example.com/x', 'FETCH', {}, {}),
+    /no method called FETCH/,
+  );
+
+  const sent = [];
+  const door = globalThis.orknux.http.request;
+  globalThis.orknux.http.request = (what) => {
+    sent.push(what);
+    return { status: 204, headers: {}, body: '', json: null };
+  };
+  try {
+    /* A path resolves against baseUrl, and baseUrl's own host is always inside the fence. */
+    configured({ baseUrl: 'https://api.example.com/', token: 'SECRET' })('get').run('/v1/issues', {});
+    /* A host named in `hosts` is too, absolute url and all. */
+    configured({ hosts: 'api.example.com, status.example.com', token: 'SECRET' })('get')
+      .run('https://status.example.com/up', {});
+    /* A caller's own header wins: it is saying it has a better credential. */
+    configured({ baseUrl: 'https://api.example.com', token: 'SECRET' })('get')
+      .run('/x', { Authorization: 'Bearer THEIRS' });
+    /* And a header name and scheme of the workspace's choosing, for the x-api-key APIs. */
+    configured({
+      baseUrl: 'https://api.example.com',
+      token: 'SECRET',
+      authHeader: 'X-Api-Key',
+      authScheme: '',
+    })('get').run('/x', {});
+
+    /*
+     * The fence, and the reason for it. A model persuaded to fetch some other
+     * host by something it read in a page must not take the workspace's key
+     * there — so the refusal happens before a request is made, and `sent`
+     * staying four long is the proof that nothing left.
+     */
+    assert.throws(
+      () =>
+        configured({ hosts: 'api.example.com', token: 'SECRET' })('get')
+          .run('https://elsewhere.test/collect', {}),
+      /elsewhere\.test is not a host this plugin may reach: it is configured for api\.example\.com/,
+    );
+    /* A token with nowhere named is refused rather than sent to whatever was asked for. */
+    assert.throws(
+      () => configured({ token: 'SECRET' })('get').run('https://anywhere.test/x', {}),
+      /no baseUrl and no hosts are, so there is nowhere it may safely be sent/,
+    );
+    /* With no token there is nothing to leak, so an open plugin reaches anywhere the proxy allows. */
+    configured({})('get').run('https://anywhere.test/x', {});
+  } finally {
+    globalThis.orknux.http.request = door;
+  }
+
+  assert.equal(sent.length, 5, 'a refused call is refused before it is made');
+  const [onBase, onListed, withTheirs, withApiKey, unfenced] = sent;
+
+  assert.equal(onBase.url, 'https://api.example.com/v1/issues', 'one slash, not two');
+  assert.equal(onBase.method, 'GET');
+  assert.equal(onBase.headers.authorization, 'Bearer SECRET');
+
+  assert.equal(onListed.url, 'https://status.example.com/up');
+  assert.equal(onListed.headers.authorization, 'Bearer SECRET');
+
+  assert.equal(withTheirs.headers.authorization, 'Bearer THEIRS');
+
+  assert.equal(withApiKey.headers['x-api-key'], 'SECRET', 'sent bare, the way x-api-key wants it');
+  assert.equal(withApiKey.headers.authorization, undefined);
+
+  assert.equal(unfenced.headers.authorization, undefined, 'no token, no header');
+
+  /* A port and a credential in the authority are not the host being fenced on. */
+  const ported = [];
+  const again = globalThis.orknux.http.request;
+  globalThis.orknux.http.request = (what) => {
+    ported.push(what);
+    return { status: 200, headers: {}, body: '{}', json: { ok: true } };
+  };
+  try {
+    configured({ hosts: 'API.Example.com' })('get').run('https://api.example.com:8443/v1/x', {});
+  } finally {
+    globalThis.orknux.http.request = again;
+  }
+  assert.equal(ported.length, 1, 'the port is not part of the host');
+});
+
+test('an http answer is read rather than thrown, and download names its bytes', async () => {
+  const url = new URL(`../../plugins/http/http.js`, import.meta.url);
+  const { default: Http } = await import(url.href);
+
+  const plugin = Object.create(Http.prototype);
+  Object.defineProperty(plugin, 'settings', { value: Object.freeze({ hosts: 'api.example.com' }) });
+  const get = plugin.functions().find((one) => one.name === 'get').run;
+
+  const door = globalThis.orknux.http.request;
+  globalThis.orknux.http.request = () => ({
+    status: 404,
+    headers: { 'content-type': 'application/json' },
+    body: '{"message":"no such issue"}',
+    json: { message: 'no such issue' },
+  });
+  try {
+    /*
+     * A 404 is an answer, not a failure of the call. Throwing would lose the
+     * body, which is where the other end said what it objected to — and "it
+     * failed" is not something a workflow can branch on.
+     */
+    const answered = get('https://api.example.com/v1/issues/9', {});
+    assert.equal(answered.status, 404);
+    assert.equal(answered.ok, false);
+    assert.equal(answered.json.message, 'no such issue');
+    assert.equal(answered.body, '{"message":"no such issue"}');
+
+    /* An array parses, but a map cannot hold one — so it stays in `body` and json is null. */
+    globalThis.orknux.http.request = () => ({ status: 200, headers: {}, body: '[1,2]', json: [1, 2] });
+    const listed = get('https://api.example.com/v1/all', {});
+    assert.equal(listed.ok, true);
+    assert.equal(listed.json, null, 'an array does not fit a map');
+    assert.equal(listed.body, '[1,2]', 'and is still there for whoever asked for it');
+
+    /* Only an unreachable host throws, because then there is no answer to read. */
+    globalThis.orknux.http.request = () => ({ error: 'connection refused' });
+    assert.throws(
+      () => get('https://api.example.com/v1/x', {}),
+      /could not reach api\.example\.com: connection refused/,
+    );
+  } finally {
+    globalThis.orknux.http.request = door;
+  }
+
+  /*
+   * And the bytes. The function keeps base64 filled, because a workflow node
+   * has no session store to read a key from; the tool empties it, because a
+   * model reading a megabyte on the way to a twelve-character key is the one
+   * thing that does not survive the trip to the next call.
+   */
+  const held = new Map();
+  const store = globalThis.orknux.session.store;
+  const fetching = globalThis.orknux.http.download;
+  globalThis.orknux.session.store = {
+    put: (key, value) => {
+      held.set(key, value);
+      return { ok: true };
+    },
+    get: (key) => (held.has(key) ? held.get(key) : null),
+  };
+  globalThis.orknux.http.download = () => ({
+    status: 200,
+    headers: {},
+    base64: 'JVBERi0xLjQK',
+    size: 9,
+    contentType: 'application/pdf',
+  });
+  try {
+    const got = plugin.functions().find((one) => one.name === 'download').run;
+    const fetched = got('https://api.example.com/reports/q3.pdf', {});
+    assert.ok(fetched.key.startsWith('http.'), 'the key is named for its plugin');
+    assert.equal(held.get(fetched.key), 'JVBERi0xLjQK', 'what is kept is what was fetched');
+    assert.equal(fetched.base64, 'JVBERi0xLjQK', 'the function still carries the bytes');
+    assert.equal(fetched.contentType, 'application/pdf');
+
+    /* Content-derived, so the same file twice overwrites itself rather than piling up. */
+    assert.equal(got('https://api.example.com/reports/q3.pdf', {}).key, fetched.key);
+
+    const asTool = plugin.tools().find((one) => one.name === 'download' && one.run !== undefined).run;
+    const named = asTool('https://api.example.com/reports/q3.pdf', {});
+    assert.equal(named.key, fetched.key, 'the same bytes under the same name');
+    assert.equal(named.base64, '', 'and the agent gets the name, not the megabyte');
+    assert.equal(held.get(named.key), 'JVBERi0xLjQK', 'which is still there to be had');
+  } finally {
+    globalThis.orknux.session.store = store;
+    globalThis.orknux.http.download = fetching;
   }
 });
