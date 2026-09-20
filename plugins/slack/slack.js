@@ -1029,11 +1029,11 @@ adding a message to anybody's unread count.`,
           'itself, what the sharing message should say, and a threadTs to share inside a thread - ' +
           'empty for the channel itself. Pass an empty channel to only upload: the answered permalink ' +
           'then goes in a later post\'s attachments. Text only - a PDF or an image cannot travel this ' +
-          'way; give remoteFile its url instead. Where a tool answered with a key for what it ' +
-          'made - mermaid_render does - pass that as contentKey and leave content empty: the ' +
-          'bytes are taken from the server rather than from what you retype, which is what stops ' +
-          'a long file arriving truncated. Answers the file\'s id and permalink. Needs the ' +
-          'botToken parameter.',
+          'way; give remoteFile its url instead. Where a tool answered a key for what it made, ' +
+          'PASS THAT as contentKey and leave content empty: the bytes are taken off the server ' +
+          'instead of out of what you type back, which is the one thing that stops a long file ' +
+          'arriving truncated. Answers the file\'s id and permalink. Needs the botToken ' +
+          'parameter.',
         params: [
           { name: 'channel', type: 'string' },
           { name: 'filename', type: 'string' },
@@ -1077,17 +1077,19 @@ adding a message to anybody's unread count.`,
       new OrknuxFunction({
         name: 'uploadBinary',
         description:
-          'Uploads bytes to Slack as a file the workspace hosts - a PDF, a PNG, a JPEG - passed as ' +
-          'base64, up to 10 MB decoded, and shares them to a channel with a message. Only for bytes ' +
-          'that are not text: an SVG, a CSV, JSON, markdown or any source you could read goes to ' +
-          'upload as it stands. Encoding text to base64 to send it here doubles its length and has ' +
-          'to be copied out perfectly, which is how a long one gets truncated. Pass the channel id, a ' +
-          'filename whose extension says what the bytes are (report.pdf, chart.png), the base64, what ' +
-          'the sharing message should say, and a threadTs - or an empty channel to only upload. ' +
-          'pdf_fromHtml and mermaid_render answer base64 ready for this - and both answer a key as ' +
-          'well: pass that as contentKey and leave base64 empty, so the bytes come off the server ' +
-          'rather than out of what you retype. Answers the file\'s id and permalink. Needs the ' +
-          'botToken parameter.',
+          'Uploads bytes to Slack as a file the workspace hosts - a PDF, a PNG, a JPEG - and ' +
+          'shares them to a channel with a message. PASS contentKey, NOT base64: mermaid_render, ' +
+          'nomnoml_render and pdf_fromHtml each answer a short key beside the bytes, and giving ' +
+          'that key here takes them off the server instead of out of what you type back. A few ' +
+          'kilobytes of base64 does not survive being written into a tool call - it arrives with a ' +
+          'character wrong and the whole call is rejected as malformed - so copying the bytes out ' +
+          'of one answer and into the next argument is the one thing that reliably fails. Only ' +
+          'pass base64 directly when the bytes came from somewhere that answered no key. Either ' +
+          'way you must pass a filename whose extension says what the bytes are (report.pdf, ' +
+          'chart.png), the channel id, what the sharing message should say, and a threadTs - or an ' +
+          'empty channel to only upload. For bytes only: an SVG, a CSV, JSON, markdown or any ' +
+          'source you could read goes to upload instead, as it stands. Answers the file\'s id and ' +
+          'permalink. Needs the botToken parameter.',
         params: [
           { name: 'channel', type: 'string' },
           { name: 'filename', type: 'string' },
