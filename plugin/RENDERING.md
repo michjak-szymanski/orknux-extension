@@ -51,6 +51,9 @@ render: {
 
   /** One page of a PDF, drawn as a PNG — `RENDER_PDF`. */
   pngFromPdf(pdf: string, page?: number, width?: number): OrknuxDrawnPdfPage;
+
+  /** What a PDF says, as HTML — `RENDER_PDF`. */
+  htmlFromPdf(pdf: string, from?: number, to?: number): OrknuxPdfHtml;
 }
 ```
 
@@ -86,6 +89,32 @@ side and the server's ceilings can bring both down - so a plugin that gets
 back a blank and one that gets back a giant have something to tell them apart
 with. It answered only `base64` and `bytes` until then, which left a bad
 drawing indistinguishable from a good one.
+
+`htmlFromPdf` answers the other question about a document: not *how does it
+look* but *what does it say*.
+
+```ts
+type OrknuxPdfHtml =
+  | { html: string; pages: number; from: number; to: number; characters: number; error?: undefined }
+  | { error: string; html?: undefined; /* …and the rest undefined */ };
+```
+
+It shares `RENDER_PDF` with `pngFromPdf` because it shares the thing that grant
+is about: handing an untrusted document to PDFBox. A second capability would
+ask an administrator to weigh a distinction that is not there.
+
+What comes back is the document's text in reading order — a `<section
+data-page="N">` per page, a `<p>` per block — with the document's own text
+escaped, never passed through as markup. It is **not** the page's design:
+columns, tables and anything positioned rather than written are flattened into
+the order they are read in. Where the layout is the question, draw the page and
+look at it.
+
+`from` and `to` count from one and both may be left out; what comes back says
+which range was read and how many pages the document has, so a caller that
+asked for the beginning knows where the beginning ended. A document with more
+text than the server hands over at once is refused with the number in the
+sentence, and a range is the answer to that.
 
 A refusal is data rather than a throw, the way every door here answers, and
 outside the sandbox the fallback says so in a sentence:

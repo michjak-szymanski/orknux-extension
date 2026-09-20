@@ -651,6 +651,28 @@ export type OrknuxDrawnPdfPage =
     };
 
 /**
+ * What a PDF says, as HTML — or the sentence saying why it says nothing.
+ *
+ * `pages` is the document's own page count, `from` and `to` the range that was
+ * actually read: a caller that asked for the beginning of a long report needs
+ * to know where the beginning ended, because a document too large to hand over
+ * in one piece is refused by size and a range is the way out of that.
+ *
+ * `characters` is how much text came back, which is what a caller deciding
+ * whether to hand it to a model wants before it does.
+ */
+export type OrknuxPdfHtml =
+  | { html: string; pages: number; from: number; to: number; characters: number; error?: undefined }
+  | {
+      error: string;
+      html?: undefined;
+      pages?: undefined;
+      from?: undefined;
+      to?: undefined;
+      characters?: undefined;
+    };
+
+/**
  * A picture drawn from markup, or the sentence saying why none was.
  *
  * `width` and `height` are what the picture came out as, read off the file
@@ -972,6 +994,31 @@ export interface OrknuxHelpers {
      * so a caller that asked for page one of six learns there are six.
      */
     pngFromPdf(pdf: string, page?: number, width?: number): OrknuxDrawnPdfPage;
+
+    /**
+     * What a PDF says, as HTML — `RENDER_PDF`.
+     *
+     * The other question about a document a plugin just made. `pngFromPdf` is
+     * for looking at a page - is the table cut in half, did the diagram land -
+     * and this is for reading it: the text is already in the file, and reading
+     * a thousand words back out of a picture costs a vision model a thousand
+     * words of tokens and some guessing.
+     *
+     * **Text in reading order, not the page's design.** A `<section>` per page
+     * and a `<p>` per block; columns, tables and anything positioned rather
+     * than written are flattened into the order they are read in. Where the
+     * layout is the question, draw the page and look at it.
+     *
+     * The document's own text is escaped, never passed through as markup.
+     *
+     * @param pdf the document as base64.
+     * @param from the first page, counting from one; left out starts at the
+     *   beginning.
+     * @param to the last page; left out reads to the end. A document with more
+     *   text than the server hands over at once is refused with the number in
+     *   the sentence, and a range is the answer to it.
+     */
+    htmlFromPdf(pdf: string, from?: number, to?: number): OrknuxPdfHtml;
   };
 
   /**
