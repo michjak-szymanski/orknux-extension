@@ -171,6 +171,74 @@ export default class Confluence extends OrknuxPlugin {
   }
 
   /* The two shapes this plugin answers. */
+  /*
+   * Two calls, and the whole skill is about the first one.
+   *
+   * `search` takes plain words or CQL and passes either through as written, so
+   * a model that does not know CQL exists gets whatever full-text matching
+   * gives it - which on a wiki of any size is the wrong page, confidently.
+   */
+  skills() {
+    return [
+      new OrknuxSkill({
+        name: 'Looking something up on Confluence',
+        description: 'Searching a wiki so the right page comes back, and what its body actually is.',
+        content: `# Looking something up on Confluence
+
+The answer to a great many questions is already written down on the wiki. Two
+calls get at it: \`confluence_search\` finds the page, \`confluence_openPage\` reads
+it.
+
+## Search with CQL, not with hope
+
+\`search\` passes the query through as written. Plain words search page text,
+which on a wiki of any size returns the twenty pages that mention your words
+and not the one that is about them. **CQL is how you ask properly:**
+
+    space = "DOC" AND title ~ "runbook"
+    title ~ "deploy" AND lastmodified > now("-12w")
+    space = "ENG" AND type = page AND text ~ "rate limit"
+    creator = "jsmith" AND lastmodified > now("-4w")
+
+The fields worth knowing: \`space\`, \`title\`, \`text\`, \`type\` (\`page\`, \`blogpost\`),
+\`label\`, \`creator\`, \`lastmodified\`, \`created\`. \`~\` is contains, \`=\` is exact.
+\`now("-4w")\` takes \`d\`, \`w\`, \`m\`, \`y\`.
+
+**Prefer \`title ~\` over plain text** when you know roughly what the page is
+called. A runbook is titled like a runbook; its body mentions a hundred things
+it is not about.
+
+## Then open exactly one
+
+Each match carries an \`id\` and a \`url\`, and \`openPage\` takes either - or any
+Confluence link somebody pasted, Cloud's \`/spaces/KEY/pages/123/Title\` or
+Server's \`?pageId=123\`.
+
+Read the excerpts first and open the **one** page that answers the question.
+Opening five to see which is right costs five page bodies in your context and
+usually the first one was right.
+
+## The body is XHTML, not markdown
+
+\`openPage\` answers Confluence **storage format**, which is XHTML: \`<p>\`, \`<h2>\`,
+\`<ac:structured-macro>\` for panels and code blocks. Read it as HTML. Do not
+quote it back to somebody as though it were prose - pull the answer out and say
+it in your own words, with the page's \`url\` so they can go and read it.
+
+## When nothing comes back
+
+**An empty search is usually permissions, not an empty wiki.** Confluence
+filters by what the credential can see, so a query that works in a browser can
+answer nothing through a token with narrower access. Say that is a possibility
+rather than telling somebody their wiki has no runbook.
+
+If a query with several \`AND\` clauses finds nothing, drop the narrowest clause
+and search again - a wrong space key or a stale label answers empty in exactly
+the same way as a subject nobody has written about.`,
+      }),
+    ];
+  }
+
   objects() {
     return [
       new OrknuxObject({
