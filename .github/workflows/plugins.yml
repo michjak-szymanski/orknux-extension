@@ -1,6 +1,7 @@
 name: Plugins
 
-# Packs every plugin and attaches the zips to a GitHub release.
+# Packs every plugin, attaches the zips to a GitHub release, and publishes them
+# to the marketplace.
 #
 # A separate tag namespace from `v*` on purpose. `v*` is the version of
 # @orknux/plugin, the library — it moves when the library does. The plugins
@@ -12,8 +13,8 @@ name: Plugins
 #
 # The tag name is only a label for the release; what a zip is called comes from
 # the plugin's own key and version. `workflow_dispatch` runs the same thing by
-# hand from the Actions tab and makes no release — for checking that the pack
-# still works.
+# hand from the Actions tab, and makes no release and publishes nothing — it is
+# for checking that the pack still works.
 #
 # The zips are not in the repository, deliberately: they hold only files that
 # are already committed, in a form git cannot delta, and `pdf` alone is 1.6 MB
@@ -30,7 +31,7 @@ concurrency:
 
 jobs:
   pack:
-    name: Pack and release
+    name: Pack, release and publish
     runs-on: ubuntu-latest
     permissions:
       # `gh release create` writes to the repository. Nothing else here does,
@@ -132,9 +133,61 @@ jobs:
           --notes-file release-notes.md
           plugins/dist/*.zip
 
+      # Last, and deliberately after the release exists.
+      #
+      # `POST /api/plugins` upserts, so re-running a tag is safe and the loop
+      # never has to ask whether a key is already there: 201 says it created
+      # one, 200 says it replaced one, and neither is a decision this build
+      # makes. That is also what makes the ordering cheap — if publishing
+      # fails, the tag and the release still stand and a re-run finishes the
+      # job. The other way round would leave a plugin published against a
+      # release nobody can read.
+      #
+      # The token is a publish token, scoped to exactly this. An install token
+      # lives in an orknux-server somebody else may administer, and one token
+      # doing both would mean every server holding a copy could publish.
+      - name: Publish to the marketplace
+        if: startsWith(github.ref, 'refs/tags/plugins-v')
+        env:
+          ORKNUX_PUBLISH_TOKEN: ${{ secrets.ORKNUX_PUBLISH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ORKNUX_PUBLISH_TOKEN:-}" ]; then
+            echo '::error::ORKNUX_PUBLISH_TOKEN is not set, so there is nothing to publish with'
+            exit 1
+          fi
+
+          published=0
+          for zip in plugins/dist/*.zip; do
+            name="$(basename "$zip")"
+            # `-o` keeps the body out of the log, where a token echoed back in
+            # an error would otherwise land; `-w` is the only thing printed.
+            status="$(curl -sS --retry 2 --retry-connrefused \
+              -o answer.json -w '%{http_code}' \
+              -X POST https://orknux.ai/api/plugins \
+              -H "Authorization: Bearer $ORKNUX_PUBLISH_TOKEN" \
+              -F "file=@$zip")"
+
+            case "$status" in
+              201) echo "$name — created" ;;
+              200) echo "$name — replaced" ;;
+              *)
+                echo "::error::$name — the marketplace answered $status"
+                # The body, for the sentence it carries. It is the API's own
+                # error, not the request, so there is no credential in it.
+                cat answer.json || true
+                exit 1
+                ;;
+            esac
+            published=$((published + 1))
+          done
+          echo "published $published plugin(s) to orknux.ai"
+
       # On a manual run there is no tag and no release, so the zips go up as a
       # build artifact instead — which is what somebody clicking "Run workflow"
-      # to check the pack still works actually wants to see.
+      # to check the pack still works actually wants to see. Nothing is
+      # published either: a dispatch is for checking the pack, not for
+      # shipping.
       - name: Keep the zips for a manual run
         if: ${{ !startsWith(github.ref, 'refs/tags/plugins-v') }}
         uses: actions/upload-artifact@v4
