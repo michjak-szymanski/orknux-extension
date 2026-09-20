@@ -229,6 +229,28 @@ type OrknuxDrawnPdfPage =
       pages?: undefined;
     };
 
+/**
+ * What a PDF says, as HTML - or the sentence saying why it says nothing.
+ *
+ * `pages` is the document's own page count, `from` and `to` the range that was
+ * actually read: a caller that asked for the beginning of a long report needs
+ * to know where the beginning ended, because a document too large to hand over
+ * in one piece is refused by size and a range is the way out of that.
+ *
+ * `characters` is how much text came back, which is what a caller deciding
+ * whether to hand it to a model wants to know before it does.
+ */
+type OrknuxPdfHtml =
+  | { html: string; pages: number; from: number; to: number; characters: number; error?: undefined }
+  | {
+      error: string;
+      html?: undefined;
+      pages?: undefined;
+      from?: undefined;
+      to?: undefined;
+      characters?: undefined;
+    };
+
 type OrknuxDrawnPng =
   | { base64: string; bytes: number; error?: undefined }
   | { error: string; base64?: undefined; bytes?: undefined };
@@ -595,6 +617,33 @@ declare const orknux: {
      * 96 dpi.
      */
     pngFromPdf(pdf: string, page?: number, width?: number): OrknuxDrawnPdfPage;
+
+    /**
+     * What a PDF says, as HTML - `RENDER_PDF`.
+     *
+     * The other question about a document. `pngFromPdf` answers *how does it
+     * look*; this answers *what does it say*, which is the one a plugin can
+     * act on rather than only show.
+     *
+     * The same grant as drawing, and deliberately: the same parser, the same
+     * embedded-file and encryption and font models, the same risk surface. A
+     * second capability would ask an operator to weigh a distinction that is
+     * not there.
+     *
+     * The text comes back in reading order - a `<section data-page="N">` per
+     * page and a `<p>` per block, with single newlines inside a block folded
+     * to spaces, because those are where the page wrapped rather than where a
+     * sentence ended. A two-column page reads as two columns.
+     *
+     * Not a layout answer. Columns, tables and anything positioned rather than
+     * written are flattened, and text that is a `<script>` comes back escaped.
+     * For a question about how the page is arranged, draw it.
+     *
+     * `from` and `to` count from one and are both optional. 200,000 characters
+     * is the most one call returns; past that it is refused with the number in
+     * the sentence, and a range is the way through.
+     */
+    htmlFromPdf(pdf: string, from?: number, to?: number): OrknuxPdfHtml;
   };
 
   log: {

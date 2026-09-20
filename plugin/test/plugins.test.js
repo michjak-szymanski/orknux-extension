@@ -1008,11 +1008,11 @@ test('the pdf plugin declares what the server would accept', async () => {
   assert.deepEqual(inspected.capabilities, ['RENDER_PDF']);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
-    ['preview', 'fromHtml'],
+    ['read', 'preview', 'fromHtml'],
   );
   assert.deepEqual(
     inspected.tools.map((declared) => declared.name),
-    ['fromHtml', 'preview'],
+    ['fromHtml', 'read', 'preview'],
   );
   /* Neither tool is its function: one strips the document, one takes a key. */
   for (const declared of inspected.tools) {
@@ -1083,6 +1083,128 @@ test('pdf preview draws a page: bytes on the function, a key on the tool', async
     assert.throws(() => tool.run('pdf.nope', 1, 0), /nothing is kept under pdf.nope/);
     assert.throws(() => tool.run(doc.key, 7, 0), /could not draw the page: page 7 of 3/);
     assert.throws(() => declared('', 1, 0), /no document to draw/);
+  } finally {
+    globalThis.orknux.session.store = store;
+    globalThis.orknux.render = render;
+  }
+});
+
+test('pdf read answers what a document says: bytes on the function, a key on the tool', async () => {
+  const url = new URL(`../../plugins/pdf/pdf.js`, import.meta.url);
+  const { default: Pdf } = await import(url.href);
+  const made = new Pdf();
+  const declared = made.functions().find((one) => one.name === 'read').run;
+  const tool = made.tools().find((one) => one.name === 'read' && one.run !== undefined);
+
+  /*
+   * The other half of preview, and the split is the same one: a workflow node
+   * has no session and passes the document, an agent has one and passes the
+   * key. The difference from preview is what comes back - a picture is
+   * stripped from a model's answer because nobody reads base64, and text is
+   * not, because text is the answer.
+   */
+  assert.deepEqual(
+    tool.params.map((one) => one.name),
+    ['contentKey', 'from', 'to'],
+  );
+  assert.equal(
+    made.functions().find((one) => one.name === 'read').params[0].name,
+    'base64',
+    'the workflow surface still takes a document',
+  );
+
+  const held = new Map();
+  const store = globalThis.orknux.session.store;
+  const render = globalThis.orknux.render;
+  let asked = null;
+  let answering = {
+    html:
+      '<section data-page="1"><p>Invoice 42</p><p>Total due 1,200.00</p></section>' +
+      '<section data-page="2"><p>Terms: net 30.</p></section>',
+    pages: 2,
+    from: 1,
+    to: 2,
+    characters: 108,
+  };
+
+  globalThis.orknux.session.store = {
+    put: (key, value) => {
+      held.set(key, value);
+      return { ok: true };
+    },
+    get: (key) => (held.has(key) ? held.get(key) : null),
+  };
+  globalThis.orknux.render = {
+    htmlFromPdf: (pdf, from, to) => {
+      asked = { pdf, from, to };
+      return answering;
+    },
+  };
+
+  try {
+    const said = declared('JVBE  Ri0x\nLjQK', 0, 0);
+
+    /* Whitespace is packed out, the way it is for drawing. */
+    assert.equal(asked.pdf, 'JVBERi0xLjQK', 'the document arrives without its line breaks');
+    /* Zero is "the whole document", not page zero. */
+    assert.equal(asked.from, undefined, 'no range asked for is no range passed on');
+    assert.equal(asked.to, undefined);
+
+    assert.equal(said.pages, 2, 'the document(s) own page count');
+    assert.equal(said.from, 1);
+    assert.equal(said.to, 2, 'and the range actually read');
+    assert.equal(said.characters, 108);
+    assert.ok(said.html.includes('Total due 1,200.00'));
+
+    /* Kept as well as answered: slack_upload takes a contentKey for text. */
+    assert.ok(said.key.startsWith('pdf.'), 'the text is kept under a key');
+    assert.equal(held.get(said.key), said.html, 'and what is kept is what was answered');
+
+    /* A range reaches the door as written. */
+    declared('JVBERi0xLjQK', 2, 2);
+    assert.equal(asked.from, 2);
+    assert.equal(asked.to, 2);
+
+    /*
+     * Markup in a document stays text. The server escapes it and this must not
+     * un-escape it on the way past: a PDF whose text is a script tag is a
+     * document saying something, not a document doing something.
+     */
+    answering = {
+      html: '<section data-page="1"><p>&lt;script&gt;alert(1)&lt;/script&gt;</p></section>',
+      pages: 1,
+      from: 1,
+      to: 1,
+      characters: 30,
+    };
+    const escaped = declared('JVBERi0xLjQK', 0, 0);
+    assert.ok(!/<script/i.test(escaped.html), 'a document saying <script> comes back saying it');
+
+    /* The tool reads through the key, and keeps the text in its answer. */
+    held.set('pdf.abc', 'JVBERi0xLjQK');
+    answering = { html: '<section data-page="1"><p>Hello</p></section>', pages: 1, from: 1, to: 1, characters: 5 };
+    const byKey = tool.run('pdf.abc', 0, 0);
+    assert.equal(asked.pdf, 'JVBERi0xLjQK', 'the key named the document');
+    assert.ok(byKey.html.includes('Hello'), 'text is the answer, so it is not stripped');
+
+    assert.throws(() => tool.run('', 0, 0), /takes a contentKey, not a document/);
+    assert.throws(() => tool.run('pdf.gone', 0, 0), /nothing is kept under pdf.gone/);
+    assert.throws(() => declared('   ', 0, 0), /no document to read/);
+
+    /*
+     * And the server's own sentence, kept rather than replaced. It carries the
+     * only numbers that tell a caller what to do next - the real page count,
+     * or how many characters the document actually held - and a tidier message
+     * of this plugin's own would throw exactly those away.
+     */
+    answering = { error: 'that document has 3 pages' };
+    assert.throws(() => declared('JVBERi0xLjQK', 9, 9), /could not read the document: that document has 3 pages/);
+
+    answering = {
+      error: 'this call would return 431,905 characters and 200,000 is the most; ask for a range of pages',
+    };
+    assert.throws(() => declared('JVBERi0xLjQK', 0, 0), /431,905 characters/);
+    assert.throws(() => declared('JVBERi0xLjQK', 0, 0), /ask for a range of pages/);
   } finally {
     globalThis.orknux.session.store = store;
     globalThis.orknux.render = render;

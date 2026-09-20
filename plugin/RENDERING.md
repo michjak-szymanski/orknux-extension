@@ -7,8 +7,9 @@ What the server draws for a plugin, and why it has to be the server.
 | what | the server today |
 |------|------------------|
 | `RENDER_PNG` | **accepted** — `pngFromSvg`, mirrored, three plugins draw through it |
-| `RENDER_PDF` | **accepted** — `pngFromPdf`, mirrored |
+| `RENDER_PDF` | **accepted** — `pngFromPdf` and `htmlFromPdf`, both mirrored |
 | a plugin using `pngFromPdf` | **written** — `pdf_preview`, the last section |
+| a plugin using `htmlFromPdf` | **written** — `pdf_read`, the same split |
 
 Both capabilities are live and both are in `limits.ts` and
 `types/globals.d.ts`, so a plugin declaring either passes `check` here exactly
@@ -161,6 +162,32 @@ picture you cannot see is not one. The key comes back too, so
 
 `Preview` carries `pages` as the **document's** count rather than this page's
 number, so one call says both that the page exists and how many more there are.
+
+## And the same split again, for reading
+
+`htmlFromPdf` got the same pair, and the interesting part is where they differ:
+
+```
+function (workflows)  pdf_read(base64, from, to)      -> Reading
+tool     (agents)     pdf_read(contentKey, from, to)  -> Reading
+```
+
+The argument splits for the reason it always does — a workflow node has no
+session, an agent cannot retype a megabyte. **What comes back does not split**,
+and that is the point worth recording: `preview` strips its picture from the
+agent's answer because nobody reads base64, and `read` strips nothing, because
+the text *is* the answer. Slack's `readAttachment` settled this first — the key
+for bytes, the text for text — and a reader whose text you have to fetch
+separately is not a reader.
+
+The key still comes back, holding the text rather than the document, because
+`slack_upload` takes a `contentKey` for text.
+
+The server's refusals are passed through rather than tidied. "that document has
+3 pages" and "this call would return 431,905 characters and 200,000 is the
+most; ask for a range of pages" both carry the only number that tells a caller
+what to do next, and a friendlier sentence of the plugin's own would throw
+exactly that away.
 
 And the consequence that was flagged before it happened, now happened: `pdf`
 asked for **no capability at all** and asks for `RENDER_PDF`. That is a real

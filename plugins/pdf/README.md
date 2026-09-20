@@ -9,23 +9,73 @@ Everything runs inside the sandbox; the PDF library ships as the plugin's own
 bundled libraries, so nothing is installed on the server and nothing leaves
 it.
 
-## One function, one tool
+## Write one, look at it, read it back
 
 | Function | Answers |
 |---|---|
-| `fromHtml(html, title = "")` | A `Document`: the file as `base64`, plus its `pages` and `bytes`. `title` is the document's title metadata. |
+| `fromHtml(html, title = "")` | A `Document`: the file as `base64`, its `pages` and `bytes`, a `key` it is kept under, and `problems` — what went wrong without stopping the document. |
+| `preview(base64, page, width)` | A `Preview`: that page drawn as a picture, its size, the document's `pages`, and a `key` for the picture. |
+| `read(base64, from, to)` | A `Reading`: what the document **says**, as text, plus `characters`, `pages`, the range actually read, and a `key`. |
 
-There are no parameters to configure. Nothing to point at, no credential, no
-capability — see *What it asks for* below.
+There are no parameters to configure. Nothing to point at and no credential.
 
 ```
 pdf_fromHtml('<h1>Q3 review</h1><p>Revenue was up 4%.</p>')
-  → { base64: 'JVBERi0xLjMK…', pages: 1, bytes: 2841 }
+  → { base64: 'JVBERi0xLjMK…', pages: 1, bytes: 2841, key: 'pdf.1k9x2m', problems: [] }
 ```
 
-Hand the `base64` to `slack_uploadBinary` with a `.pdf` filename, or to the
-http door's `upload`. That is the whole handoff — the PDF never becomes a file
-on disk anywhere.
+Hand the **key** to `slack_uploadBinary` with a `.pdf` filename. That is the
+whole handoff — the PDF never becomes a file on disk anywhere, and never passes
+through a model as base64, which does not survive being written back out.
+
+### The two questions about a document
+
+`preview` answers *how does it look*. `read` answers *what does it say*. They
+share a capability and a parser and are otherwise opposites:
+
+- **Layout goes wrong silently**, and `problems` can only report what the
+  writer knew about — not a heading stranded at the foot of a page or a table
+  that ran off the side. Draw the page and look at it before you send it to
+  anybody.
+- **Text is what something can act on** — find the total on an invoice, quote
+  a clause, decide whether a report is worth passing on.
+
+`read` answers reading order, not layout: a `<section data-page="N">` per page
+and a `<p>` per block, with the line breaks inside a block folded to spaces,
+because those are where the page wrapped rather than where a sentence ended. A
+two-column page reads as two columns rather than as alternating lines. Columns,
+tables and anything positioned rather than written are flattened — for a
+question about arrangement, draw it instead.
+
+Text that was itself markup comes back escaped: a PDF whose contents are
+`<script>` reads as `&lt;script&gt;`. It is a document *saying* something, not
+a document *doing* something, and that distinction is pinned by a test.
+
+`from` and `to` name a range of pages, counting from one, both optional. 200,000
+characters is the most one call returns; past that it is refused with the number
+in the sentence, and a range is the way through.
+
+```
+pdf_read(key)
+  → { html: '<section data-page="1"><p>Invoice 42</p>…', characters: 4180,
+      pages: 6, from: 1, to: 6, key: 'pdf.9m2k1x' }
+```
+
+That last key holds the **text**, which `slack_upload` takes as `contentKey` —
+so a document read here reaches a channel as a snippet without being copied out
+and pasted back in.
+
+### Agents get a key, workflows get bytes
+
+Both `preview` and `read` come in two shapes. The **function** takes `base64`,
+because a workflow node has no session to hold a key in and refusing there
+would close its only door. The **tool** takes `contentKey` and has no `base64`
+argument at all: a few hundred thousand characters of base64 typed into a tool
+call arrives a character wrong and is rejected before anything runs.
+
+What they answer differs the other way round. `preview` strips its picture from
+the agent's answer — nobody reads base64 — and `read` does not strip its text,
+because the text *is* the answer.
 
 ## What of HTML is understood
 
@@ -95,11 +145,23 @@ is the shape `slack_uploadBinary` and the http door's `upload` take anyway.
 `TEXT_ENCODING`, for `TextEncoder` and friends, which jsPDF's Unicode font
 machinery leans on.
 
-**No capabilities at all.** The writer, the renderer and the fonts are all
-inside the file. This plugin makes no network request, holds no credential,
-and reaches nothing — it is arithmetic on a string that happens to produce a
-PDF. It is the one plugin here that an administrator can accept without
-thinking about what it can see.
+**And `RENDER_PDF`**, which is a real change from the days when this asked for
+nothing at all.
+
+Writing a document still asks the server for nothing: the writer, the layout,
+the fonts and the diagram renderer are all inside the file, and `fromHtml` is
+arithmetic on a string that happens to produce a PDF. It is *looking at* one
+that needs help — rasterising needs a rasteriser, and reading needs a parser,
+neither of which a sandbox with no WebAssembly can carry.
+
+`preview` and `read` share that one grant deliberately. Same parser, same
+embedded-file and encryption and font models, same risk surface — a second
+capability would ask an operator to weigh a distinction that is not there.
+
+Nothing is fetched either way. What crosses is a document this plugin is
+holding, and what comes back is pixels or text computed from it: no connection,
+no address, no credential. A workspace that only writes documents never calls
+the other two and can weigh the grant on its own.
 
 ## How it is laid out
 

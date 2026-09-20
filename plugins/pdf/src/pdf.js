@@ -734,6 +734,59 @@ function drawnPage(base64, page, width) {
   };
 }
 
+/**
+ * What a document says, over a range of its pages.
+ *
+ * The other half of `drawnPage`. That one answers how a page *looks*, which is
+ * what you check a layout with; this answers what it *says*, which is what
+ * something can act on - find the total in an invoice, quote a clause back,
+ * decide whether a report is worth passing on.
+ *
+ * Reading order rather than layout: a `<section data-page="N">` per page and a
+ * `<p>` per block, with the newlines inside a block folded to spaces because
+ * those are where the page wrapped and not where a sentence ended. Columns and
+ * tables are flattened, and anything positioned rather than written comes back
+ * in the order it was written. For a question about arrangement, draw the page.
+ */
+function readText(base64, from, to) {
+  const packed = typeof base64 === 'string' ? base64.replace(/\s+/g, '') : '';
+  if (packed.length === 0) {
+    throw new Error('there is no document to read');
+  }
+
+  const first = typeof from === 'number' && from > 0 ? from : undefined;
+  const last = typeof to === 'number' && to > 0 ? to : undefined;
+
+  const said = orknux.render.htmlFromPdf(packed, first, last);
+  if (said.error !== undefined) {
+    /*
+     * The server's own sentence, which is the one worth having: it names the
+     * real page count for a range past the end, and says how many characters
+     * a document has when it is too long to hand over at once. Wrapping that
+     * in something vaguer would throw away the only number that tells a
+     * caller what range to ask for instead.
+     */
+    throw new Error(`could not read the document: ${said.error}`);
+  }
+
+  /*
+   * Kept as well as answered, under a key, the way everything here that makes
+   * something does - `slack_upload` takes a contentKey for text, so a document
+   * read here reaches a channel as a snippet without passing through anybody.
+   */
+  const key = keyFor(said.html);
+  const kept = orknux.session.store.put(key, said.html);
+
+  return {
+    html: said.html,
+    characters: said.characters,
+    pages: said.pages,
+    from: said.from,
+    to: said.to,
+    key: kept.error === undefined ? key : '',
+  };
+}
+
 export default class Pdf extends OrknuxPlugin {
 
   id() {
@@ -887,6 +940,54 @@ reads; the diagram is what they look at afterwards.`,
   objects() {
     return [
       new OrknuxObject({
+        name: 'Reading',
+        description: 'What a document says, over the pages that were read.',
+        properties: [
+          {
+            name: 'html',
+            kind: 'string',
+            description:
+              'The text in reading order - a <section data-page="N"> per page and a <p> per ' +
+              'block. Text that was itself markup comes back escaped, so a document saying ' +
+              '<script> reads as &lt;script&gt; rather than becoming one.',
+          },
+          {
+            name: 'characters',
+            kind: 'number',
+            description:
+              'How much text came back. Worth reading before deciding what to do with it: a ' +
+              'long document is long here too.',
+          },
+          {
+            name: 'pages',
+            kind: 'number',
+            description:
+              'How many pages the whole document has - not how many were read. One call says ' +
+              'both what this range held and how much more there is.',
+          },
+          {
+            name: 'from',
+            kind: 'number',
+            description: 'The first page read, counting from one.',
+          },
+          {
+            name: 'to',
+            kind: 'number',
+            description:
+              'And the last. Where it is short of pages, there is more document to ask for.',
+          },
+          {
+            name: 'key',
+            kind: 'string',
+            description:
+              'Where this text is kept for the rest of this session. slack_upload takes it as ' +
+              'contentKey, so a document read here reaches a channel as a snippet without being ' +
+              'copied out and pasted back in. Empty where there was no session to keep it in.',
+          },
+        ],
+      }),
+
+      new OrknuxObject({
         name: 'Preview',
         description: 'One page of a document, drawn so somebody can look at it.',
         properties: [
@@ -997,6 +1098,44 @@ reads; the diagram is what they look at afterwards.`,
        * everything else here: the picture is the point of asking.
        */
       new OrknuxTool({
+        name: 'read',
+        description:
+          'Reads what a PDF says and answers it as text you can act on - find a total, quote a ' +
+          'clause, decide whether a report is worth passing on. Pass contentKey: the key ' +
+          'fromHtml answered beside a document it made, or the one slack_readAttachment gave ' +
+          'you for a file somebody sent. There is deliberately no base64 argument, because a ' +
+          'document typed into a tool call arrives a character wrong. from and to name a range ' +
+          'of pages, counting from one, both optional - use them when a document is long, ' +
+          'because 200,000 characters is the most one call returns and the refusal says how ' +
+          'many there were. ' +
+          'What comes back is reading order, not layout: a section per page, a paragraph per ' +
+          'block, columns and tables flattened. For how a page is arranged rather than what it ' +
+          'says, use preview and look at it.',
+        params: [
+          { name: 'contentKey', type: 'string' },
+          { name: 'from', type: 'number', required: false, default: 0 },
+          { name: 'to', type: 'number', required: false, default: 0 },
+        ],
+        returnType: 'Reading',
+        run: (contentKey, from, to) => {
+          if (typeof contentKey !== 'string' || contentKey.length === 0) {
+            throw new Error(
+              'read takes a contentKey, not a document: pass the key the answer that made or ' +
+                'fetched it carried.',
+            );
+          }
+          const held = orknux.session.store.get(contentKey);
+          if (typeof held !== 'string' || held.length === 0) {
+            throw new Error(
+              `nothing is kept under ${contentKey} in this session: make or fetch the document ` +
+                'again and pass the key that answer carried.',
+            );
+          }
+          return readText(held, from, to);
+        },
+      }),
+
+      new OrknuxTool({
         name: 'preview',
         description:
           'Draws one page of a PDF as a picture, so you can see what a document actually came ' +
@@ -1036,6 +1175,28 @@ reads; the diagram is what they look at afterwards.`,
 
   functions() {
     return [
+      new OrknuxFunction({
+        name: 'read',
+        description:
+          'Reads what a PDF says and answers it as text. Pass the document as base64 - which is ' +
+          'what fromHtml answered - and optionally from and to, a range of pages counting from ' +
+          'one. What comes back is reading order rather than layout: a <section data-page="N"> ' +
+          'per page and a <p> per block, with the line breaks inside a block folded away because ' +
+          'those are where the page wrapped and not where a sentence ended. Columns and tables ' +
+          'are flattened, so for a question about how a page is arranged use preview and look at ' +
+          'it instead. 200,000 characters is the most one call returns; past that it is refused ' +
+          'with the number, and a range of pages is the way through. Answers the text, how much ' +
+          'of it there is, how many pages the whole document has, the range actually read, and a ' +
+          'key the text is kept under - slack_upload takes that as contentKey.',
+        params: [
+          { name: 'base64', type: 'string' },
+          { name: 'from', type: 'number', required: false, default: 0 },
+          { name: 'to', type: 'number', required: false, default: 0 },
+        ],
+        returnType: 'Reading',
+        run: (base64, from, to) => readText(base64, from, to),
+      }),
+
       new OrknuxFunction({
         name: 'preview',
         description:
