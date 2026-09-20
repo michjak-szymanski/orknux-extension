@@ -711,6 +711,94 @@ export default class Pdf extends OrknuxPlugin {
     return [];
   }
 
+  /*
+   * What a model has to know and was working out by trial.
+   *
+   * A run asked for "a pdf version of the diagram", tried a mermaid block,
+   * got a render error, tried three more shapes of the same call, and told the
+   * person PDFs were unavailable - having already produced one, successfully,
+   * on the second attempt. Its own reasoning said it had no skill for this.
+   * Nothing in that sequence was a bug in the plugin; it was a model with a
+   * tool and no idea how the tool is meant to be used.
+   */
+  skills() {
+    return [
+      new OrknuxSkill({
+        name: 'Making a PDF',
+        description: 'What pdf_fromHtml takes, what it will not take, and what to do when a diagram will not draw.',
+        content: `# Making a PDF
+
+\`pdf_fromHtml\` takes HTML and answers a document. It is a report writer, not
+a browser: it lays out text and draws diagrams, and ignores everything meant
+for a screen.
+
+## What it sets
+
+Headings \`h1\`-\`h3\`, paragraphs, \`br\`, \`hr\`, \`ul\` and \`ol\` with nesting, \`b\`/\`strong\`,
+and table cells run together as text. Entities are decoded. Every other tag is
+ignored and its text kept, so unknown markup degrades to its content.
+
+**No CSS, no images, no links.** A \`style\` attribute is not an error, it simply
+does nothing. Do not spend a turn writing one.
+
+**Latin alphabets only.** ASCII, Latin-1 and Latin Extended-A: Polish, Czech,
+Hungarian, Turkish, Romanian, the Nordics, the Baltics. Cyrillic, Greek, CJK
+and emoji come back blank, and the log says which characters were dropped.
+
+## Diagrams
+
+Put mermaid source in a \`<pre class="mermaid">\` block and it is drawn into the
+page as vector art, sized to the column:
+
+    <h2>How a delivery is handled</h2>
+    <pre class="mermaid">
+    flowchart LR
+      A[Webhook] --> B{Verified?}
+      B -->|yes| C[Describe]
+    </pre>
+
+Five kinds draw: \`flowchart\`/\`graph\`, \`sequenceDiagram\`, \`stateDiagram-v2\`,
+\`classDiagram\`, \`erDiagram\`. Any other kind - \`pie\`, \`gantt\`, \`mindmap\` - is
+refused by name.
+
+## When a diagram will not draw
+
+**The document is not lost.** \`pdf_fromHtml\` refuses the whole call when a
+diagram fails, so the fix is to send the document without that diagram - not
+to abandon the PDF.
+
+Do this, in order, and stop at the first that works:
+
+1. Simplify the source. Plain \`-->\` arrows, short labels, no quotes or colons
+   inside \`[...]\` if the first attempt failed on them.
+2. Send the document **without** the \`<pre>\` block, putting the same
+   information in a list. A report that describes the flow in five bullets is
+   worth more than no report.
+3. Only then say something is wrong - and say what you did produce.
+
+Do not call the tool a fourth time with a fourth shape of the same diagram.
+Two failures mean the diagram, not the call.
+
+## Getting it to somebody
+
+The answer carries a **key**, not just bytes. Pass the key:
+
+    pdf_fromHtml(html, title)  ->  { key: 'pdf.1k7e78y', pages: 2, bytes: 30887 }
+    slack_uploadBinary(channel, 'report.pdf', 'pdf.1k7e78y', comment, threadTs)
+
+\`slack_uploadBinary\` takes that key and nothing else - there is no argument to
+put base64 in. A PDF is hundreds of thousands of characters and does not
+survive being written back out by you; the key is a dozen characters and what
+it names never leaves the server.
+
+## Before you start
+
+Write the document first and the diagram second. The text is what somebody
+reads; the diagram is what they look at afterwards.`,
+      }),
+    ];
+  }
+
   /* What a written document comes back as. */
   objects() {
     return [
