@@ -21,6 +21,7 @@
  */
 
 import { build } from 'esbuild';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -36,6 +37,18 @@ const BUILT = [
   { entry: 'mermaid/src/mermaid.js', outfile: 'mermaid/mermaid.js' },
   { entry: 'pdf/src/pdf.js', outfile: 'pdf/pdf.js' },
 ];
+
+/*
+ * What every bundle carries in front of its own first line.
+ *
+ * A plugin is read before it is granted anything - the server loads the module
+ * to ask what it wants, and cannot grant in order to find out whether to grant
+ * - so the module body runs with nothing switched on. A library that builds a
+ * `new TextEncoder` at module scope therefore failed to load at all, and the
+ * plugin could not be installed. See shim.mjs for why the answer belongs in
+ * the bundle rather than in the sandbox.
+ */
+const SHIM = readFileSync(here + 'shim.mjs', 'utf8');
 
 for (const job of BUILT) {
   const built = await build({
@@ -65,6 +78,7 @@ for (const job of BUILT) {
     write: true,
     metafile: true,
     logLevel: 'warning',
+    banner: { js: SHIM },
   });
   const out = Object.entries(built.metafile.outputs)[0];
   console.log(`${job.outfile}  ${out === undefined ? '?' : out[1].bytes} bytes`);

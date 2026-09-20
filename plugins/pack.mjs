@@ -47,7 +47,7 @@
  */
 
 import { deflateRawSync } from 'node:zlib';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { inspect } from '../plugin/dist/tooling.js';
@@ -247,6 +247,28 @@ for (const key of keys) {
   const { manifest, inspected, entries } = await packed(key);
   const zip = zipped(entries);
   const name = `${manifest.key}-${manifest.version}.zip`;
+
+  /*
+   * The older zips for this plugin go first.
+   *
+   * A version bump used to leave the previous zip sitting beside the new one,
+   * and a folder holding `pdf-0.1.0.zip` and `pdf-0.4.0.zip` offers the stale
+   * one first in every file picker that sorts by name. That is not a tidiness
+   * problem: the old file installs, fails for a reason fixed weeks ago, and
+   * the reading of it is "the fix did not work" - which is exactly how an
+   * afternoon goes missing.
+   *
+   * Only this plugin's own, matched on the key and a version: a zip somebody
+   * put here by hand is not this script's to delete.
+   */
+  for (const stale of readdirSync(out)) {
+    if (stale === name) continue;
+    if (!/^(.+)-\d+\.\d+\.\d+\.zip$/.test(stale)) continue;
+    if (stale.slice(0, stale.lastIndexOf('-')) !== manifest.key) continue;
+    rmSync(out + stale);
+    console.log(`dist/${stale}  removed (older than ${manifest.version})`);
+  }
+
   writeFileSync(out + name, zip);
 
   const size = (bytes) => (bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`);
