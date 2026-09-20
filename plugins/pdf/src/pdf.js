@@ -44,6 +44,24 @@ import { renderMermaidSync } from 'beautiful-mermaid';
 import DEJAVU from 'dejavu-fonts-ttf/ttf/DejaVuSans.ttf';
 import DEJAVU_BOLD from 'dejavu-fonts-ttf/ttf/DejaVuSans-Bold.ttf';
 
+/**
+ * A short name for one document, derived from the document itself.
+ *
+ * Content rather than a counter or a clock: the same html rendered twice lands
+ * on the same key and simply overwrites itself, and nothing here has to ask
+ * what time it is or keep a number between calls.
+ *
+ * FNV-1a because it is four lines and this is a name, not a checksum.
+ */
+function keyFor(text) {
+  let hash = 0x811c9dc5;
+  for (let at = 0; at < text.length; at += 1) {
+    hash ^= text.charCodeAt(at);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `pdf.${hash.toString(36)}`;
+}
+
 /** The alphabet of RFC 4648's base64, in order. */
 const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
@@ -584,10 +602,20 @@ export default class Pdf extends OrknuxPlugin {
           {
             name: 'base64',
             kind: 'string',
-            description: 'The file itself. Hand it to slack_uploadBinary with a .pdf filename.',
+            description:
+              'The file itself, as base64. A workflow node wanting the bytes reads this; anything ' +
+              'putting the file somewhere passes the key below instead.',
           },
           { name: 'pages', kind: 'number', description: 'How many pages it came to.' },
           { name: 'bytes', kind: 'number', description: 'How large the file is, before base64.' },
+          {
+            name: 'key',
+            kind: 'string',
+            description:
+              'Where this document is kept for the rest of this session. Hand it to ' +
+              'slack_uploadBinary as contentKey - that is the only thing it takes - so the bytes ' +
+              'never leave the server. Empty where there was no session to keep it in.',
+          },
         ],
       }),
     ];
@@ -608,7 +636,9 @@ export default class Pdf extends OrknuxPlugin {
           'class="mermaid">...</pre> (flowchart/graph, sequenceDiagram, stateDiagram-v2, ' +
           'classDiagram, erDiagram). Full Unicode text - Polish, Czech, the lot - set in DejaVu. A ' +
           'report writer, not a browser: no CSS, no raster images, no links; i/em render regular. ' +
-          'Answers the file as base64 - hand it to slack_uploadBinary with a .pdf filename - with ' +
+          'Answers the file as base64, its page and byte counts, and a short key it is kept ' +
+          'under for this session - hand THAT to slack_uploadBinary as contentKey with a .pdf ' +
+          'filename, never the base64, which does not survive being written back out - with ' +
           'its page and byte counts. title is the document\'s title metadata.',
         params: [
           { name: 'html', type: 'string' },
@@ -714,10 +744,28 @@ export default class Pdf extends OrknuxPlugin {
           }
 
           const bytes = new Uint8Array(doc.output('arraybuffer'));
+          const encoded = base64Of(bytes);
+
+          /*
+           * Kept as well as answered, and the keeping is the half that matters.
+           *
+           * A PDF is tens of kilobytes of base64, and an answer reaches the
+           * next tool call by being written out again by whatever read it.
+           * That does not survive: one arrived a character wrong and the call
+           * was rejected as malformed before anything ran. `slack_uploadBinary`
+           * takes the key and nothing else now, which is why this has to
+           * answer one.
+           */
+          const key = keyFor(encoded);
+          const kept = orknux.session.store.put(key, encoded);
+
           return {
-            base64: base64Of(bytes),
+            base64: encoded,
             pages: doc.getNumberOfPages(),
             bytes: bytes.length,
+            // Empty outside a session, which is exactly when base64 above is
+            // the only copy there is - and when a workflow node is the caller.
+            key: kept.error === undefined ? key : '',
           };
         },
       }),

@@ -47,7 +47,7 @@ is in:
 | Function | For |
 |---|---|
 | `upload(channel, filename, content, comment, threadTs, contentKey)` | **Text** Slack will host: an SVG, a CSV, a log, JSON, mermaid source. Answers the file's `id` and `permalink`. An empty `channel` uploads without sharing, and the permalink then goes into a later `post`'s `attachments`. `contentKey` takes the bytes from the session store instead of from `content` — see *Passing content by key*. |
-| `uploadBinary(channel, filename, base64, comment, threadTs)` | **Bytes** Slack will host, as base64 — a PDF, an image. Up to the http door's 10 MB. `pdf_fromHtml` answers base64 ready for this. |
+| `uploadBinary(channel, filename, …, comment, threadTs)` | **Bytes** Slack will host — a PDF, a rendered diagram. Up to the http door's 10 MB. **The two surfaces differ:** agents pass a `contentKey` and have no base64 argument at all; the workflow function still takes `base64`, because a workflow has no session and so never had a key. See *Two surfaces* below. |
 | `uploadFromUrl(channel, url, filename, comment, threadTs)` | **Copying a file from a url onto Slack**, so the channel holds the file rather than a link. Fetches up to 5 MB. An empty `filename` is derived from the url and its content type. |
 | `remoteFile(channel, url, title, filetype)` | **Pointing at a url without copying it.** Slack keeps a pointer and shows a card. The right door when the bytes should stay where they are, or exceed the caps above. |
 
@@ -63,7 +63,7 @@ So both upload functions take a `contentKey` as well as their content:
 ```
 mermaid_render('flowchart LR
  A --> B')   → { png: 'iVBORw0…', bytes: 18402, key: 'mermaid.1k3af9' }
-slack_uploadBinary('C123', 'flow.png', '', 'the flow', '', 'mermaid.1k3af9')
+slack_uploadBinary('C123', 'flow.png', 'mermaid.1k3af9', 'the flow', '')
 ```
 
 The key is a dozen characters, and what it names never leaves the server — the
@@ -74,6 +74,22 @@ them back from there.
 before, and a workflow node has no session to keep anything in, so `content`
 stays the path that always works. A key that names nothing throws and says to
 pass the content or render again, rather than uploading an empty file.
+
+### Two surfaces, on purpose
+
+`uploadBinary` is the one call here whose tool is not its function.
+
+The **function** — what a workflow step calls — keeps its `base64` argument. A
+workflow has no session, so no key was ever on offer to it, and taking the
+argument away would close the only door it has.
+
+The **tool** — what an agent calls — takes a `contentKey` and has nowhere to
+put bytes. A model has a key every time, because everything that makes bytes
+answers one, and it still wrote five thousand characters of base64 into the
+argument: it arrived a character wrong and the whole call was rejected as
+malformed before anything ran. Advice did not fix that and a refusal would only
+have described it. An argument a model should never fill is an argument that
+should not be in front of it.
 
 **A diagram goes as a picture.** Slack draws no SVG — it hosts one as a file
 and shows a card with a filename on it, so an SVG in a channel is something

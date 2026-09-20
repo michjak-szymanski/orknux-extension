@@ -708,8 +708,8 @@ lines saying what it is and what it concludes, and attach the rest:
 
 - text — a log, a CSV, a query, a config — goes through **\`slack_upload\`**
   with a filename whose extension says what it is
-- a PDF or an image goes through **\`slack_uploadBinary\`** as base64, which is
-  what \`pdf_fromHtml\` already answers
+- a PDF or an image goes through **\`slack_uploadBinary\`**, named by the
+  \`key\` its maker answered — \`pdf_fromHtml\` answers one
 - a diagram goes through **\`mermaid_render\`** or **\`nomnoml_render\`** and
   then \`slack_uploadBinary\` with a \`.png\` filename — see below
 
@@ -732,12 +732,14 @@ never that.
 Pass the **\`key\`** the render answered, not the bytes:
 
     mermaid_render(source)  ->  { png: '…', key: 'mermaid.1k3af9' }
-    slack_uploadBinary(channel, 'flow.png', '', comment, threadTs, 'mermaid.1k3af9')
+    slack_uploadBinary(channel, 'flow.png', 'mermaid.1k3af9', comment, threadTs)
 
-The answer reaches the next call by going through you, and a few kilobytes of
-base64 does not survive being written out again — one arrived with a stray
-character in the middle of it and the whole call was rejected as malformed.
-The key is a dozen characters and what it names never leaves the server.
+\`slack_uploadBinary\` takes that key in place of the bytes — there is no
+argument to put bytes in, and that is on purpose. The answer reaches the next
+call by going through you, and a few kilobytes of base64 does not survive being
+written out again: one arrived with a stray character in the middle of it and
+the whole call was rejected as malformed before anything ran. The key is a
+dozen characters and what it names never leaves the server.
 
 ## Before you post at all
 
@@ -770,7 +772,68 @@ adding a message to anybody's unread count.`,
       new OrknuxFunctionTool({ function: 'react' }),
       new OrknuxFunctionTool({ function: 'search' }),
       new OrknuxFunctionTool({ function: 'upload' }),
-      new OrknuxFunctionTool({ function: 'uploadBinary' }),
+      /*
+       * The one tool here that is not its function.
+       *
+       * `uploadBinary` the *function* takes base64, because a workflow node
+       * has no session and therefore never had a key to pass - taking the
+       * argument away there would close the only door it has. A model is the
+       * other case entirely: everything that makes bytes answers it a key, and
+       * it still wrote five thousand characters of base64 into the argument,
+       * where it arrived a character wrong and the call was rejected as
+       * malformed before anything ran.
+       *
+       * Advice did not fix that and a refusal would only have described it. An
+       * argument a model should never fill is an argument that should not be
+       * in front of it, so this surface does not have one. Same
+       * implementation, same channel and filename and comment - one parameter
+       * replaced by the name of the thing it used to carry.
+       */
+      new OrknuxTool({
+        name: 'uploadBinary',
+        description:
+          'Puts bytes on Slack as a file the workspace hosts - a PDF, a rendered diagram - and ' +
+          'shares them to a channel with a message. The bytes are named, never typed: pass the ' +
+          'short contentKey the tool that made them answered beside them. mermaid_render, ' +
+          'nomnoml_render and pdf_fromHtml all answer one. There is deliberately no base64 ' +
+          'argument here: a few kilobytes of it written back into a tool call arrives with a ' +
+          'character wrong and the whole call is rejected before anything runs, so the argument ' +
+          'that invited that is gone. Also pass a filename whose extension says what the bytes ' +
+          'are (report.pdf, chart.png), the channel id, what the sharing message should say, and ' +
+          'a threadTs - or an empty channel to only upload, whose permalink then goes in a later ' +
+          'post\'s attachments. Text is not bytes: an SVG, a CSV, JSON, markdown or any source ' +
+          'you could read goes to upload instead, as it stands. Answers the file\'s id and ' +
+          'permalink. Needs the botToken parameter.',
+        params: [
+          { name: 'channel', type: 'string' },
+          { name: 'filename', type: 'string' },
+          { name: 'contentKey', type: 'string' },
+          { name: 'comment', type: 'string' },
+          { name: 'threadTs', type: 'string' },
+        ],
+        returnType: 'HostedFile',
+        run: (channel, filename, contentKey, comment, threadTs) => {
+          if (typeof contentKey !== 'string' || contentKey.length === 0) {
+            throw new Error(
+              'uploadBinary takes a contentKey, not bytes: make the file first and pass the key ' +
+                'that answer carried. mermaid_render, nomnoml_render and pdf_fromHtml all answer ' +
+                'one. For bytes that live at a url, uploadFromUrl fetches them without either of ' +
+                'us handling them.',
+            );
+          }
+
+          const held = orknux.session.store.get(contentKey);
+          if (typeof held !== 'string' || held.length === 0) {
+            throw new Error(
+              `nothing is kept under ${contentKey} in this session: make the file again and pass ` +
+                'the key that answer carried. A key is only good for the session it was made in.',
+            );
+          }
+
+          return uploadedBytes(this.settings, filename, held, channel, comment, threadTs);
+        },
+      }),
+
       new OrknuxFunctionTool({ function: 'uploadFromUrl' }),
       new OrknuxFunctionTool({ function: 'remoteFile' }),
       new OrknuxFunctionTool({ function: 'listAttachments' }),

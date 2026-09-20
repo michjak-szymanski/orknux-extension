@@ -181,11 +181,75 @@ test('the slack plugin declares what the server would accept', async () => {
     ],
   );
   for (const declared of inspected.tools) {
+    /*
+     * Every one is its function, with a single deliberate exception: the
+     * agents' uploadBinary is a tool of its own so that it can have no base64
+     * argument at all. A model has a key every time — everything that makes
+     * bytes answers one — and an argument it should never fill is an argument
+     * that should not be in front of it. A workflow node has no session and so
+     * never had a key, which is why the function this does not proxy keeps
+     * taking bytes.
+     */
+    if (declared.name === 'uploadBinary') {
+      assert.equal(declared.proxyOf, null, 'the agents\' uploadBinary is its own tool');
+      assert.deepEqual(
+        declared.params.map((param) => param.name),
+        ['channel', 'filename', 'contentKey', 'comment', 'threadTs'],
+      );
+      continue;
+    }
     assert.equal(declared.proxyOf, declared.name);
     const fronted = inspected.functions.find((one) => one.name === declared.proxyOf);
     assert.deepEqual(declared.params, fronted.params);
     assert.equal(declared.returnType, fronted.returnType);
     assert.equal(declared.description, fronted.description);
+  }
+
+  /* And the function it does not proxy still takes bytes, for the caller that has them. */
+  const bytes = inspected.functions.find((one) => one.name === 'uploadBinary');
+  assert.ok(
+    bytes.params.some((param) => param.name === 'base64'),
+    'the workflow surface keeps its base64',
+  );
+});
+
+test('the agents uploadBinary takes a key and has nowhere to put bytes', async () => {
+  const url = new URL(`../../plugins/slack/slack.js`, import.meta.url);
+  const { default: Slack } = await import(url.href);
+  const made = new Slack();
+  const tool = made.tools().find((one) => one.name === 'uploadBinary' && one.run !== undefined);
+
+  /* Nothing named, nothing to upload — and the sentence says what to do instead. */
+  assert.throws(
+    () => tool.run('C1', 'report.pdf', '', 'here', ''),
+    /takes a contentKey, not bytes/,
+  );
+
+  /* A key naming nothing is a session that has moved on, not a missing argument. */
+  assert.throws(
+    () => tool.run('C1', 'report.pdf', 'pdf.nothing', 'here', ''),
+    /nothing is kept under pdf.nothing/,
+  );
+
+  /*
+   * And with something kept under it, the key resolves and the upload is
+   * attempted — reaching the token check, which is as far as anything gets
+   * without a Slack to talk to.
+   */
+  const held = new Map([['pdf.abc', 'UE5H']]);
+  const store = globalThis.orknux.session.store;
+  globalThis.orknux.session.store = {
+    put: () => ({ ok: true }),
+    get: (key) => (held.has(key) ? held.get(key) : null),
+  };
+  try {
+    assert.throws(
+      () => tool.run('C1', 'report.pdf', 'pdf.abc', 'here', ''),
+      /botToken parameter is not set/,
+      'the key resolved and the upload was attempted',
+    );
+  } finally {
+    globalThis.orknux.session.store = store;
   }
 });
 
