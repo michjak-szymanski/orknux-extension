@@ -253,6 +253,33 @@ test('the agents uploadBinary takes a key and has nowhere to put bytes', async (
   }
 });
 
+test('readAttachment answers a key beside what it read', async () => {
+  const inspected = await inspect(shipped('slack'));
+  const shape = inspected.objects.find((one) => one.name === 'AttachmentContent');
+
+  /*
+   * Both halves of the answer can be handed straight on - text to `upload` as
+   * its contentKey, bytes to `uploadBinary` as the only thing that one takes -
+   * so reading a PDF out of one thread and putting it in another channel costs
+   * nobody a retyped kilobyte.
+   */
+  assert.deepEqual(
+    shape.properties.map((property) => property.name),
+    ['name', 'mimetype', 'size', 'content', 'base64', 'key'],
+  );
+
+  /*
+   * How the two branches fill it is not reachable from here: every path past
+   * the token check needs `this.settings`, and the contract's own fallback
+   * freezes those empty and non-configurable on purpose. What a test can hold
+   * is the shape above and the refusal below - the rest is the sandbox's.
+   */
+  const url = new URL(`../../plugins/slack/slack.js`, import.meta.url);
+  const { default: Slack } = await import(url.href);
+  const read = new Slack().functions().find((one) => one.name === 'readAttachment').run;
+  assert.throws(() => read('F1'), /botToken parameter is not set/);
+});
+
 test('the teams plugin declares what the server would accept', async () => {
   const inspected = await inspect(shipped('teams'));
 

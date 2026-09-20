@@ -151,6 +151,49 @@ function slackApi(settings, method, args) {
 }
 
 /**
+ * A short name for something read out of Slack, derived from the thing itself.
+ *
+ * Content rather than a counter or a clock: reading the same attachment twice
+ * lands on the same key and simply overwrites itself, and nothing here has to
+ * ask what time it is or keep a number between calls.
+ *
+ * FNV-1a because it is four lines and this is a name, not a checksum.
+ */
+function keyFor(text) {
+  let hash = 0x811c9dc5;
+  for (let at = 0; at < text.length; at += 1) {
+    hash ^= text.charCodeAt(at);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `slack.${hash.toString(36)}`;
+}
+
+/**
+ * What one attachment answers, with what it read kept under a key.
+ *
+ * Both halves of the answer are here because both can be handed straight on:
+ * text to `upload` as its contentKey, bytes to `uploadBinary` as the only
+ * thing that one takes. Reading a PDF out of a thread and putting it in
+ * another channel should not mean either of us typing it out.
+ */
+function attachmentRead(described, mimetype, size, content, base64) {
+  const held = typeof content === 'string' ? content : base64;
+  const key = keyFor(held);
+  const kept = orknux.session.store.put(key, held);
+
+  return {
+    name: at(described, 'name'),
+    mimetype: mimetype,
+    size: size,
+    content: content,
+    base64: base64,
+    // Empty outside a session, which is exactly when the content above is the
+    // only copy there is.
+    key: kept.error === undefined ? key : '',
+  };
+}
+
+/**
  * A filename for a fetched url: its last path segment where that reads as a
  * name, else `file` with the extension its content type implies — because a
  * mermaid.ink url's last segment is the whole encoded diagram, not a name.
@@ -649,6 +692,15 @@ export default class Slack extends OrknuxPlugin {
             name: 'base64',
             kind: 'string',
             description: 'The bytes, where it is binary. Null for a text file. Exactly one of these two is set.',
+          },
+          {
+            name: 'key',
+            kind: 'string',
+            description:
+              'Where what was read is kept for the rest of this session. Hand it straight on - ' +
+              'to uploadBinary as contentKey for a file, to upload as contentKey for text - ' +
+              'rather than copying the content out. Empty where there was no session to keep it ' +
+              'in.',
           },
         ],
       }),
@@ -1316,7 +1368,10 @@ adding a message to anybody's unread count.`,
           'Reads one attachment by the file id listAttachments answers. A text file - a CSV, a log, ' +
           'JSON, source - comes back as content; a binary one - a PDF, an image - as base64 bytes, up ' +
           'to 5 MB. Answers the file\'s name, mimetype, size, and exactly one of content or base64, ' +
-          'the other null. Needs the botToken parameter, with files:read.',
+          'the other null - and a short key what was read is kept under for this session. Hand ' +
+          'that key straight on rather than copying the content out: uploadBinary takes it as ' +
+          'contentKey, which is the only thing it takes, and upload takes it the same way for ' +
+          'text. Needs the botToken parameter, with files:read.',
         params: [{ name: 'file', type: 'string' }],
         returnType: 'AttachmentContent',
         run: (file) => {
@@ -1345,13 +1400,7 @@ adding a message to anybody's unread count.`,
             if (got.status >= 400) {
               throw new Error(`Slack answered ${got.status} for the file's content`);
             }
-            return {
-              name: at(described, 'name'),
-              mimetype: mimetype,
-              size: at(described, 'size'),
-              content: got.body,
-              base64: null,
-            };
+            return attachmentRead(described, mimetype, at(described, 'size'), got.body, null);
           }
 
           const got = orknux.http.download(source, bearing);
@@ -1361,13 +1410,7 @@ adding a message to anybody's unread count.`,
           if (got.status >= 400) {
             throw new Error(`Slack answered ${got.status} for the file's content`);
           }
-          return {
-            name: at(described, 'name'),
-            mimetype: mimetype,
-            size: got.size,
-            content: null,
-            base64: got.base64,
-          };
+          return attachmentRead(described, mimetype, got.size, null, got.base64);
         },
       }),
     ];
