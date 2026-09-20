@@ -994,8 +994,15 @@ you asked for" has sent that sentence twice, to somebody who needed it once.
 Narrating what you just did is how it happens, and it happens almost every
 time.
 
-Say it once, in the call. Afterwards add only what the call did not already
-say - and often there is nothing, which is the correct amount.
+Say it once, in the call. Then your answer is for whatever the call did not
+already say - what to look at, what you could not do, what you would do next.
+
+**And where there is none of that, answer with nothing at all.** An empty
+answer is not a gap; the run sends no second message for it, which is precisely
+what you want once the comment has said the thing. "I have already posted the
+image, so I have nothing further to add" is not saying nothing - it is saying
+nothing at length, and it costs the reader a message to learn that you were
+done.
 
 ## Before you post at all
 
@@ -1089,7 +1096,7 @@ adding a message to anybody's unread count.`,
           'character wrong and the whole call is rejected before anything runs, so the argument ' +
           'that invited that is gone. Also pass a filename whose extension says what the bytes ' +
           'are (report.pdf, chart.png), the channel id, what the sharing message should say, and ' +
-          'This call posts a message - the comment is its text. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Describing what you just sent is therefore sending it twice. Put what you want said in the comment, and afterwards add only what the comment did not already say - often that is nothing. ' +
+          'This call posts a message - the comment is its text. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Caption the file in the comment. Then, if you have something a reader actually wants - what to look at, what you could not do, what you would do next - your answer is where it goes. If you do not, ANSWER WITH NOTHING AT ALL - an empty answer sends no second message at all, which is exactly what you want once the comment has said it. What is never right is a sentence whose whole content is that you have nothing to add: that is not saying nothing, it is saying nothing at length. ' +
           'a threadTs - or an empty channel to only upload, whose permalink then goes in a later ' +
           'post\'s attachments. Text is not bytes: an SVG, a CSV, JSON, markdown or any source ' +
           'you could read goes to upload instead, as it stands. Answers the file\'s id and ' +
@@ -1276,7 +1283,7 @@ adding a message to anybody's unread count.`,
           'url. The maps upload first and need the botToken parameter; permalinks need nothing. ' +
           'Pass an empty array for ' +
           'none. Pass the connection the event came in on, or an empty string to use the configured ' +
-          'one. An empty string is always safe: a connection named by an older event may since have been deleted. This call posts a message - text is its words. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Say it once, here. Answers the channel and the new message\'s ts.',
+          'one. An empty string is always safe: a connection named by an older event may since have been deleted. This call posts a message - text is its words. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Say it once, here. If nothing is left to add afterwards, ANSWER WITH NOTHING AT ALL - an empty answer sends no second message, where a sentence saying you have nothing to add sends one. Answers the channel and the new message\'s ts.',
         params: [
           { name: 'connection', type: 'string' },
           { name: 'channel', type: 'string' },
@@ -1408,7 +1415,7 @@ adding a message to anybody's unread count.`,
           'the message, upload a PNG with uploadFromUrl instead. Pass the channel id (not a #name), a ' +
           'filename whose extension says what the content is (report.csv, diagram.mmd), the content ' +
           'itself, what the sharing message should say, and a threadTs to share inside a thread - ' +
-          'This call posts a message - the comment is its text. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Describing what you just sent is therefore sending it twice. Put what you want said in the comment, and afterwards add only what the comment did not already say - often that is nothing. ' +
+          'This call posts a message - the comment is its text. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Caption the file in the comment. Then, if you have something a reader actually wants - what to look at, what you could not do, what you would do next - your answer is where it goes. If you do not, ANSWER WITH NOTHING AT ALL - an empty answer sends no second message at all, which is exactly what you want once the comment has said it. What is never right is a sentence whose whole content is that you have nothing to add: that is not saying nothing, it is saying nothing at length. ' +
           'empty for the channel itself. Pass an empty channel to only upload: the answered permalink ' +
           'then goes in a later post\'s attachments. Text only - a PDF or an image cannot travel this ' +
           'way; give remoteFile its url instead. Where a tool answered a key for what it made, ' +
@@ -1466,7 +1473,7 @@ adding a message to anybody's unread count.`,
           'kilobytes of base64 does not survive being written into a tool call - it arrives with a ' +
           'character wrong and the whole call is rejected as malformed - so copying the bytes out ' +
           'of one answer and into the next argument is the one thing that reliably fails. Only ' +
-          'This call posts a message - the comment is its text. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Describing what you just sent is therefore sending it twice. Put what you want said in the comment, and afterwards add only what the comment did not already say - often that is nothing. ' +
+          'This call posts a message - the comment is its text. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Caption the file in the comment. Then, if you have something a reader actually wants - what to look at, what you could not do, what you would do next - your answer is where it goes. If you do not, ANSWER WITH NOTHING AT ALL - an empty answer sends no second message at all, which is exactly what you want once the comment has said it. What is never right is a sentence whose whole content is that you have nothing to add: that is not saying nothing, it is saying nothing at length. ' +
           'Only ' +
           'pass base64 directly when the bytes came from somewhere that answered no key. Either ' +
           'way you must pass a filename whose extension says what the bytes are (report.pdf, ' +
@@ -1515,7 +1522,7 @@ adding a message to anybody's unread count.`,
           'bigger file wants remoteFile, which points without copying. Pass the channel id, the url, ' +
           'a filename - or empty to name it from the url and its content type - what the sharing ' +
           'message should say, and a threadTs - or an empty channel to only upload. ' +
-          'This call posts a message - the comment is its text. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Describing what you just sent is therefore sending it twice. Put what you want said in the comment, and afterwards add only what the comment did not already say - often that is nothing. ' +
+          'This call posts a message - the comment is its text. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Caption the file in the comment. Then, if you have something a reader actually wants - what to look at, what you could not do, what you would do next - your answer is where it goes. If you do not, ANSWER WITH NOTHING AT ALL - an empty answer sends no second message at all, which is exactly what you want once the comment has said it. What is never right is a sentence whose whole content is that you have nothing to add: that is not saying nothing, it is saying nothing at length. ' +
           'Answers the ' +
           'file\'s id and permalink. Needs the botToken parameter.',
         params: [
@@ -1535,7 +1542,7 @@ adding a message to anybody's unread count.`,
         description:
           'Attaches a file that already lives at a url - a PDF, a rendered diagram image, anything ' +
           'binary - to Slack as a remote file, and shares it to a channel. ' +
-          'This call posts a message - the title and comment are its text. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Describing what you just sent is therefore sending it twice. Put what you want said in the comment, and afterwards add only what the comment did not already say - often that is nothing. ' +
+          'This call posts a message - the title and comment are its text. Your own answer is posted to the same conversation as well, by the run rather than by you, so whatever you say after this call arrives as a SECOND message. Caption the file in the comment. Then, if you have something a reader actually wants - what to look at, what you could not do, what you would do next - your answer is where it goes. If you do not, ANSWER WITH NOTHING AT ALL - an empty answer sends no second message at all, which is exactly what you want once the comment has said it. What is never right is a sentence whose whole content is that you have nothing to add: that is not saying nothing, it is saying nothing at length. ' +
           'Slack keeps a pointer and ' +
           'shows a preview card; the bytes stay where they are, so the url must be reachable by ' +
           'whoever clicks. Pass the file\'s url, a title people will see, the channel id to share ' +
