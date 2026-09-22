@@ -208,6 +208,45 @@ function avatarAt(settings, path) {
   return origin === null ? null : origin + (path.startsWith('/') ? path : `/${path}`);
 }
 
+/**
+ * One person as the declared `User` shape — see objects().
+ *
+ * Both calls that answer a person go through here, so a user found by name and
+ * a user opened by id are the same shape with the same fields filled in. The
+ * avatar's bytes are not among them: only `openUser` fetches those, and only
+ * when asked, so they are empty here rather than absent.
+ */
+function personOf(settings, found) {
+  const id = at(found, 'accountId') ?? at(found, 'userKey');
+  const username = at(found, 'username');
+  const base = at(at(found, '_links'), 'base') ?? root(settings);
+  return {
+    id: id,
+    username: username,
+    /* Cloud answers a public name where a display name is withheld. */
+    name: at(found, 'displayName') ?? at(found, 'publicName'),
+    email: at(found, 'email'),
+    type: at(found, 'type') ?? at(found, 'accountType'),
+    external: at(found, 'isExternalCollaborator') === true,
+    avatarUrl: avatarAt(settings, at(at(found, 'profilePicture'), 'path')),
+    avatar: null,
+    avatarType: null,
+    avatarKey: '',
+    /*
+     * The two deployments keep a profile in different places, and neither
+     * answers the link in the user itself.
+     */
+    url:
+      isCloud(settings)
+        ? id === null
+          ? null
+          : `${base}/people/${encodeURIComponent(id)}`
+        : typeof username === 'string'
+          ? `${base}/display/~${encodeURIComponent(username)}`
+          : null,
+  };
+}
+
 /** A short name for bytes read out of Confluence, derived from the thing itself. */
 function keyFor(text) {
   let hash = 0x811c9dc5;
@@ -351,9 +390,10 @@ Resolve the one that matters rather than all of them. A page mentioning eight
 people costs eight calls if you ask for eight, and the question was almost
 always about the owner.
 
-**A display name will not work.** Confluence looks a person up by key, not by
-label, so there is no way to ask for "Jo Smith" here - take the id off the
-page, or search.
+**A display name will not work here.** Confluence looks a person up by key,
+not by label. \`confluence_findUsers\` is the call that takes a name - give it
+"Jo Smith" or just "jo", and it answers people with the ids everything else
+takes.
 
 ## The body is XHTML, not markdown
 
@@ -398,6 +438,15 @@ the same way as a subject nobody has written about.`,
         properties: [
           { name: 'total', kind: 'number', description: 'How many the whole search holds, not how many came back.' },
           { name: 'matches', kind: 'array', of: 'Match', description: 'Capped by limit.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Users',
+        description: 'What a search for people came to.',
+        properties: [
+          { name: 'total', kind: 'number', description: 'How many the whole search holds, not how many came back.' },
+          { name: 'users', kind: 'array', of: 'User', description: 'Capped by limit.' },
         ],
       }),
 
@@ -494,6 +543,7 @@ the same way as a subject nobody has written about.`,
       new OrknuxFunctionTool({ function: 'search' }),
       new OrknuxFunctionTool({ function: 'openPage' }),
       new OrknuxFunctionTool({ function: 'openUser' }),
+      new OrknuxFunctionTool({ function: 'findUsers' }),
     ];
   }
 
@@ -592,7 +642,7 @@ the same way as a subject nobody has written about.`,
           'profile url, or a mention copied straight out of a page body, which is the usual one: ' +
           'a page carries a mention as <ri:user ri:account-id="..."/> rather than as a name, so ' +
           'openPage answers those ids in its mentions list and this turns one into a person. A ' +
-          'display name is not an identifier and will not work - search for the person instead. ' +
+          'display name is not an identifier and will not work - findUsers turns one into an id. ' +
           'withAvatar fetches their picture as base64 too, which is off by default: a name and ' +
           'an email are what this is usually for, and the avatar sits behind the same login as ' +
           'the wiki, so the url alone opens for nobody else.',
@@ -607,9 +657,8 @@ the same way as a subject nobody has written about.`,
 
           const site = root(this.settings);
           const base = at(at(found, '_links'), 'base') ?? site;
-          const avatarUrl = avatarAt(this.settings, at(at(found, 'profilePicture'), 'path'));
-          const id = at(found, 'accountId') ?? at(found, 'userKey');
-          const username = at(found, 'username');
+          const profile = personOf(this.settings, found);
+          const avatarUrl = profile.avatarUrl;
 
           /*
            * The picture itself, only when somebody asked for it.
@@ -640,30 +689,58 @@ the same way as a subject nobody has written about.`,
             }
           }
 
+          /* The same shape a search answers, with the three the fetch filled in. */
+          return { ...profile, avatar: avatar, avatarType: avatarType, avatarKey: avatarKey };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'findUsers',
+        description:
+          'Finds people by name, which is the call for turning "Jo Smith" into somebody openUser ' +
+          'can take - a display name is not an identifier anywhere else in this plugin. Matches ' +
+          'on the full name the way the people directory does, so a first name or a fragment is ' +
+          'enough. Answers how many the whole search holds and the people themselves, each with ' +
+          'the id every other call takes, their display name, whether the account is a person or ' +
+          'an app, and a link to their profile. limit caps them.',
+        params: [
+          { name: 'name', type: 'string' },
+          { name: 'limit', type: 'number', required: false, default: 10 },
+        ],
+        returnType: 'Users',
+        run: (name, limit) => {
+          const asked = typeof name === 'string' ? name.trim() : '';
+          if (asked.length === 0) {
+            throw new Error('there is no name to search for');
+          }
+          const capped = Math.min(Math.max(Math.trunc(limit), 1), 50);
+          /* A name with a quote in it is a name, not the end of the clause. */
+          const quoted = asked.replace(/(["\\])/g, '\\$1');
+
+          /*
+           * The one place the two deployments differ, and the same split the
+           * jira plugin makes for the same reason: Cloud has an endpoint for
+           * searching people, and Server answers the same question through
+           * the CQL search everything else goes through, with `type=user`
+           * saying what is being looked for.
+           */
+          const found = isCloud(this.settings)
+            ? read(
+                this.settings,
+                `/rest/api/search/user?cql=${encodeURIComponent(`user.fullname~"${quoted}"`)}&limit=${capped}`,
+              )
+            : read(
+                this.settings,
+                `/rest/api/search?cql=${encodeURIComponent(
+                  `type=user AND user.fullname~"${quoted}"`,
+                )}&limit=${capped}`,
+              );
+
+          const results = at(found, 'results') ?? [];
           return {
-            id: id,
-            username: username,
-            /* Cloud answers a public name where a display name is withheld. */
-            name: at(found, 'displayName') ?? at(found, 'publicName'),
-            email: at(found, 'email'),
-            type: at(found, 'type') ?? at(found, 'accountType'),
-            external: at(found, 'isExternalCollaborator') === true,
-            avatarUrl: avatarUrl,
-            avatar: avatar,
-            avatarType: avatarType,
-            avatarKey: avatarKey,
-            /*
-             * The two deployments keep a profile in different places, and
-             * neither answers the link in the user itself.
-             */
-            url:
-              isCloud(this.settings)
-                ? id === null
-                  ? null
-                  : `${base}/people/${encodeURIComponent(id)}`
-                : typeof username === 'string'
-                  ? `${base}/display/~${encodeURIComponent(username)}`
-                  : null,
+            total: at(found, 'totalSize') ?? results.length,
+            /* A search result wraps the person; an endpoint that answers one bare still works. */
+            users: results.map((one) => personOf(this.settings, at(one, 'user') ?? one)),
           };
         },
       }),

@@ -14,6 +14,7 @@ makes the calls; the plugin never holds the token.
 |---|---|
 | `search(query, limit = 20)` | `total` and `matches` — `id`, `type`, `title`, `space`, an `excerpt` around the match, `updated` and `url` each. `openPage` takes either the id or the url. |
 | `openPage(page)` | One page whole: `id`, `title`, `space`, `version`, `updated`, `by` — who last changed it — `url`, and the `body`. |
+| `findUsers(name, limit)` | People by name — `Jo Smith`, or just `jo`. The one call that takes a label, and it answers the ids every other call needs. |
 | `openUser(person, withAvatar)` | Who an id belongs to: display name, email where Atlassian will say, whether it is a person or an app, and a profile link. Takes a mention copied straight out of a page. `withAvatar` fetches the picture itself as base64. |
 
 Both are fronted to agents, which is most of the point: a model that can look
@@ -99,9 +100,23 @@ in `/wiki` and the avatar path *begins* with `/wiki`, so joining them the
 obvious way asks for `/wiki/wiki/aa-avatar/…` and 404s. This builds it from
 the scheme and host instead, which is right on both deployments.
 
-**A display name is not an identifier.** There is no `openUser("Jo Smith")`:
-Confluence looks a person up by key, not by label. Search for the person, or
-take the id off the page.
+**A display name is not an identifier**, so there is no `openUser("Jo Smith")`
+— Confluence looks a person up by key, not by label. `findUsers` is the call
+that takes a name, and it answers people carrying the ids everything else
+needs:
+
+```
+findUsers('Jo Smith')   →  { total: 2, users: [ { id, name, url, … }, … ] }
+```
+
+It matches on the full name the way the people directory does, so a fragment
+is enough. This is the one place the two deployments genuinely differ, the
+same way the jira plugin's search does: Cloud has `/rest/api/search/user`,
+and Server asks the CQL search everything else goes through with `type=user`.
+Which one runs is decided off `email`, like everything else here.
+
+The people it answers are the same `User` shape `openUser` gives, with the
+avatar bytes empty — a search fetches no pictures.
 
 Resolve the one you need rather than all of them — a page mentioning eight
 people is eight requests if you ask for eight, and usually only the owner

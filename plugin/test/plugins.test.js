@@ -773,11 +773,11 @@ test('the confluence plugin declares what the server would accept', async () => 
   assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
-    ['search', 'openPage', 'openUser'],
+    ['search', 'openPage', 'openUser', 'findUsers'],
   );
   assert.deepEqual(
     inspected.tools.map((declared) => declared.name),
-    ['search', 'openPage', 'openUser'],
+    ['search', 'openPage', 'openUser', 'findUsers'],
   );
 });
 
@@ -949,6 +949,76 @@ test('confluence turns the ids a page mentions into people, on either deployment
   /* And nothing is fetched unless it was asked for. */
   assert.equal(person.avatar, null);
   assert.equal(person.avatarKey, '');
+
+  /*
+   * Searching by name, which is the one question an id cannot answer - and
+   * the one place these two deployments part. Cloud has an endpoint for
+   * finding people; Server asks the CQL search everything else goes through,
+   * with `type=user` saying what it is looking for. Watched on the way out
+   * rather than assumed, the way the jira plugin's own split is.
+   */
+  const searches = [];
+  const searching = globalThis.orknux.http.get;
+  let onServer;
+  let byName;
+  try {
+    globalThis.orknux.http.get = (where) => {
+      searches.push(where);
+      return {
+        status: 200,
+        headers: {},
+        body: '{}',
+        json: {
+          totalSize: 2,
+          results: [
+            {
+              user: {
+                type: 'known',
+                accountId: '5b10ac8d82e05b22cc7d4ef5',
+                displayName: 'Jo Smith',
+                profilePicture: { path: '/wiki/aa-avatar/5b10ac8d82e05b22cc7d4ef5' },
+              },
+            },
+            { user: { type: 'known', accountId: '712020:aaa', publicName: 'Jo Other' } },
+          ],
+        },
+      };
+    };
+    byName = configured(cloud)('findUsers').run('Jo Smith', 10);
+    onServer = configured(server)('findUsers').run('jo', 10);
+  } finally {
+    globalThis.orknux.http.get = searching;
+  }
+
+  /* Cloud: the endpoint made for it, with the name quoted into the clause. */
+  assert.equal(
+    searches[0],
+    'https://acme.atlassian.net/wiki/rest/api/search/user?cql=user.fullname~%22Jo%20Smith%22&limit=10',
+  );
+  /* Server: the same question through the search everything else uses. */
+  assert.equal(
+    searches[1],
+    'https://wiki.acme.com/rest/api/search?cql=type%3Duser%20AND%20user.fullname~%22jo%22&limit=10',
+  );
+
+  /*
+   * The same `User` shape openUser answers, so a person found by name is a
+   * person, not a second thing shaped nearly like one - and the avatar fields
+   * are empty rather than absent, because a search fetches no pictures.
+   */
+  assert.equal(byName.total, 2);
+  assert.deepEqual(
+    byName.users.map((one) => one.name),
+    ['Jo Smith', 'Jo Other'],
+  );
+  assert.equal(byName.users[0].id, '5b10ac8d82e05b22cc7d4ef5');
+  assert.equal(byName.users[0].url, 'https://acme.atlassian.net/wiki/people/5b10ac8d82e05b22cc7d4ef5');
+  assert.equal(byName.users[0].avatarUrl, 'https://acme.atlassian.net/wiki/aa-avatar/5b10ac8d82e05b22cc7d4ef5');
+  assert.equal(byName.users[0].avatar, null);
+  assert.equal(byName.users[0].avatarKey, '');
+  assert.equal(onServer.users.length, 2);
+
+  assert.throws(() => configured(cloud)('findUsers').run('  ', 10), /no name to search for/);
 
   /* The other spellings of the same question, resolved before any request. */
   assert.throws(() => configured({})('openUser').run('   '), /nobody to look up/);
