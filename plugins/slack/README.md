@@ -11,14 +11,14 @@ the **server** to talk to Slack, under a capability somebody accepted and
 through a connection the workspace pointed it at. The four file functions are
 the exception, and say so below.
 
-## Fourteen functions, thirteen of them tools
+## Fifteen functions, fourteen of them tools
 
 Everything except `isFirstReply` is fronted to agents as a tool. That one is a
 workflow's gate, written to be a condition — a model reading a thread has
 better ways to ask.
 
-Twelve of those thirteen are the function itself, under a name an agent can
-call. The thirteenth, `uploadBinary`, is a tool of its own with a different
+Thirteen of those fourteen are the function itself, under a name an agent can
+call. The fourteenth, `uploadBinary`, is a tool of its own with a different
 signature — see *Two surfaces* below for why.
 
 Every function in the first two groups takes `connection` first: pass the
@@ -33,6 +33,7 @@ configured `slack` parameter. The section after the tables says why.
 | `readMessage(connection, link)` | The one message a permalink points at: `channel`, `ts`, `user`, `text`, `threadTs`. For when a message quotes another by link. |
 | `whoIs(connection, userId)` | Who an id belongs to: `id`, `name`, `realName`, `displayName`, `bot`. Takes the id bare or as the whole `<@U…>` notation a message carries it in. |
 | `search(connection, query, limit)` | `matches` — `channel`, `channelName`, `ts`, `user`, `text`, `permalink` each — and `total`, how many the whole search holds. Slack's search syntax works: `in:#channel`, `from:@name`, `"an exact phrase"`. |
+| `findRecent(query, channel, days, limit)` | `matches` in the same shape, newest first, by **reading recent history with the bot token** and filtering it — for a workspace with no user token to search with. Plus how much was read and whether the window was whole. Takes no `connection`: it runs on `botToken`. |
 | `isFirstReply(connection, channel, threadTs, ts)` | `true` only if this message is the first reply in its thread. **Not a tool** — a workflow condition. |
 
 ### Writing
@@ -227,7 +228,8 @@ credential.
 | `remoteFile` | `remote_files:write`, `remote_files:share` |
 | `listAttachments` | `files:read`, plus the conversation's history scope |
 | `readAttachment` | `files:read` |
-| `search` via `userToken` | `search:read`, on a user token |
+| `search` via `userToken` | `search:read` — or the granular `search:read.public`, `.private`, `.im`, `.mpim` — on a user token |
+| `findRecent` | `channels:history`, `channels:read` on the bot token — plus `groups:*` for private ones |
 
 ## Two caveats worth knowing before you debug them
 
@@ -235,6 +237,47 @@ credential.
 with `not_allowed_token_type`, which comes back as the error — so a search runs
 on either the `userToken` parameter or the connection's **User Token** field,
 and on nothing else.
+
+**`findRecent` is the answer where there is no user token to have.** Slack
+exposes no message search to a bot token at any plan — `search.messages`,
+`search.files` and `search.all` are all user-token-only, and
+`admin.conversations.search` searches channels rather than what was said in
+them. So `findRecent` does the other thing: it reads recent history with the
+**bot** token and filters it.
+
+That trades away a great deal and buys the boundary people usually want.
+Gone: relevance ranking, the archive behind the window, and any channel the
+bot was never invited to. Gained: the reach is *membership*, not scope — a bot
+in nothing private can read nothing private, whatever anybody grants it, and
+you widen it by inviting the bot rather than by editing a token.
+
+| | |
+|---|---|
+| scopes | `channels:history` and `channels:read`; add `groups:*` only if private channels should be readable |
+| cost | one request per channel, plus one `users.conversations` and one `auth.test` — inside a single call, which is why it reads fifteen channels at most |
+| window | `days`, a week by default, one page of 200 messages per channel |
+| matching | every word somewhere in the message, any order, any case — **not** Slack search syntax, so `in:#channel` belongs in the `channel` argument |
+
+`complete` says whether the window was read whole. False means a channel had
+more behind its page, or more than fifteen channels were asked for — narrow
+the days or name a channel, and do not read a `false` as "that is everything".
+
+**`search:read` is the scope that works, and the narrow ones are not a
+substitute.** Slack publishes granular search scopes — `search:read.public`,
+`.private`, `.im`, `.mpim` — and a token carrying only `search:read.public` is
+refused by `search.messages` even when freshly minted. The endpoint searches
+every source the identity can see and has no parameter to say otherwise, so it
+asks for the whole grant rather than the part a query happens to touch. A
+refusal now carries Slack's own `needed` and `provided` beside it, which is the
+pair that says which scope is short.
+
+**So the lever is whose token it is, not which scope it carries.** A user token
+searches exactly what that person can see — `search:read` on somebody who is in
+forty private channels searches all forty. The way to keep a search out of
+private conversations is therefore a Slack account that is not in any: make one
+for the purpose, add it to the public channels it should read, authorise with
+it, and put its token in `userToken`. That parameter exists for this — the
+searching identity does not have to be whoever the connection belongs to.
 
 **A condition that cannot be decided must not quietly decide.** `isFirstReply`
 throws when the thread cannot be read rather than answering `false`: "we could

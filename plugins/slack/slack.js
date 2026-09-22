@@ -484,6 +484,21 @@ function attaching(settings, attachments) {
  * callers cannot tell which path ran.
  */
 function searchAs(token, query, limit) {
+  /*
+   * The mistake the other way round, which `tokenOf` has warned about for a
+   * while and this had no answer for. A bot token here fails at Slack with a
+   * bare `not_allowed_token_type`, which says nothing about which of two
+   * parameters is wrong - and the two tokens differ by four characters at the
+   * front, so getting them the wrong way round is a typo rather than a
+   * misunderstanding.
+   */
+  if (typeof token === 'string' && token.startsWith('xoxb-')) {
+    orknux.log.warn(
+      'userToken holds a bot token (xoxb-), and Slack answers search for a user token only. ' +
+        'The bot token belongs in botToken; search needs an xoxp- from somebody who can see ' +
+        'what is being searched for.',
+    );
+  }
   const answered = orknux.http.request({
     url: 'https://slack.com/api/search.messages',
     method: 'POST',
@@ -499,7 +514,28 @@ function searchAs(token, query, limit) {
   }
   if (at(answered.json, 'ok') !== true) {
     const said = at(answered.json, 'error');
-    return { error: typeof said === 'string' ? said : `status ${answered.status}` };
+    const code = typeof said === 'string' ? said : `status ${answered.status}`;
+    /*
+     * The two fields that answer "which scope", thrown away until somebody
+     * spent an afternoon on it. Slack says `missing_scope` and then says
+     * exactly what was needed and what the token actually carries - and the
+     * usual cause is a token minted before the scope was added to the app,
+     * because a scope lives in the token rather than in the configuration.
+     *
+     * `search:read.public` is worth knowing about here: Slack's granular
+     * search scopes are per source, so a token carrying only that one
+     * searches public channels and matches nothing in a private one.
+     */
+    const needed = at(answered.json, 'needed');
+    const provided = at(answered.json, 'provided');
+    return {
+      error:
+        typeof needed === 'string'
+          ? `${code}: Slack wants ${needed}` +
+            `${typeof provided === 'string' ? `, and this token carries ${provided}` : ''}` +
+            ' - a scope is minted into a token, so adding one to the app means re-authorising to get a new one'
+          : code,
+    };
   }
 
   const messages = at(answered.json, 'messages');
@@ -513,6 +549,61 @@ function searchAs(token, query, limit) {
     permalink: at(one, 'permalink'),
   }));
   return { matches: matches, total: at(messages, 'total') ?? matches.length };
+}
+
+/**
+ * How many channels one scan will read, and how far back it reads.
+ *
+ * `findRecent` costs one request per channel, inside a single sandbox call, so
+ * the cap is what keeps a workspace of four hundred channels from being a
+ * timeout. Fifteen is about what fits comfortably; past that, name the channel.
+ */
+const SCANNED = 15;
+
+/** One page of history per channel, which is Slack's own maximum for the call. */
+const PAGE = 200;
+
+/** The noise a channel keeps that nobody is searching for. */
+const NOISE = ['channel_join', 'channel_leave', 'group_join', 'group_leave'];
+
+/**
+ * Every channel the bot has been invited to.
+ *
+ * `users.conversations` answers the token's own memberships, which for a bot
+ * token is exactly what it can read — so this is both the list to scan and the
+ * boundary the scan cannot cross. A bot in no private channel cannot be asked
+ * to read one, and no scope changes that.
+ */
+function joined(settings) {
+  const found = slackApi(settings, 'users.conversations', {
+    types: 'public_channel,private_channel',
+    exclude_archived: 'true',
+    limit: '1000',
+  });
+  return (at(found, 'channels') ?? []).map((one) => ({
+    id: at(one, 'id'),
+    name: at(one, 'name'),
+  }));
+}
+
+/**
+ * The workspace's own address, so a permalink is built rather than fetched.
+ *
+ * `chat.getPermalink` answers one link per call, which would be a request per
+ * match. `auth.test` needs no scope at all and answers the workspace url once,
+ * and a permalink is that url, the channel and the timestamp with its dot
+ * taken out — which is a string, not a round trip.
+ */
+function workspaceUrl(settings) {
+  const who = slackApi(settings, 'auth.test', {});
+  const url = at(who, 'url');
+  return typeof url === 'string' ? url.replace(/\/+$/, '') : null;
+}
+
+/** Whether every word is somewhere in the text, in any order and whatever the capitals. */
+function carries(text, terms) {
+  const haystack = String(text ?? '').toLowerCase();
+  return terms.every((term) => haystack.includes(term));
 }
 
 /**
@@ -729,6 +820,25 @@ export default class Slack extends OrknuxPlugin {
         properties: [
           { name: 'matches', kind: 'array', of: 'SearchMatch', description: 'Capped by limit.' },
           { name: 'total', kind: 'number', description: 'How many the whole search holds, not how many came back.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'RecentResult',
+        description: 'What reading recent history came to — a scan, and honest about being one.',
+        properties: [
+          { name: 'matches', kind: 'array', of: 'SearchMatch', description: 'Newest first, capped by limit.' },
+          { name: 'total', kind: 'number', description: 'How many matched in what was read, before limit.' },
+          { name: 'channels', kind: 'number', description: 'How many channels were read.' },
+          { name: 'messages', kind: 'number', description: 'How many messages were looked at to find them.' },
+          { name: 'since', kind: 'string', description: 'The oldest moment read, as ISO 8601.' },
+          {
+            name: 'complete',
+            kind: 'boolean',
+            description:
+              'Every channel asked for was read to the end of the window. False means there is ' +
+              'more inside it — narrow the days, or name one channel.',
+          },
         ],
       }),
 
@@ -1083,6 +1193,7 @@ adding a message to anybody's unread count.`,
       }),
       new OrknuxFunctionTool({ function: 'react' }),
       new OrknuxFunctionTool({ function: 'search' }),
+      new OrknuxFunctionTool({ function: 'findRecent' }),
       new OrknuxFunctionTool({ function: 'upload' }),
       /*
        * The one tool here that is not its function.
@@ -1395,6 +1506,136 @@ adding a message to anybody's unread count.`,
             throw new Error(`could not search Slack: ${found.error}`);
           }
           return found;
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'findRecent',
+        description:
+          'Finds messages by reading recent history and filtering it, which is what a bot can do ' +
+          'where search cannot: Slack answers search.messages for a user token only, so this runs ' +
+          'on the bot token instead and reads the channels the bot has been invited to. Every word ' +
+          'of the query has to appear somewhere in a message, in any order and whatever the ' +
+          'capitals - it is not Slack search syntax, so in:#channel and from:@name do not work; ' +
+          'pass the channel separately. channel takes a name, a #name or an id, and left empty ' +
+          'reads every channel the bot is in, up to fifteen. days is how far back to read, a week ' +
+          'if not given. Answers the matches newest first with a permalink each, how much was read ' +
+          'to find them, and whether the window was read whole. This is a scan and not an index: ' +
+          'it sees recent history rather than the archive, and nothing in a channel the bot was ' +
+          'never invited to.',
+        params: [
+          { name: 'query', type: 'string' },
+          { name: 'channel', type: 'string', required: false, default: '' },
+          { name: 'days', type: 'number', required: false, default: 7 },
+          { name: 'limit', type: 'number', required: false, default: 20 },
+        ],
+        returnType: 'RecentResult',
+        run: (query, channel, days, limit) => {
+          const terms = (typeof query === 'string' ? query : '')
+            .trim()
+            .toLowerCase()
+            .split(/\s+/)
+            .filter((one) => one.length > 0);
+          if (terms.length === 0) {
+            throw new Error('there is nothing to look for');
+          }
+          const back = Math.min(Math.max(Math.trunc(days), 1), 90);
+          const capped = Math.min(Math.max(Math.trunc(limit), 1), 200);
+          const oldest = Math.floor(Date.now() / 1000) - back * 86400;
+
+          /*
+           * What the bot is in, which is both the list to read and the fence
+           * around it. A named channel still has to be one of these: asking
+           * Slack for a channel the bot was never invited to answers
+           * `not_in_channel`, and saying so here names the reason.
+           */
+          const memberships = joined(this.settings);
+          const asked = typeof channel === 'string' ? channel.trim().replace(/^#/, '') : '';
+          let reading = memberships;
+          if (asked.length > 0) {
+            reading = memberships.filter((one) => one.id === asked || one.name === asked);
+            if (reading.length === 0) {
+              throw new Error(
+                `the bot is not in ${channel}, so there is nothing of it to read - invite it there, ` +
+                  'or leave the channel empty to read the ones it is in',
+              );
+            }
+          }
+
+          const complete = reading.length <= SCANNED;
+          reading = reading.slice(0, SCANNED);
+
+          const base = workspaceUrl(this.settings);
+          const matches = [];
+          let read = 0;
+          let whole = complete;
+          const refusals = [];
+
+          for (const where of reading) {
+            let messages;
+            try {
+              messages = slackApi(this.settings, 'conversations.history', {
+                channel: where.id,
+                oldest: String(oldest),
+                limit: String(PAGE),
+              });
+            } catch (thrown) {
+              /*
+               * One channel refusing is not the scan failing - a private
+               * channel needs `groups:history` where a public one needs
+               * `channels:history`, and a workspace may have granted one and
+               * not the other. Every refusal is kept, and they are only
+               * thrown if nothing at all could be read.
+               */
+              refusals.push(`${where.name ?? where.id}: ${thrown.message}`);
+              whole = false;
+              continue;
+            }
+
+            const held = at(messages, 'messages') ?? [];
+            read += held.length;
+            /* More behind this page than the window asked for. */
+            if (at(messages, 'has_more') === true) {
+              whole = false;
+            }
+
+            for (const one of held) {
+              if (NOISE.includes(at(one, 'subtype'))) {
+                continue;
+              }
+              const text = at(one, 'text');
+              if (!carries(text, terms)) {
+                continue;
+              }
+              const ts = at(one, 'ts');
+              matches.push({
+                channel: where.id,
+                channelName: where.name,
+                ts: ts,
+                user: at(one, 'user') ?? at(one, 'username'),
+                text: text,
+                permalink:
+                  base === null || typeof ts !== 'string'
+                    ? null
+                    : `${base}/archives/${where.id}/p${ts.replace('.', '')}`,
+              });
+            }
+          }
+
+          if (matches.length === 0 && refusals.length === reading.length && refusals.length > 0) {
+            throw new Error(`nothing could be read: ${refusals[0]}`);
+          }
+
+          /* Newest first, which is the order a person asking about last week means. */
+          matches.sort((first, second) => Number(second.ts) - Number(first.ts));
+          return {
+            matches: matches.slice(0, capped),
+            total: matches.length,
+            channels: reading.length - refusals.length,
+            messages: read,
+            since: new Date(oldest * 1000).toISOString(),
+            complete: whole && matches.length <= capped,
+          };
         },
       }),
 
