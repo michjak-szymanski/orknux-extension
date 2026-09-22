@@ -70,7 +70,9 @@ sentence the github plugin starts.
 
 **[jenkins](plugins/jenkins/jenkins.js)** answers the question asked in the
 minute after a build goes red — the job's state, the build's result, the failing
-tests, the end of the log — and runs the job again. The log is fetched by its
+tests, the end of the log — finds the job by name wherever it lives, reads the
+test report a case at a time so "the build takes eighteen minutes" becomes "four
+tests take eleven of them", and runs the job again. The log is fetched by its
 tail rather than whole, because a console log is megabytes and a sandbox is not.
 
     https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/jenkins/jenkins.js

@@ -855,16 +855,19 @@ test('the jenkins plugin declares what the server would accept', async () => {
   assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
-    ['jobs', 'job', 'build', 'buildLog', 'testResults', 'trigger', 'queueItem'],
+    ['jobs', 'search', 'job', 'build', 'buildLog', 'testResults', 'testCases', 'trigger', 'queueItem'],
   );
   /* All of it is fronted to agents: reading a build and running one are one job. */
   assert.deepEqual(
     inspected.tools.map((declared) => declared.name),
-    ['jobs', 'job', 'build', 'buildLog', 'testResults', 'trigger', 'queueItem'],
+    ['jobs', 'search', 'job', 'build', 'buildLog', 'testResults', 'testCases', 'trigger', 'queueItem'],
   );
   assert.deepEqual(
     inspected.objects.map((declared) => declared.name),
-    ['Parameter', 'Job', 'Jobs', 'Change', 'Build', 'Log', 'Failure', 'Tests', 'Queued'],
+    [
+      'Parameter', 'Job', 'Jobs', 'Change', 'Build', 'Log', 'Failure', 'Tests',
+      'Case', 'Cases', 'Queued',
+    ],
   );
 });
 
@@ -1091,6 +1094,159 @@ test('the jenkins plugin names a job however it was spelled, and takes a log by 
 
   /* Anonymous: no authorization header at all, rather than an empty one. */
   assert.equal(asked[9].headers.authorization, undefined);
+});
+
+test('jenkins searches the job tree, and reads a test report a case at a time', async () => {
+  const url = new URL(`../../plugins/jenkins/jenkins.js`, import.meta.url);
+  const { default: Jenkins } = await import(url.href);
+
+  const plugin = Object.create(Jenkins.prototype);
+  Object.defineProperty(plugin, 'settings', {
+    value: Object.freeze({ url: 'https://ci.example.com', user: 'ada', token: 't' }),
+  });
+  const call = (name) => plugin.functions().find((one) => one.name === name);
+
+  /* A controller with folders in it, answered the way a nested tree answers. */
+  const tree = {
+    jobs: [
+      { _class: 'hudson.model.FreeStyleProject', name: 'deploy-staging', fullName: 'deploy-staging', color: 'blue' },
+      {
+        _class: 'hudson.model.FreeStyleProject',
+        name: 'nightly',
+        fullName: 'nightly',
+        color: 'red',
+        description: 'Deploys PROD overnight',
+      },
+      {
+        _class: 'com.cloudbees.hudson.plugins.folder.Folder',
+        name: 'platform',
+        fullName: 'platform',
+        jobs: [
+          {
+            _class: 'com.cloudbees.hudson.plugins.folder.Folder',
+            name: 'prod',
+            fullName: 'platform/prod',
+            jobs: [
+              {
+                _class: 'hudson.model.FreeStyleProject',
+                name: 'deploy-api',
+                fullName: 'platform/prod/deploy-api',
+                color: 'blue',
+                lastBuild: { number: 88, result: 'SUCCESS', timestamp: 1700000000000 },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  /* Seconds, as Jenkins times a case — and never mind that it times a build in milliseconds. */
+  const report = {
+    duration: 61.5,
+    suites: [
+      {
+        name: 'CartSuite',
+        cases: [
+          { className: 'com.acme.CartTest', name: 'slowCheckout', status: 'PASSED', duration: 41.25, age: 0 },
+          { className: 'com.acme.CartTest', name: 'emptyCart', status: 'FAILED', duration: 0.5, age: 1,
+            errorDetails: 'expected <0> but was <1>' },
+        ],
+      },
+      {
+        name: 'LoginSuite',
+        cases: [
+          { className: 'com.acme.LoginTest', name: 'expiredToken', status: 'REGRESSION', duration: 2, age: 11,
+            errorDetails: 'timed out' },
+          { className: 'com.acme.LoginTest', name: 'skippedOne', status: 'SKIPPED', duration: 0, age: 0, skipped: true },
+        ],
+      },
+    ],
+  };
+
+  const asked = [];
+  const door = globalThis.orknux.http.request;
+  let found;
+  let narrow;
+  let slowest;
+  let flaky;
+  let failed;
+  try {
+    globalThis.orknux.http.request = (what) => {
+      asked.push(what);
+      const sent = what.url.includes('/testReport/') ? report : tree;
+      return { status: 200, headers: {}, body: JSON.stringify(sent), json: sent };
+    };
+    found = call('search').run('deploy prod', 25, '');
+    narrow = call('search').run('deploy', 1, '');
+    slowest = call('testCases').run('platform/prod/deploy-api', 'lastBuild', 'slowest', 20);
+    flaky = call('testCases').run('platform/prod/deploy-api', 'lastBuild', 'flaky', 20);
+    failed = call('testCases').run('platform/prod/deploy-api', 'lastBuild', 'failed', 20);
+  } finally {
+    globalThis.orknux.http.request = door;
+  }
+
+  /* Three levels of folders, asked for in one request rather than walked. */
+  assert.equal(
+    (asked[0].url.match(/jobs\[/g) ?? []).length,
+    3,
+    'a search asks for three levels of folders at once, or it is walking them',
+  );
+  assert.match(asked[0].url, /^https:\/\/ci\.example\.com\/api\/json\?tree=jobs\[/);
+
+  /*
+   * Every word, anywhere: the job nested two folders down matches on its path
+   * and the top-level one matches on its description, whatever the capitals.
+   * The staging job shares a word with the query and is not a hit.
+   */
+  assert.deepEqual(
+    found.jobs.map((one) => one.name),
+    ['nightly', 'platform/prod/deploy-api'],
+  );
+  assert.equal(found.more, false);
+  assert.equal(found.jobs[1].status, 'passing');
+  assert.equal(found.jobs[1].url, 'https://ci.example.com/job/platform/job/prod/job/deploy-api/');
+
+  /* A limit says so rather than quietly being all there was. */
+  assert.equal(narrow.jobs.length, 1);
+  assert.equal(narrow.more, true);
+
+  assert.throws(() => call('search').run('   ', 25, ''), /nothing to search for/);
+  assert.throws(
+    () => call('testCases').run('deploy', 'lastBuild', 'sideways', 20),
+    /no order called sideways: it is slowest, failed, flaky, name/,
+  );
+
+  /* Slowest first, and in milliseconds — 41.25 seconds is not 41 of anything. */
+  assert.deepEqual(
+    slowest.cases.map((one) => [one.test, one.duration]),
+    [
+      ['com.acme.CartTest.slowCheckout', 41250],
+      ['com.acme.LoginTest.expiredToken', 2000],
+      ['com.acme.CartTest.emptyCart', 500],
+      ['com.acme.LoginTest.skippedOne', 0],
+    ],
+  );
+  assert.equal(slowest.total, 4);
+  assert.equal(slowest.duration, 61500);
+  assert.equal(slowest.build, null, 'a permalink names no number');
+  assert.equal(slowest.cases[0].suite, 'CartSuite');
+
+  /*
+   * Failing for more than one build — which is the broken window, not what
+   * this build did. The one that broke today has age 1 and is not in here.
+   */
+  assert.deepEqual(
+    flaky.cases.map((one) => [one.test, one.age]),
+    [['com.acme.LoginTest.expiredToken', 11]],
+  );
+
+  /* And the failures, slowest first, with what the assertion said. */
+  assert.deepEqual(
+    failed.cases.map((one) => one.test),
+    ['com.acme.LoginTest.expiredToken', 'com.acme.CartTest.emptyCart'],
+  );
+  assert.equal(failed.cases[1].message, 'expected <0> but was <1>');
 });
 
 test('the plantuml plugin declares what the server would accept', async () => {

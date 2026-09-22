@@ -7,6 +7,13 @@
  * is nearly always one of four things — the job's state, a build's result, the
  * failing tests, the last hundred lines of the log.
  *
+ * Two calls are about the questions asked before and after that one. `search`
+ * finds a job by name wherever a folder has put it, because guessing at a path
+ * and getting a 404 twice costs more than looking. `testCases` reads the test
+ * report one case at a time, ordered by what each cost — which is how "the
+ * build takes eighteen minutes" becomes "four tests take eleven of them", a
+ * thing somebody can act on, and something no amount of log says.
+ *
  * A plugin has no network, deliberately and permanently, so every call here is
  * made by the *server* on the plugin's behalf, under the NETWORK_REQUEST
  * capability a person accepted, against the Jenkins the workspace named.
@@ -54,6 +61,21 @@ const STATUS = {
   aborted: 'aborted',
   disabled: 'disabled',
 };
+
+/** What a listing reads off a job — and a search reads off every level of them. */
+const LISTED = 'name,fullName,url,color,description,lastBuild[number,result,timestamp]';
+
+/**
+ * How many levels of folders a search looks through.
+ *
+ * Jenkins nests folders without limit and answers one level at a time, so a
+ * search asks for three at once: `jobs[…,jobs[…,jobs[…]]]`. Three is where
+ * real installations stop — team, product, branch — and a fourth doubles the
+ * answer to find what nobody organises. A job deeper than this is not found
+ * rather than found slowly, which is why the tool says so and takes a folder
+ * to start from.
+ */
+const DEPTH = 3;
 
 /** The permalinks Jenkins answers in place of a build number, in its own spelling. */
 const PERMALINKS = [
@@ -337,6 +359,70 @@ function holdsJobs(entry) {
   return typeof kind === 'string' && /Folder|MultiBranch/i.test(kind);
 }
 
+/**
+ * Jenkins times a build in milliseconds and a test case in seconds, in the
+ * same API, and nothing says so. Everything this plugin answers is in
+ * milliseconds, so the two can be put beside each other without a trap in it.
+ */
+function seconds(held) {
+  return typeof held === 'number' && Number.isFinite(held) ? Math.round(held * 1000) : null;
+}
+
+/** One test case as the declared `Case` shape — see objects(). */
+function caseOf(one, suite) {
+  const held = at(one, 'className');
+  const named = at(one, 'name');
+  const status = at(one, 'status');
+  return {
+    test: typeof held === 'string' && held.length > 0 ? `${held}.${named}` : named,
+    suite: suite,
+    status: at(one, 'skipped') === true && status === null ? 'SKIPPED' : status,
+    duration: seconds(at(one, 'duration')),
+    /*
+     * How many builds it has been failing for, which Jenkins counts and
+     * nothing else here can: a test failing for eleven builds is somebody's
+     * broken window, and a test failing for one is this change.
+     */
+    age: at(one, 'age') ?? 0,
+    message: at(one, 'errorDetails'),
+  };
+}
+
+/** Which tests come back, and in what order — the closed set `testCases` takes. */
+const ORDERS = {
+  /* The question that gets asked most: what is this build spending its time on. */
+  slowest: { keep: () => true, by: (first, second) => (second.duration ?? 0) - (first.duration ?? 0) },
+  failed: {
+    keep: (one) => one.status === 'FAILED' || one.status === 'REGRESSION',
+    by: (first, second) => (second.duration ?? 0) - (first.duration ?? 0),
+  },
+  /*
+   * Failing for more than one build. Not flakiness as such — Jenkins does not
+   * measure that — but what a person means by it: the failures that were
+   * already there before today's change, and are not what broke this build.
+   */
+  flaky: { keep: (one) => (one.age ?? 0) > 1, by: (first, second) => (second.age ?? 0) - (first.age ?? 0) },
+  name: { keep: () => true, by: (first, second) => String(first.test).localeCompare(String(second.test)) },
+};
+
+/** The tree a listing asks for, nested `depth` folders deep. */
+function nested(depth) {
+  let tree = `jobs[${LISTED}]`;
+  for (let level = 1; level < depth; level += 1) {
+    tree = `jobs[${LISTED},${tree}]`;
+  }
+  return tree;
+}
+
+/** Every job in a nested listing, flat — the folders among them included, since a folder is a hit too. */
+function flattened(holder, into) {
+  for (const one of at(holder, 'jobs') ?? []) {
+    into.push(one);
+    flattened(one, into);
+  }
+  return into;
+}
+
 /** One job as the declared `Job` shape — see objects(). */
 function jobOf(entry, site) {
   const colour = statusOf(at(entry, 'color'));
@@ -605,6 +691,45 @@ export default class Jenkins extends OrknuxPlugin {
       }),
 
       new OrknuxObject({
+        name: 'Case',
+        description: 'One test in a build, whatever it did.',
+        properties: [
+          { name: 'test', kind: 'string', description: 'The class and the case: com.acme.CartTest.emptyCart.' },
+          { name: 'suite', kind: 'string', description: 'Which suite it ran in, as the report groups them.' },
+          { name: 'status', kind: 'string', description: 'PASSED, FAILED, REGRESSION, FIXED, SKIPPED.' },
+          {
+            name: 'duration',
+            kind: 'number',
+            description: 'Milliseconds — converted, because Jenkins times a case in seconds and a build in milliseconds.',
+          },
+          {
+            name: 'age',
+            kind: 'number',
+            description: 'How many builds it has been failing for. 0 while it passes, 1 when this build broke it.',
+          },
+          { name: 'message', kind: 'string', description: 'What the assertion said. Null where it passed.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Cases',
+        description: "A build's tests, one by one and in some order.",
+        properties: [
+          { name: 'job', kind: 'string', description: 'The job it belongs to.' },
+          { name: 'build', kind: 'number', description: 'Which build. Null where a permalink named it.' },
+          { name: 'total', kind: 'number', description: 'How many cases the report holds, before order and limit.' },
+          {
+            name: 'duration',
+            kind: 'number',
+            description: 'What the whole run took, in milliseconds — what one case is a share of.',
+          },
+          { name: 'cases', kind: 'array', of: 'Case', description: 'Ordered as asked, capped by limit.' },
+          { name: 'more', kind: 'boolean', description: 'There were more than came back.' },
+          { name: 'url', kind: 'string', description: 'The test report, for a person to open.' },
+        ],
+      }),
+
+      new OrknuxObject({
         name: 'Queued',
         description: 'A build asked for, and where it has got to.',
         properties: [
@@ -636,6 +761,14 @@ export default class Jenkins extends OrknuxPlugin {
 
 Four calls, and the order matters. Three of them are cheap; the console log is
 not.
+
+## 0. If you do not know the job's exact name, search for it
+
+\`jenkins_search("deploy prod")\` finds a job by name wherever it lives,
+folders included — every word has to appear somewhere in the full name or the
+description, in any order. Guessing at a path and getting a 404 twice costs
+more than one search, and "there is no such job" is a bad answer to give
+somebody whose job is called something slightly different.
 
 ## 1. The build, not the log
 
@@ -674,6 +807,20 @@ test failure is in the middle, which is what step 2 is for.
 the job has ever passed, when it last did, and what has gone in since. "It has
 never passed" and "it broke this morning" are different problems, and they look
 identical from a single red build.
+
+## A slow build is a test question, not a log question
+
+\`jenkins_testCases(job, "lastBuild", "slowest")\` answers every test ordered by
+what it cost, with the whole run's time beside it — so "the build takes
+eighteen minutes" becomes "four tests take eleven of them", which is something
+somebody can act on. Reading the log for this does not work: a log says when
+things happened and not what they cost.
+
+Two other orders are worth knowing. \`failed\` is the failures, slowest first.
+\`flaky\` is everything that has been failing for **more than one build** —
+which is how you tell today's breakage from the broken window that was already
+there. That distinction is \`age\`: 1 means this build broke it, 11 means
+eleven builds have been red and nobody looked.
 
 ## What not to do
 
@@ -744,10 +891,12 @@ builds for the one that was yours.`,
   tools() {
     return [
       new OrknuxFunctionTool({ function: 'jobs' }),
+      new OrknuxFunctionTool({ function: 'search' }),
       new OrknuxFunctionTool({ function: 'job' }),
       new OrknuxFunctionTool({ function: 'build' }),
       new OrknuxFunctionTool({ function: 'buildLog' }),
       new OrknuxFunctionTool({ function: 'testResults' }),
+      new OrknuxFunctionTool({ function: 'testCases' }),
       new OrknuxFunctionTool({ function: 'trigger' }),
       new OrknuxFunctionTool({ function: 'queueItem' }),
     ];
@@ -763,7 +912,8 @@ builds for the one that was yours.`,
           'it is a folder holding other jobs, its status as a word (passing, failing, unstable, ' +
           'aborted, never built, disabled), whether it is building now, its last build number, ' +
           'result and start time, and a url. A folder is not listed into: pass it back here to see ' +
-          'inside it. limit caps the list, and more says whether there were others.',
+          'inside it, or use search, which looks through folders in one call. limit caps the ' +
+          'list, and more says whether there were others.',
         params: [
           { name: 'folder', type: 'string', required: false, default: '' },
           { name: 'limit', type: 'number', required: false, default: 50 },
@@ -782,12 +932,78 @@ builds for the one that was yours.`,
            */
           const listed = read(
             this.settings,
-            `${inside === null ? '' : inside.path}/api/json?tree=jobs[name,fullName,url,color,` +
-              `description,lastBuild[number,result,timestamp]]{0,${capped + 1}}`,
+            `${inside === null ? '' : inside.path}/api/json?tree=${nested(1)}{0,${capped + 1}}`,
             inside === null ? undefined : `there is no folder called ${inside.name}`,
           );
 
           const found = at(listed, 'jobs') ?? [];
+          return {
+            jobs: found.slice(0, capped).map((one) => jobOf(one, site)),
+            more: found.length > capped,
+          };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'search',
+        description:
+          'Finds a job by name anywhere on the Jenkins, including inside folders, which is what ' +
+          'to use when you know what a job is called but not where it lives. Every word of the ' +
+          'query has to appear somewhere in the job\'s full name or its description, whatever the ' +
+          'capitals - "deploy prod" finds platform/prod/deploy-api and does not find ' +
+          'deploy-staging. Answers the same shape jobs does: full name, whether it is a folder, ' +
+          'status as a word, last build number, result and start time, and a url each. Looks ' +
+          'three levels of folders deep from wherever it starts; pass folder to start further in, ' +
+          'which is also what to do on a controller too large to read in one go.',
+        params: [
+          { name: 'query', type: 'string' },
+          { name: 'limit', type: 'number', required: false, default: 25 },
+          { name: 'folder', type: 'string', required: false, default: '' },
+        ],
+        returnType: 'Jobs',
+        run: (query, limit, folder) => {
+          /*
+           * Every word, anywhere, in any order — rather than the one substring
+           * somebody happened to type. A person looking for the production
+           * deploy knows both of those words and neither the order Jenkins
+           * puts them in nor the separator whoever named it chose.
+           */
+          const terms = (typeof query === 'string' ? query : '')
+            .trim()
+            .toLowerCase()
+            .split(/\s+/)
+            .filter((one) => one.length > 0);
+          if (terms.length === 0) {
+            throw new Error('there is nothing to search for');
+          }
+
+          const inside = typeof folder === 'string' && folder.trim().length > 0 ? reference(folder) : null;
+          const capped = Math.min(Math.max(Math.trunc(limit), 1), 200);
+          const site = root(this.settings);
+
+          /*
+           * One request, nested rather than walked.
+           *
+           * Jenkins has a search of its own — `/search/suggest` — and it is
+           * the wrong one to build on: it answers display names, which for a
+           * job in a folder is "folder » job" rather than a path anything can
+           * be asked about, and it says nothing about whether the thing it
+           * found is passing. A nested tree answers both in one call, and the
+           * matching happens here because Jenkins offers nowhere to send it.
+           */
+          const listed = read(
+            this.settings,
+            `${inside === null ? '' : inside.path}/api/json?tree=${nested(DEPTH)}`,
+            inside === null ? undefined : `there is no folder called ${inside.name}`,
+          );
+
+          const found = flattened(listed, []).filter((one) => {
+            const named = at(one, 'fullName') ?? at(one, 'name') ?? '';
+            const said = at(one, 'description') ?? '';
+            const haystack = `${named} ${said}`.toLowerCase();
+            return terms.every((term) => haystack.includes(term));
+          });
+
           return {
             jobs: found.slice(0, capped).map((one) => jobOf(one, site)),
             more: found.length > capped,
@@ -999,6 +1215,63 @@ builds for the one that was yours.`,
             skipped: skipped,
             failures: failures.slice(0, capped),
             more: failures.length > capped,
+            url: `${site}${where}/testReport/`,
+          };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'testCases',
+        description:
+          'Every test in a build, one by one - the class and case name, whether it passed, how ' +
+          'long it took in milliseconds, and how many builds it has been failing for. order is ' +
+          'slowest (the default, which answers "what is this build spending its time on"), ' +
+          'failed (failures and regressions first, slowest first within them), flaky (only what ' +
+          'has been failing for more than one build, oldest failure first) or name (alphabetical, ' +
+          'for comparing two builds). which takes a build number or a permalink and is lastBuild ' +
+          'if not given; limit caps the cases. The answer also carries the whole run\'s time, so ' +
+          'one case\'s share of it is a division rather than a guess.',
+        params: [
+          { name: 'job', type: 'string' },
+          { name: 'which', type: 'string', required: false, default: 'lastBuild' },
+          { name: 'order', type: 'string', required: false, default: 'slowest' },
+          { name: 'limit', type: 'number', required: false, default: 20 },
+        ],
+        returnType: 'Cases',
+        run: (job, which, order, limit) => {
+          const ref = reference(job);
+          const wanted = ref.build === null ? buildOf(which) : ref.build;
+          const capped = Math.min(Math.max(Math.trunc(limit), 1), 500);
+          const asked = typeof order === 'string' && order.length > 0 ? order.toLowerCase() : 'slowest';
+          if (ORDERS[asked] === undefined) {
+            throw new Error(`no order called ${order}: it is ${Object.keys(ORDERS).join(', ')}`);
+          }
+          const site = root(this.settings);
+          const where = `${ref.path}/${wanted}`;
+
+          const report = read(
+            this.settings,
+            `${where}/testReport/api/json?tree=duration,failCount,skipCount,passCount,totalCount,` +
+              'suites[name,duration,cases[className,name,status,duration,age,skipped,errorDetails]]',
+            `${ref.name} build ${wanted} published no test results - either it runs no tests, ` +
+              'or it stopped before them',
+          );
+
+          const cases = [];
+          for (const suite of at(report, 'suites') ?? []) {
+            for (const one of at(suite, 'cases') ?? []) {
+              cases.push(caseOf(one, at(suite, 'name')));
+            }
+          }
+
+          const ordered = cases.filter(ORDERS[asked].keep).sort(ORDERS[asked].by);
+          return {
+            job: ref.name,
+            build: /^\d+$/.test(wanted) ? Number(wanted) : null,
+            total: cases.length,
+            duration: seconds(at(report, 'duration')),
+            cases: ordered.slice(0, capped),
+            more: ordered.length > capped,
             url: `${site}${where}/testReport/`,
           };
         },

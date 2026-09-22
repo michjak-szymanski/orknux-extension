@@ -12,14 +12,16 @@ Every call is made by the server on the plugin's behalf under
 | Function | |
 |---|---|
 | `jobs(folder, limit)` | What is on the Jenkins, or inside one folder. `more` says whether there were others. |
+| `search(query, limit, folder)` | A job by name, wherever it lives — folders included. |
 | `job(job)` | One job whole, including the **parameters** a build takes. Read this before triggering. |
 | `build(job, which)` | One build: result, duration, what caused it, and the commits in it. |
 | `buildLog(job, which, lines)` | The **end** of the console output, which is where a build says why it stopped. |
 | `testResults(job, which, limit)` | The counts, and the failing cases by name with their messages. |
+| `testCases(job, which, order, limit)` | Every test, one by one: what it cost, what it did, how long it has been failing. |
 | `trigger(job, parameters)` | Asks for a build. Answers a queue item, not a build. |
 | `queueItem(item)` | Whether that queued build has started, and what number it got. |
 
-All seven are fronted to agents, and two skills travel with them: one on
+All nine are fronted to agents, and two skills travel with them: one on
 triaging a failure without dragging a megabyte of log into the answer, one on
 what triggering actually does.
 
@@ -36,8 +38,8 @@ job('https://ci.example.com/job/deploy/412/')        // a link to a build
 
 Folders nest, and a folder is **not** listed into: `jobs()` answers it with
 `folder: true`, and passing that name back lists what is inside it. That is one
-call per level, deliberately — a recursive listing of a large controller is a
-very expensive way to find one job.
+call per level, deliberately — and `search` is the other way to do it, which
+reads several levels at once and matches on a name rather than walking them.
 
 `which` takes a build number as a string, or one of Jenkins' own permalinks —
 `lastBuild`, `lastCompletedBuild`, `lastStableBuild`, `lastSuccessfulBuild`,
@@ -48,6 +50,51 @@ because a link to build 412 is a link to build 412.
 **Only the path is read out of a url; the host is not.** Every request goes to
 the `url` parameter below, so a link to a *different* Jenkins names a job on
 this one, or nothing at all.
+
+## Searching, and why not Jenkins' own search
+
+`search` takes words rather than a path: every one of them has to appear
+somewhere in a job's full name or its description, in any order and whatever
+the capitals, so `search("deploy prod")` finds `platform/prod/deploy-api` and
+leaves `deploy-staging` alone.
+
+Jenkins has a search of its own — `/search/suggest` — and it is the wrong one
+to build on. It answers **display names**: a job in a folder comes back as
+`folder » job`, which is not a path anything can then be asked about, and it
+says nothing about whether what it found is passing. So `search` reads the job
+tree instead, three levels of folders deep in one request, and matches here —
+which costs one call and answers the same `Job` shape `jobs` does, status and
+last build included.
+
+Three levels is where real installations stop: team, product, branch. A job
+deeper than that is not found rather than found slowly, and `folder` is how to
+start further in — which is also the answer on a controller too large to read
+in one go.
+
+## Looking at the tests one by one
+
+`testResults` answers the shape of a failure. `testCases` answers the shape of
+the **run**: every case, what it cost, and how long it has been failing.
+
+| `order` | |
+|---|---|
+| `slowest` | the default — what the build is spending its time on |
+| `failed` | failures and regressions, slowest first |
+| `flaky` | only what has been failing for more than one build, oldest first |
+| `name` | alphabetical, which is what comparing two builds wants |
+
+"The build takes eighteen minutes" becomes "four tests take eleven of them",
+which is something somebody can act on; a log cannot answer that, because a
+log says when things happened and not what they cost.
+
+`age` is Jenkins counting something nothing else here can: how many builds a
+test has been failing for. 1 means this build broke it. 11 means eleven builds
+have been red and nobody looked, which is a different conversation.
+
+**Durations come back in milliseconds**, converted. Jenkins times a build in
+milliseconds and a test case in seconds, in the same API, and says so nowhere
+— so a plugin that passed both through unchanged would be handing somebody a
+trap to fall into once.
 
 ## Two answers Jenkins gives that are not answers
 
@@ -80,8 +127,8 @@ and quote the `url` so a person can read the rest.
 ## The shapes it exports
 
 `Job`, `Jobs`, `Parameter`, `Build`, `Change`, `Log`, `Tests`, `Failure`,
-`Queued` — so a workflow passes a build around rather than a bare map, and a
-condition reads `.result` instead of indexing into JSON.
+`Case`, `Cases`, `Queued` — so a workflow passes a build around rather than a
+bare map, and a condition reads `.result` instead of indexing into JSON.
 
 `Job` is one shape for both calls that answer a job, the way jira's `Issue` is:
 a listing leaves `buildable`, `inQueue`, `health` and `parameters` empty rather
