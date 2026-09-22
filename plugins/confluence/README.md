@@ -110,7 +110,22 @@ findUsers('Jo Smith')   →  { total: 2, users: [ { id, name, url, … }, … ] 
 ```
 
 It matches on the full name the way the people directory does, so a fragment
-is enough. This is the one place the two deployments genuinely differ, the
+is enough.
+
+**And an id is what finds their pages.** A page stores a mention as an id, so
+searching for a name finds the pages that *type* it and misses the ones that
+mention them. The pair of calls is the answer:
+
+```
+findUsers('Ada Lovelace')                       → id 5b10ac8d82e05b22cc7d4ef5
+search('mention = "5b10ac8d82e05b22cc7d4ef5"')  → the pages that mention her
+```
+
+CQL takes an id in `mention`, `creator`, `contributor` and `watcher`, and they
+narrow like any other clause — `contributor = "5b10…" AND space = "ENG"`. The
+skill *Finding what somebody has to do with the wiki* ships that, so an agent
+reaches for the two steps rather than searching for the name and reporting
+nothing. This is the one place the two deployments genuinely differ, the
 same way the jira plugin's search does: Cloud has `/rest/api/search/user`,
 and Server asks the CQL search everything else goes through with `type=user`.
 Which one runs is decided off `email`, like everything else here.

@@ -413,9 +413,94 @@ If a query with several \`AND\` clauses finds nothing, drop the narrowest clause
 and search again - a wrong space key or a stale label answers empty in exactly
 the same way as a subject nobody has written about.`,
       }),
+
+      new OrknuxSkill({
+        name: 'Finding what somebody has to do with the wiki',
+        description: 'Going from a name to the pages that mention them, which is two steps and not one.',
+        content: `# Finding what somebody has to do with the wiki
+
+"What has Ada written?" and "where is Ada mentioned?" look like text searches.
+They are not, and searching for the name is the wrong answer to both.
+
+## A name is not in the page; an id is
+
+Confluence stores a mention as an identifier inside markup:
+
+    <ac:link><ri:user ri:userkey="ff8080816f2b1c34016f2b1c34000001"/></ac:link>
+
+The name you see is drawn from that id when the page is displayed. So
+\`text ~ "Ada Lovelace"\` finds the pages that happen to **type** her name, and
+misses every page that **mentions** her - which are usually the ones being
+asked about.
+
+## So it is two steps
+
+\`\`\`
+confluence_findUsers("Ada Lovelace")     → id: "5b10ac8d82e05b22cc7d4ef5"
+confluence_search('mention = "5b10ac8d82e05b22cc7d4ef5"')
+\`\`\`
+
+Pass back whatever \`findUsers\` gave you. On Cloud that is an account id and on
+Server a user key, and the plugin already knows which of the two this wiki
+speaks - there is nothing to convert.
+
+## The CQL fields that take one
+
+| field | finds |
+|---|---|
+| \`mention = "<id>"\` | pages that mention them |
+| \`creator = "<id>"\` | pages they created |
+| \`contributor = "<id>"\` | pages they created **or** edited |
+| \`watcher = "<id>"\` | pages they are watching |
+
+They narrow like any other clause, and that is usually what makes the answer
+useful rather than long:
+
+\`\`\`
+mention = "5b10ac8d…" AND lastmodified > now("-4w")
+creator = "5b10ac8d…" AND space = "ENG" ORDER BY created DESC
+contributor = "5b10ac8d…" AND title ~ "runbook"
+\`\`\`
+
+\`contributor\` is the one to reach for when somebody asks what a person has
+worked on. \`creator\` answers a narrower question - who started it - and a page
+somebody rewrote entirely is still not theirs by that field.
+
+## Matching the id as text is a fallback, not the tool
+
+\`text ~ "5b10ac8d…"\` sometimes works and should not be the first try: the
+search index holds what a page *renders*, not always the markup behind it, so
+this misses pages \`mention\` finds. Use it only when \`mention\` answers nothing
+and you have reason to think the id is written into the page as literal text -
+in a macro parameter, say.
+
+## The other direction
+
+\`confluence_openPage\` answers a \`mentions\` list: the ids on that page, read
+straight out of the body. \`confluence_openUser\` turns one into a person. So
+the pair is symmetrical - a person gives you their pages, a page gives you its
+people - and neither of them starts from a name.
+
+## What an empty answer means here
+
+The same thing it means everywhere in this plugin: possibly permissions.
+Confluence filters by what the credential can see, so a person genuinely
+mentioned on forty pages answers zero if the token cannot read that space.
+Check with a query that has nothing to do with people - \`space = "ENG"\` - before
+reporting that somebody has never been mentioned.`,
+      }),
     ];
   }
 
+  /*
+   * The second page, and it is about a question the first one answers badly.
+   *
+   * "What has Ada written" and "where is Ada mentioned" look like text
+   * searches and are not: the wiki stores people as ids, so searching for a
+   * name finds the pages that *type* it and misses every page that mentions
+   * her. The two steps are obvious once somebody knows the id exists, and
+   * invisible before that.
+   */
   objects() {
     return [
       new OrknuxObject({
