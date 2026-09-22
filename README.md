@@ -91,10 +91,11 @@ for the diagram kinds it does not draw.
 
 **[plantuml](plugins/plantuml/plantuml.js)** draws what mermaid is worst at —
 sequence diagrams with activation and grouping, class diagrams with real
-cardinality, gantt, mindmaps, wireframes — on a PlantUML server, and reads one
-back as box-drawing characters, which is a diagram a model can actually read. A
-syntax error comes back as the line it is on rather than as a picture of the
-words "syntax error".
+cardinality, gantt, mindmaps, wireframes — in the sandbox: the engine is
+bundled, nothing is fetched, and no diagram leaves the machine. Graph layout is
+Smetana, PlantUML's own port of dot, because Graphviz ships as WebAssembly and
+there is none here. A syntax error comes back as the line it is on rather than
+as a picture of the words "syntax error".
 
     https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/plantuml/plantuml.js
 

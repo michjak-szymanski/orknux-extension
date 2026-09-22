@@ -221,6 +221,7 @@ test('the slack plugin declares what the server would accept', async () => {
       'post',
       'react',
       'search',
+      'findRecent',
       'mention',
       'upload',
       'uploadBinary',
@@ -247,6 +248,7 @@ test('the slack plugin declares what the server would accept', async () => {
       'post',
       'react',
       'search',
+      'findRecent',
       'upload',
       'uploadBinary',
       'uploadFromUrl',
@@ -627,6 +629,123 @@ test('the teams plugin declares what the server would accept', async () => {
     inspected.functions.map((declared) => declared.name),
     ['verify', 'text', 'sender', 'message', 'channelUrl', 'replyUrl'],
   );
+});
+
+test('slack findRecent reads what the bot was invited to, and nothing else', async () => {
+  const url = new URL(`../../plugins/slack/slack.js`, import.meta.url);
+  const { default: Slack } = await import(url.href);
+
+  const plugin = Object.create(Slack.prototype);
+  Object.defineProperty(plugin, 'settings', { value: Object.freeze({ botToken: 'xoxb-t' }) });
+  const call = (name) => plugin.functions().find((one) => one.name === name);
+
+  /*
+   * Two channels the bot is in, one of them carrying the join noise a channel
+   * keeps and a page that says there is more behind it.
+   */
+  const conversations = {
+    ok: true,
+    channels: [
+      { id: 'C1', name: 'deploys' },
+      { id: 'C2', name: 'random' },
+    ],
+  };
+  const histories = {
+    C1: {
+      ok: true,
+      has_more: true,
+      messages: [
+        { ts: '1700000100.000100', user: 'U1', text: 'the deploy to prod failed again' },
+        { ts: '1700000000.000100', user: 'U2', text: 'deploy is green', subtype: undefined },
+        { ts: '1699999000.000100', user: 'U3', text: 'has joined the channel', subtype: 'channel_join' },
+      ],
+    },
+    C2: {
+      ok: true,
+      has_more: false,
+      messages: [
+        { ts: '1700000200.000100', user: 'U4', text: 'PROD deploy notes are in the doc' },
+        { ts: '1700000050.000100', user: 'U5', text: 'lunch?' },
+      ],
+    },
+  };
+
+  const asked = [];
+  const door = globalThis.orknux.http.request;
+  let found;
+  let refused;
+  try {
+    globalThis.orknux.http.request = (what) => {
+      asked.push(what);
+      const method = what.url.slice('https://slack.com/api/'.length);
+      if (method === 'users.conversations') {
+        return { status: 200, headers: {}, body: '{}', json: conversations };
+      }
+      if (method === 'auth.test') {
+        return { status: 200, headers: {}, body: '{}', json: { ok: true, url: 'https://acme.slack.com/' } };
+      }
+      if (method === 'conversations.history') {
+        const channel = /channel=([^&]+)/.exec(what.body)[1];
+        return { status: 200, headers: {}, body: '{}', json: histories[channel] };
+      }
+      throw new Error(`the test was not expecting ${method}`);
+    };
+
+    found = call('findRecent').run('deploy prod', '', 7, 20);
+    try {
+      call('findRecent').run('deploy', '#nowhere', 7, 20);
+    } catch (thrown) {
+      refused = thrown.message;
+    }
+  } finally {
+    globalThis.orknux.http.request = door;
+  }
+
+  /* The bot token, on the bot's own memberships — no connection, no user token. */
+  assert.equal(asked[0].url, 'https://slack.com/api/users.conversations');
+  assert.equal(asked[0].headers.authorization, 'Bearer xoxb-t');
+  assert.match(asked[0].body, /types=public_channel%2Cprivate_channel/);
+
+  /*
+   * Every word, anywhere, in any order and whatever the capitals — so "deploy
+   * prod" finds the message that says "PROD deploy notes" and leaves the one
+   * that only says deploy alone. It is not Slack's search syntax and does not
+   * pretend to be.
+   */
+  assert.deepEqual(
+    found.matches.map((one) => one.text),
+    ['PROD deploy notes are in the doc', 'the deploy to prod failed again'],
+  );
+  /* Newest first, across channels rather than within one. */
+  assert.deepEqual(
+    found.matches.map((one) => one.channelName),
+    ['random', 'deploys'],
+  );
+
+  /* A permalink built from the workspace url rather than fetched per match. */
+  assert.equal(found.matches[0].permalink, 'https://acme.slack.com/archives/C2/p1700000200000100');
+  assert.equal(asked.filter((one) => one.url.endsWith('auth.test')).length, 1, 'the workspace url was fetched more than once');
+
+  /* The join noise a channel keeps is not something anybody is searching for. */
+  assert.equal(found.messages, 5);
+  assert.equal(found.total, 2);
+  assert.equal(found.channels, 2);
+
+  /* A window with more behind it says so rather than reading as the whole story. */
+  assert.equal(found.complete, false);
+  assert.match(found.since, /^\d{4}-\d{2}-\d{2}T/);
+
+  /* The window is what was asked for, and one page of it per channel. */
+  const history = asked.find((one) => one.url.endsWith('conversations.history'));
+  assert.match(history.body, /oldest=\d+/);
+  assert.match(history.body, /limit=200/);
+
+  /*
+   * And the fence, which is the whole point of doing it this way: a channel
+   * the bot was never invited to is not searched and not silently empty.
+   */
+  assert.match(refused, /the bot is not in #nowhere/);
+  assert.throws(() => call('findRecent').run('   ', '', 7, 20), /nothing to look for/);
 });
 
 test('the confluence plugin declares what the server would accept', async () => {
@@ -1259,28 +1378,116 @@ test('the plantuml plugin declares what the server would accept', async () => {
     inspected.parameters.map((parameter) => parameter.name),
     ['url'],
   );
+  /* Optional: it names a server for `links` to point at, and nothing is sent there. */
+  assert.deepEqual(
+    inspected.parameters.map((parameter) => parameter.required),
+    [false],
+  );
+
   /*
-   * No permission: the url's encoding is base64 in a different order over a
-   * deflate stream that compresses nothing, and `orknux.encoding` does the one
-   * part needing the server — the UTF-8 — ungranted.
+   * None. The engine expects a browser and the bundle brings its own — the
+   * document, the serialiser and the canvas are in src/dom.js — rather than
+   * asking for a permission to have the boundary moved.
    */
   assert.deepEqual(inspected.permissions, []);
-  assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
+  /* Only the rasterising, which is the one thing a sandbox cannot do for itself. */
+  assert.deepEqual(inspected.capabilities, ['RENDER_PNG']);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
-    ['render', 'ascii', 'check', 'links'],
+    ['render', 'check', 'links'],
   );
   assert.deepEqual(
     inspected.tools.map((declared) => declared.name),
-    ['render', 'ascii', 'check', 'links'],
+    ['render', 'check', 'links'],
   );
   assert.deepEqual(
     inspected.objects.map((declared) => declared.name),
-    ['Drawing', 'Ascii', 'Checked', 'Links'],
+    ['Drawing', 'Checked', 'Links'],
   );
 });
 
-test('a plantuml url really is deflate, in plantuml’s own alphabet', async () => {
+test('the plantuml plugin draws in the sandbox, with no server and no Graphviz', async () => {
+  const url = new URL(`../../plugins/plantuml/plantuml.js`, import.meta.url);
+  const { default: PlantUml } = await import(url.href);
+
+  const plugin = Object.create(PlantUml.prototype);
+  Object.defineProperty(plugin, 'settings', { value: Object.freeze({}) });
+  const call = (name) => plugin.functions().find((one) => one.name === name);
+
+  const session = globalThis.orknux.session;
+  let drawn;
+  let laidOut;
+  let bad;
+  let refused;
+  try {
+    globalThis.orknux.session = { store: { put: () => ({}), get: () => null } };
+
+    /*
+     * A sequence diagram, which needs no graph layout — and one with an accent
+     * and a tick in it, because the text is measured here rather than by a
+     * browser and a character with no entry in the table still has to have a
+     * width.
+     */
+    drawn = call('render').run('@startuml\nactor Ada\nAda -> Bob : Zażółć ✓\nactivate Bob\n@enduml', 'svg', 0);
+
+    /*
+     * And a class diagram, which does. Graphviz is WebAssembly and this
+     * sandbox has none; the engine carries Smetana, PlantUML's own port of
+     * dot, and falls back to it. If that ever stops being true, this is the
+     * assertion that says so.
+     */
+    laidOut = call('render').run('@startuml\nclass Cart\nclass Item\nCart "1" *-- "0..*" Item\n@enduml', 'svg', 0);
+
+    bad = call('check').run('@startuml\nactor Ada\nAda -> Bob : Hello\nnonsense !!! rubbish\n@enduml');
+    try {
+      call('render').run('@startuml\nactor Ada\nnonsense !!! rubbish\n@enduml', 'svg', 0);
+    } catch (thrown) {
+      refused = thrown.message;
+    }
+  } finally {
+    globalThis.orknux.session = session;
+  }
+
+  /* Markup, with the diagram's own words in it and a size it worked out itself. */
+  assert.match(drawn.svg, /^<\?xml|^<svg/);
+  assert.ok(drawn.svg.includes('Zażółć ✓'), 'the label did not survive being measured and drawn');
+  assert.ok(drawn.width > 0 && drawn.height > 0, 'the drawing came out with no size');
+  assert.equal(drawn.png, '');
+  assert.ok(drawn.key.startsWith('plantuml.'), 'the drawing was not kept under a key');
+
+  /*
+   * The face is named rather than left as `sans-serif`: the widths it was
+   * measured against are Helvetica's, and a viewer setting DejaVu instead
+   * would draw a tenth wider than the boxes it was given.
+   */
+  assert.match(drawn.svg, /font-family="Helvetica,Arial,&quot;Liberation Sans&quot;,sans-serif"/);
+  assert.doesNotMatch(drawn.svg, /font-family="sans-serif"/);
+
+  /* Laid out by Smetana: two boxes, their labels, and the association between them. */
+  assert.ok(laidOut.svg.includes('Cart') && laidOut.svg.includes('Item'));
+  assert.ok(laidOut.svg.includes('0..*'), 'the cardinality is not on the association');
+  assert.ok(laidOut.width > 0 && laidOut.height > 0);
+
+  /*
+   * A syntax error is a picture of a syntax error, which is no use to anything
+   * fixing one. Both of these read the line back out of that picture.
+   */
+  assert.equal(bad.ok, false);
+  assert.equal(bad.line, 4);
+  assert.equal(bad.source, 'nonsense !!! rubbish');
+  assert.match(bad.error, /Syntax Error/);
+  assert.equal(refused, 'Syntax Error? (Assumed diagram type: sequence) on line 3: nonsense !!! rubbish');
+
+  /* And a diagram it can read says so, with nothing else in the answer. */
+  assert.deepEqual(call('check').run('@startuml\nAda -> Bob : Hello\n@enduml'), {
+    ok: true,
+    error: null,
+    line: null,
+    source: null,
+  });
+});
+
+test('a plantuml link really is deflate, in plantuml’s own alphabet', async () => {
   const url = new URL(`../../plugins/plantuml/plantuml.js`, import.meta.url);
   const { default: PlantUml } = await import(url.href);
 
@@ -1290,14 +1497,13 @@ test('a plantuml url really is deflate, in plantuml’s own alphabet', async () 
     const functions = plugin.functions();
     return (name) => functions.find((one) => one.name === name);
   };
-  const site = { url: 'https://plantuml.example.com/plantuml' };
 
   /*
-   * The encoding is the whole of what this plugin does without a server, and
-   * it is written by hand: a deflate stream of stored blocks, then base64 in
-   * an order that is not base64's. So it is decoded here with a real
-   * inflater — if `inflateRawSync` can read it, so can a PlantUML, and that
-   * is the only claim worth making about a hand-rolled stream.
+   * `links` is the one call that names a server, and it reaches nothing to do
+   * it: the diagram travels inside the url, deflated, in an alphabet that is
+   * base64's characters in another order. The stream is written by hand —
+   * stored blocks, because a sandbox has no compressor — so it is decoded here
+   * with a real inflater. If `inflateRawSync` can read it, so can a PlantUML.
    */
   const ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_';
   const unpacked = (written) => {
@@ -1315,130 +1521,24 @@ test('a plantuml url really is deflate, in plantuml’s own alphabet', async () 
     return Buffer.from(bytes);
   };
 
-  /* Something with a character outside ASCII in it, because that is the part a plugin cannot do alone. */
-  const source = '@startuml\nactor Ada\nAda -> Bob : Zażółć gęślą jaźń\nBob --> Ada : ✓\n@enduml';
-  const links = configured(site)('links').run(source);
+  const source = '@startuml\nactor Ada\nAda -> Bob : Zażółć gęślą jaźń\n@enduml';
+  const site = 'https://plantuml.example.com/plantuml';
+  const links = configured({ url: `${site}/` })('links').run(source);
 
-  const path = links.svg.slice(`${site.url}/svg/`.length);
+  const path = links.svg.slice(`${site}/svg/`.length);
   assert.equal(inflateRawSync(unpacked(path)).subarray(0, Buffer.byteLength(source)).toString('utf8'), source);
 
-  /* Five urls off one encoding, and the markdown is the png wrapped for a comment. */
-  assert.equal(links.png, `${site.url}/png/${path}`);
-  assert.equal(links.txt, `${site.url}/txt/${path}`);
-  assert.equal(links.editor, `${site.url}/uml/${path}`);
-  assert.equal(links.markdown, `![diagram](${site.url}/png/${path})`);
+  assert.equal(links.png, `${site}/png/${path}`);
+  assert.equal(links.txt, `${site}/txt/${path}`);
+  assert.equal(links.editor, `${site}/uml/${path}`);
+  assert.equal(links.markdown, `![diagram](${site}/png/${path})`);
 
-  /* Nothing to draw, and a diagram too long to travel in a url, are both said rather than sent. */
-  assert.throws(() => configured(site)('links').run('   '), /no diagram source to draw/);
-  assert.throws(
-    () => configured(site)('render').run(`@startuml\n${'note over A : padding\n'.repeat(400)}@enduml`, 'svg'),
-    /too long to travel in a url/,
-  );
-  assert.throws(() => configured(site)('render').run('@startuml\n@enduml', 'jpeg'), /no format called jpeg/);
-  assert.throws(() => configured({})('links').run('@startuml\n@enduml'), /url parameter is not set/);
-});
+  /* With no server named, the public one — which is the only url in this plugin. */
+  assert.match(configured({})('links').run(source).png, /^https:\/\/www\.plantuml\.com\/plantuml\/png\//);
 
-test('plantuml reads a syntax error out of the headers, where the answer is a picture of it', async () => {
-  const url = new URL(`../../plugins/plantuml/plantuml.js`, import.meta.url);
-  const { default: PlantUml } = await import(url.href);
-
-  const plugin = Object.create(PlantUml.prototype);
-  Object.defineProperty(plugin, 'settings', {
-    value: Object.freeze({ url: 'https://plantuml.example.com/plantuml' }),
-  });
-  const call = (name) => plugin.functions().find((one) => one.name === name);
-
-  const asked = [];
-  const door = globalThis.orknux.http.get;
-  const bytes = globalThis.orknux.http.download;
-  const session = globalThis.orknux.session;
-
-  const broken = '@startuml\nactor Ada\nAda -> Bob : Hello\nnonsense !!! rubbish\n@enduml';
-  let drawn;
-  let toModel;
-  let checked;
-  let failed;
-  try {
-    globalThis.orknux.http.get = (where) => {
-      asked.push(where);
-      /*
-       * What a PlantUML actually answers a bad diagram: 400, a picture of the
-       * error as the body, and the only readable part of it in the headers -
-       * in the case they come back in, which nothing here decides.
-       */
-      return {
-        status: 400,
-        headers: {
-          'Content-Type': 'image/svg+xml',
-          'X-PlantUML-Diagram-Error': 'Syntax Error? (Assumed diagram type: sequence)',
-          'X-PlantUML-Diagram-Error-Line': '4',
-        },
-        body: '<svg>a picture of the words "syntax error"</svg>',
-      };
-    };
-    checked = call('check').run(broken);
-
-    globalThis.orknux.http.download = (where) => {
-      asked.push(where);
-      return {
-        status: 200,
-        headers: {
-          'x-plantuml-diagram-width': '198',
-          'x-plantuml-diagram-height': '248',
-          'x-plantuml-diagram-description': '(2 participants)',
-        },
-        base64: 'iVBORw0KGgo=',
-        size: 8,
-        contentType: 'image/png',
-      };
-    };
-    globalThis.orknux.session = { store: { put: () => ({}), get: () => null } };
-    drawn = call('render').run('@startuml\nAda -> Bob : Hello\n@enduml');
-    /* The same call as an agent makes it, which is the one that must not carry bytes. */
-    toModel = plugin
-      .tools()
-      .find((one) => one.name === 'render')
-      .run('@startuml\nAda -> Bob : Hello\n@enduml', 'png');
-
-    try {
-      call('render').run(broken, 'svg');
-    } catch (thrown) {
-      failed = thrown.message;
-    }
-  } finally {
-    globalThis.orknux.http.get = door;
-    globalThis.orknux.http.download = bytes;
-    globalThis.orknux.session = session;
-  }
-
-  /* A refusal names the line and quotes it, because that is what gets fixed. */
-  assert.equal(failed, 'Syntax Error? (Assumed diagram type: sequence) on line 4: nonsense !!! rubbish');
-
-  /* And check answers the same thing as data, for a condition that has to decide. */
-  assert.equal(checked.ok, false);
-  assert.equal(checked.line, 4);
-  assert.equal(checked.source, 'nonsense !!! rubbish');
-
-  /*
-   * The picture's size is the server's measurement, not an echo of a request:
-   * nothing in the sandbox can look at a PNG and say how wide it is.
-   */
-  assert.equal(drawn.width, 198);
-  assert.equal(drawn.height, 248);
-  assert.equal(drawn.description, '(2 participants)');
-  assert.equal(drawn.png, 'iVBORw0KGgo=');
-  assert.equal(drawn.svg, '');
-  assert.match(asked[1], /^https:\/\/plantuml\.example\.com\/plantuml\/png\//);
-
-  /*
-   * And the tool a model calls carries the key instead of the picture: a
-   * hundred kilobytes of base64 read back out into the next tool call is a
-   * hundred kilobytes that has to come out perfect, and it does not.
-   */
-  assert.equal(toModel.png, '');
-  assert.equal(toModel.svg, '');
-  assert.ok(toModel.key.startsWith('plantuml.'), 'the tool answered no key to fetch the bytes by');
-  assert.equal(toModel.width, 198);
+  assert.throws(() => configured({})('links').run('   '), /no diagram source to link to/);
+  assert.throws(() => configured({})('render').run('@startuml\n@enduml', 'jpeg'), /no format called jpeg/);
+  assert.throws(() => configured({})('render').run('  ', 'svg'), /no diagram source to draw/);
 });
 
 test('the prometheus plugin declares what the server would accept', async () => {

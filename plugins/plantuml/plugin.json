@@ -9,8 +9,8 @@
     "documentation",
     "rendering"
   ],
-  "summary": "Draw the diagrams mermaid is worst at, on a PlantUML server, and read one back as letters.",
-  "version": "0.1.0",
+  "summary": "Draw the diagrams mermaid is worst at, in the sandbox: no server, no Java, nothing fetched.",
+  "version": "0.2.0",
   "icon": "icon.svg",
   "descriptionPath": "README.md"
 }

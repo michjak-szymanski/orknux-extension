@@ -1,136 +1,139 @@
 # PlantUML
 
-The diagrams a model is most often asked for and mermaid is worst at:
-sequence diagrams with activation bars and nested groups, class diagrams with
-real cardinality, component, state, activity, deployment, ERDs, gantt charts,
-mindmaps, wireframes, JSON trees — out of text a model already writes well.
+The diagrams a model is most often asked for and mermaid is worst at: sequence
+diagrams with activation bars and nested groups, class diagrams with real
+cardinality, component, state, activity, deployment, ERDs, gantt charts,
+mindmaps, wireframes, JSON trees.
 
-Every request is made by the server on the plugin's behalf under
-`NETWORK_REQUEST`, against the PlantUML server the workspace named.
+**Drawn here.** The engine is bundled into the plugin and runs in the sandbox —
+no server, no Java, no Graphviz binary, nothing fetched. A diagram does not
+leave the machine.
 
 | Function | |
 |---|---|
-| `render(source, format)` | The diagram as `png` or `svg`, its size as **the server measured it**, and a key the bytes are kept under. |
-| `ascii(source)` | The same diagram in box-drawing characters — a diagram a model can actually read. |
-| `check(source)` | Whether it parses, and the line where it does not. Answered as data, not thrown. |
-| `links(source)` | Five urls carrying the source inside them. Reaches nothing. |
+| `render(source, format, width)` | The diagram as `png` or `svg`, the size it came out, and a key the bytes are kept under. |
+| `check(source)` | Whether PlantUML can read it, and the line where it cannot. Reaches nothing. |
+| `links(source)` | Urls that draw it on a PlantUML server, carrying the source inside them. Builds strings; sends nothing. |
 
-All four are fronted to agents, with the skill that says which mistake costs
-what.
+## How a Java program renders in a sandbox
 
-## Why this calls a server, when the mermaid plugin calls nobody
+`@plantuml/core` is PlantUML compiled to JavaScript by TeaVM. Three things
+stand between that and a sandbox with no page, no timers and no WebAssembly,
+and each turned out to have an answer.
 
-PlantUML now ships a pure-JavaScript build — `@plantuml/core`, compiled with
-TeaVM — and the obvious question is why it is not bundled here the way mermaid
-and nomnoml are. It was tried. Three things stop it, and the first is fatal:
+**It defers its work onto a timer.** `renderToString` returns immediately and
+delivers through a callback; a plugin's `run` is synchronous with nothing to
+await. But there is exactly one `setTimeout` in the engine, and it is TeaVM's
+scheduler yielding to itself. So `src/dom.js` queues what gets scheduled and
+turns the queue by hand after the call returns — an event loop, run inside one
+synchronous call. A diagram takes one turn.
 
-1. **It is asynchronous.** `renderToString(lines, onSuccess, onError)` returns
-   immediately and delivers through a callback scheduled on a timer. A
-   plugin's `run` is synchronous — there is nothing to await, and no event
-   loop for it to be pumped by — so the answer arrives after the only moment
-   it could have been returned in.
-2. **It measures text through a real DOM.** Layout asks an SVG text node for
-   `getBBox()`, eighteen times for a two-line sequence diagram, and then wants
-   an XML document to serialise through. Stubs get a little further each time
-   and then ask for the next piece of a browser.
-3. **Layout is Graphviz, shipped as WebAssembly.** The sandbox has none — so
-   class, component, state, activity, deployment and use case diagrams could
-   not be laid out even if the two above were solved.
+Running the callback *inline* instead does not work, and says so: re-entering
+the scheduler from inside its own stack makes TeaVM refuse with `Can't enter
+monitor from another thread synchronously`. That is also why this plugin
+installs its own `setTimeout` over the one in `plugins/shim.mjs` — the shim
+runs a timer inline, which is right for a layout engine that only ever yields,
+and wrong for a scheduler.
 
-It is also 3.9 MB before a DOM, against a 5 MB source ceiling. A PlantUML
-server has a JVM, Graphviz and fonts, and is what one is for.
+**It measures text through a browser** — a canvas for the metrics, an SVG text
+node's `getBBox` for the rest. `src/metrics.js` answers both from Helvetica's
+advance widths, and the finished SVG is rewritten to ask for
+`Helvetica, Arial, "Liberation Sans"` rather than the bare `sans-serif` the
+engine writes. Those three carry identical metrics, so what was measured and
+what a viewer draws are the same shapes. Measuring against one face and
+drawing in another is how a label ends up outside its box.
 
-## The encoding, and why there is no compression in it
+**Its layout engine is Graphviz, shipped as WebAssembly.** True, and it does
+not matter: the engine carries **Smetana**, PlantUML's own pure-Java port of
+dot, and falls back to it when `viz-global.js` is absent — which it always is
+here.
 
-A PlantUML url carries the diagram inside it: the path is the source,
-deflated, then written in PlantUML's own base64 alphabet — which is the same
-sixty-four characters in a different order, so the standard one does not
-substitute.
+```
+PlantUML: viz-global.js is not loaded, falling back to the Smetana layout engine
+```
 
-The sandbox has no compressor. What this builds is a deflate stream of
-**stored** blocks: the header bit that says this is the last block, a length,
-its complement, and then the bytes as they are. It is a valid deflate stream
-that happens to compress nothing, PlantUML's decoder inflates it like any
-other, and it costs four characters per three bytes — against the two
-characters per byte that PlantUML's `~h` hex form would cost.
+So class, component, state, activity, deployment and use case diagrams lay out
+with no WebAssembly anywhere.
 
-`~1` is *not* this, despite what the older documentation suggests: a current
-server reads that prefix as Huffman and answers "This URL does not look like
-HUFFMAN data". The prefix-less form is deflate, and that is what this builds.
+### How close it is to a real PlantUML
 
-That encoding is also the one real limit here. A url has a length cap — a
-stock Tomcat at eight kilobytes — so a source past roughly five thousand
-characters is refused by name, with the numbers in the sentence, rather than
-sent to be truncated into a syntax error somewhere in the middle.
+Drawing the same sequence diagram, this plugin and a PlantUML server land
+within a few percent of each other — narrower, because the server's Java
+default is usually DejaVu and this measures Helvetica:
+
+| | server | here |
+|---|---|---|
+| `Alice -> Bob : Hello` / `Bob --> Alice : Hi` | 121 × 158 | 106 × 149 |
+| `{"a": 1, "b": [2, 3]}` as `@startjson` | 99 × 53 | 96 × 43 |
+
+What is not here: `!include <C4/C4_Context>` and the rest of the standard
+library, and `!theme` definitions. Both are fetched over HTTP by the browser
+build, there is no network in a sandbox, and a diagram using either still
+draws — without them.
 
 ## What a refusal says
 
-PlantUML answers a syntax error with HTTP 400 and **a picture of the error**,
-which is no use to anything trying to fix the source. What is useful is in the
-headers, and this reads them:
+PlantUML does not reject a bad diagram. It **draws a picture of the error**,
+with the source above it and the message below, which is no use to anything
+trying to fix it. The plugin reads the two useful facts back out of that
+picture — the marker `[From textarea (line 4)]` is the one thing only an error
+image carries — and throws them:
 
 ```
 Syntax Error? (Assumed diagram type: sequence) on line 4: nonsense !!! rubbish
 ```
 
-`check` asks the same question without throwing, which is what a workflow
-condition wants:
+`check` asks the same question as data rather than as a throw:
 
 ```json
 { "ok": false, "error": "Syntax Error? (Assumed diagram type: sequence)",
-  "line": 4, "source": "nonsense !!! rubbish", "type": null }
+  "line": 4, "source": "nonsense !!! rubbish" }
 ```
-
-The same headers carry the diagram's measured width and height and PlantUML's
-own description of it — `(2 participants)`, `(5 entities)` — so nothing here
-has to guess at the size of a picture it cannot see.
-
-## `ascii` is the one worth knowing about
-
-`plantuml_ascii` draws the diagram in box-drawing characters. A model cannot
-look at a PNG; it can read this.
-
-```
-┌───┐                ┌───┐
-│Ada│                │Bob│
-└─┬─┘                └─┬─┘
-  │ Zażółć gęślą jaźń  │
-  │───────────────────>│
-  │      ✓ done        │
-  │< ─ ─ ─ ─ ─ ─ ─ ─ ─ │
-```
-
-One call before sending a picture to somebody finds the two things that are
-invisible in a PNG and obvious here: participants that came out in the wrong
-order, and a message meant as a reply drawn as a call.
 
 ## The shapes it exports
 
-`Drawing`, `Ascii`, `Checked`, `Links`. `render` answers the bytes **and** a
-short key they are kept under for the session — and the tool a model sees
-answers only the key, because a hundred kilobytes of base64 read back out into
-the next tool call is a hundred kilobytes that has to come out perfect, and it
-does not. `slack_uploadBinary` takes the key.
+`Drawing`, `Checked`, `Links`. `render` answers the bytes **and** a short key
+they are kept under for the session — and the tool a model sees answers only
+the key, because a hundred kilobytes of base64 read back out into the next
+tool call is a hundred kilobytes that has to come out perfect, and it does
+not. `slack_uploadBinary` takes the key.
 
 ## Parameters
 
 | Name | |
 |---|---|
-| `url` | A PlantUML server. **Required**, with no default: `https://www.plantuml.com/plantuml` renders anything, and whose server sees the diagram text is not a decision this plugin should make quietly. A self-hosted one is a container. |
+| `url` | A PlantUML server, used **only** to build the urls `links` returns. Optional; the public server is the default. Nothing is ever sent to it — drawing happens in the sandbox. |
 
 ## What it asks for, and why
 
-`NETWORK_REQUEST`, and nothing else — every request goes to the `url` above.
+`RENDER_PNG`, and only that. The diagram — engine, layout, text metrics, SVG —
+is built in the plugin; turning finished markup into pixels needs a rasteriser,
+and this sandbox has neither one nor the WebAssembly to bring one. It is the
+same grant the mermaid plugin makes for the same reason, and the narrowest
+there is: what crosses is markup the plugin just produced, and what comes back
+is bytes computed from it. `svg` needs nothing at all.
 
-**No permission at all.** The encoding is arithmetic: base64 in a different
-order over a deflate stream that compresses nothing. The one part that needs
-the server is turning the source into its own UTF-8 bytes, and
-`orknux.encoding` does that ungranted — which is what keeps a diagram labelled
-in Polish or Japanese encoding to the bytes the other end will decode.
+**No permission.** The engine expects a browser and the bundle brings one —
+the document, the serialiser and the canvas are `src/dom.js`, and the console
+it chatters into comes from the shim every bundle here carries. Bringing its
+own is the honest way to load without a permission, rather than having the
+boundary quietly moved.
+
+## It is a build
+
+The source is `src/`, the checked-in `plantuml.js` beside it is the artifact,
+and `npm run build:plugins` produces it. Unlike every other bundle here it is
+minified for **whitespace only**: TeaVM emits labelled blocks with `continue`
+and `break` jumping to them — the shape JVM bytecode has, written as
+JavaScript — and esbuild's syntax and identifier passes rewrite those into
+something that no longer parses (`SyntaxError: Undefined label 'l'`, at load,
+before anything runs). That costs about two hundred kilobytes against a five
+megabyte ceiling and buys a bundle that loads.
 
 ## A caveat worth knowing before you debug it
 
-**The server sees the source.** That is the whole arrangement, and it is worth
-a thought before drawing anything that names internal systems on a public
-renderer. A PlantUML server is a stateless container with no database; running
-one is the answer, and then this plugin is entirely inside the network.
+**Smetana is not dot.** It is PlantUML's own port and it is good, but a large
+graph comes out less tidily than real Graphviz would manage — ten nodes look
+the same, a hundred do not. Where a sprawling class diagram matters more than
+where it is drawn, `links` gives you the same source on a server that has the
+real thing.

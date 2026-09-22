@@ -39,6 +39,23 @@ const BUILT = [
   { entry: 'mermaid/src/mermaid.js', outfile: 'mermaid/mermaid.js' },
   { entry: 'nomnoml/src/nomnoml.js', outfile: 'nomnoml/nomnoml.js' },
   { entry: 'pdf/src/pdf.js', outfile: 'pdf/pdf.js' },
+  {
+    entry: 'plantuml/src/plantuml.js',
+    outfile: 'plantuml/plantuml.js',
+    /*
+     * Whitespace only, where everything else here is minified outright.
+     *
+     * PlantUML's engine is Java compiled by TeaVM, and what that produces is
+     * labelled blocks with `continue` and `break` jumping to them - the shape
+     * a JVM's bytecode has, written as JavaScript. esbuild's syntax and
+     * identifier passes rewrite those into something that no longer parses:
+     * `SyntaxError: Undefined label 'l'`, at load, before anything runs.
+     *
+     * So the labels are left alone. It costs about two hundred kilobytes
+     * against a five megabyte ceiling, and buys a bundle that loads.
+     */
+    minify: { whitespace: true, identifiers: false, syntax: false },
+  },
 ];
 
 /*
@@ -147,7 +164,10 @@ for (const job of BUILT) {
     charset: 'utf8',
     legalComments: 'none',
     sourcemap: false,
-    minify: true,
+    minify: job.minify === undefined,
+    minifyWhitespace: job.minify === undefined ? undefined : job.minify.whitespace,
+    minifyIdentifiers: job.minify === undefined ? undefined : job.minify.identifiers,
+    minifySyntax: job.minify === undefined ? undefined : job.minify.syntax,
     write: true,
     metafile: true,
     logLevel: 'warning',
