@@ -241,6 +241,7 @@ jobs:
 
           published=0
           noted=0
+          refused=
           for zip in plugins/dist/*.zip; do
             name="$(basename "$zip")"
             slug="${name%.zip}"
@@ -291,7 +292,10 @@ jobs:
             # `-o` keeps the body out of the log, where a token echoed back in
             # an error would otherwise land; `-w` is the only thing printed.
             sending=(
-              -sS --retry 2 --retry-connrefused
+              # `--retry-all-errors` is the half that was missing: without it
+              # curl retries a refused connection and not an HTTP status, and
+              # what this endpoint actually does under load is answer 520.
+              -sS --retry 3 --retry-delay 5 --retry-all-errors --retry-connrefused
               -o answer.json -w '%{http_code}'
               -X POST https://orknux.ai/api/plugins
               -H "Authorization: Bearer $ORKNUX_PUBLISH_TOKEN"
@@ -309,16 +313,30 @@ jobs:
               201) echo "$name — created" ;;
               200) echo "$name — replaced" ;;
               *)
+                # Noted and carried on with, rather than exited on.
+                #
+                # This loop used to stop at the first refusal, which made one
+                # flaky upload of an *unchanged* plugin a wall in front of
+                # every plugin alphabetically after it: a new plantuml went
+                # unpublished three times running because mermaid — the same
+                # bytes already on the marketplace — answered 520. The run
+                # still fails, and now it fails knowing which of them landed.
                 echo "::error::$name — the marketplace answered $status"
                 # The body, for the sentence it carries. It is the API's own
                 # error, not the request, so there is no credential in it.
                 cat answer.json || true
-                exit 1
+                refused="$refused $name"
+                continue
                 ;;
             esac
             published=$((published + 1))
           done
           echo "published $published plugin(s) to orknux.ai, $noted of them with notes"
+
+          if [ -n "$refused" ]; then
+            echo "::error::the marketplace refused:$refused"
+            exit 1
+          fi
 
       # On a manual run there is no tag and no release, so the zips go up as a
       # build artifact instead — which is what somebody clicking "Run workflow"
