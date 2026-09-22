@@ -152,8 +152,12 @@ jobs:
           set -euo pipefail
           now="$(cd plugins/dist && ls *.zip | sed 's/\.zip$//' | sort)"
 
+          # This tag's own release is not the previous one, and on a re-run it
+          # is there to be mistaken for it — which reads every version as
+          # already published and titles the release "descriptions only".
           previous="$(gh release list --limit 50 --json tagName \
-            --jq '[.[] | select(.tagName | startswith("plugins-v"))][0].tagName' || true)"
+            --jq '[.[] | select(.tagName | startswith("plugins-v"))
+                       | select(.tagName != env.GITHUB_REF_NAME)][0].tagName' || true)"
 
           if [ -z "$previous" ]; then
             count="$(printf '%s\n' "$now" | wc -l | tr -d ' ')"
@@ -184,15 +188,32 @@ jobs:
           echo "$title"
           echo "RELEASE_TITLE=$title" >> "$GITHUB_ENV"
 
+      # Created, or filled in where a previous attempt left one behind.
+      #
+      # `gh release create` refuses a tag that already has a release, which
+      # made the promise in the step below untrue the first time it was needed:
+      # the marketplace answered 520 halfway down the loop, and the re-run that
+      # was supposed to finish the job died here instead, before reaching the
+      # step it was re-run for. Packing is deterministic, so a zip uploaded
+      # over itself is the same bytes and updating is the same release.
       - name: Release
         if: startsWith(github.ref, 'refs/tags/plugins-v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: >
-          gh release create "$GITHUB_REF_NAME"
-          --title "$RELEASE_TITLE"
-          --notes-file release-notes.md
-          plugins/dist/*.zip
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            echo "$GITHUB_REF_NAME is already released, so this run updates it"
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "$RELEASE_TITLE" \
+              --notes-file release-notes.md
+            gh release upload "$GITHUB_REF_NAME" plugins/dist/*.zip --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$RELEASE_TITLE" \
+              --notes-file release-notes.md \
+              plugins/dist/*.zip
+          fi
 
       # Last, and deliberately after the release exists.
       #
