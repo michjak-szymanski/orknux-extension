@@ -829,6 +829,269 @@ test('a jira call says what is missing, and picks its search endpoint by deploym
   );
 });
 
+test('the jenkins plugin declares what the server would accept', async () => {
+  const inspected = await inspect(shipped('jenkins'));
+
+  assert.equal(inspected.id, 'jenkins');
+  assert.deepEqual(validate(inspected), []);
+
+  assert.deepEqual(
+    inspected.parameters.map((parameter) => parameter.name),
+    ['url', 'user', 'token'],
+  );
+  /* The token is the one secret, and the credential is optional as a pair. */
+  assert.deepEqual(
+    inspected.parameters.map((parameter) => parameter.secret),
+    [false, false, true],
+  );
+  assert.deepEqual(
+    inspected.parameters.map((parameter) => parameter.required),
+    [true, false, false],
+  );
+
+  /* None: `orknux.encoding` turns the credential into base64, and is ungranted. */
+  assert.deepEqual(inspected.permissions, []);
+  assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
+  assert.deepEqual(
+    inspected.functions.map((declared) => declared.name),
+    ['jobs', 'job', 'build', 'buildLog', 'testResults', 'trigger', 'queueItem'],
+  );
+  /* All of it is fronted to agents: reading a build and running one are one job. */
+  assert.deepEqual(
+    inspected.tools.map((declared) => declared.name),
+    ['jobs', 'job', 'build', 'buildLog', 'testResults', 'trigger', 'queueItem'],
+  );
+  assert.deepEqual(
+    inspected.objects.map((declared) => declared.name),
+    ['Parameter', 'Job', 'Jobs', 'Change', 'Build', 'Log', 'Failure', 'Tests', 'Queued'],
+  );
+});
+
+test('the jenkins plugin names a job however it was spelled, and takes a log by its tail', async () => {
+  const url = new URL(`../../plugins/jenkins/jenkins.js`, import.meta.url);
+  const { default: Jenkins } = await import(url.href);
+
+  const configured = (settings) => {
+    const plugin = Object.create(Jenkins.prototype);
+    Object.defineProperty(plugin, 'settings', { value: Object.freeze(settings) });
+    const functions = plugin.functions();
+    return (name) => functions.find((one) => one.name === name);
+  };
+
+  /* Refused before a setting is read, let alone before a request goes out. */
+  assert.throws(() => configured({})('job').run('   '), /no job named/);
+  assert.throws(() => configured({})('job').run('https://ci.example.com'), /not a job name or a job url/);
+  assert.throws(() => configured({})('build').run('deploy', 'yesterday'), /not a build number or a permalink/);
+  assert.throws(() => configured({})('queueItem').run('soon'), /not a queue item id or a queue url/);
+
+  /* Then the settings, each named — and the credential is a pair or neither. */
+  assert.throws(() => configured({})('job').run('deploy'), /url parameter is not set/);
+  assert.throws(
+    () => configured({ url: 'https://ci.example.com', token: 't' })('job').run('deploy'),
+    /no user to send it as/,
+  );
+  assert.throws(
+    () => configured({ url: 'https://ci.example.com', user: 'ada' })('job').run('deploy'),
+    /no token to go with it/,
+  );
+
+  /*
+   * Everything below is watched on its way out rather than inferred. What
+   * matters about this plugin is the urls it builds — a job lives at
+   * `job/a/job/b`, a folder path and a pasted link have to arrive at the same
+   * one, and a log is fetched by an offset into it rather than whole.
+   */
+  const asked = [];
+  const door = globalThis.orknux.http.request;
+  const front = globalThis.orknux.http.get;
+
+  const sent = (json, headers) => ({ status: 200, headers: headers ?? {}, body: JSON.stringify(json), json });
+  const answer = (what) => {
+    const where = typeof what === 'string' ? what : what.url;
+    const method = (typeof what === 'string' ? 'GET' : what.method) ?? 'GET';
+    /* The log's length, which is the whole point of the HEAD. */
+    if (method === 'HEAD') {
+      return { status: 200, headers: { 'X-Text-Size': '5000000' }, body: '' };
+    }
+    /* A build accepted: empty, and the queue item only in the header. */
+    if (method === 'POST') {
+      return { status: 201, headers: { Location: 'https://ci.example.com/queue/item/77/' }, body: '' };
+    }
+    if (where.includes('/queue/item/99/')) {
+      return { status: 404, headers: {}, body: '<html>Not Found</html>' };
+    }
+    if (where.includes('/queue/item/')) {
+      return sent({
+        id: 77,
+        why: null,
+        cancelled: false,
+        task: { name: 'deploy', fullName: 'platform/deploy' },
+        executable: { number: 413 },
+      });
+    }
+    if (where.includes('progressiveText')) {
+      return { status: 200, headers: {}, body: 'alf a line that was cut\nnine\nten', json: undefined };
+    }
+    if (where.includes('consoleText')) {
+      return { status: 200, headers: {}, body: 'one\ntwo\nthree', json: undefined };
+    }
+    if (where.includes('tree=jobs')) {
+      return sent({
+        jobs: [
+          { _class: 'hudson.model.FreeStyleProject', name: 'deploy', fullName: 'deploy', color: 'blue' },
+          { _class: 'com.cloudbees.hudson.plugins.folder.Folder', name: 'platform', fullName: 'platform' },
+          { _class: 'hudson.model.FreeStyleProject', name: 'nightly', fullName: 'nightly', color: 'red' },
+        ],
+      });
+    }
+    if (where.includes('estimatedDuration')) {
+      return sent({
+        number: 412,
+        result: 'FAILURE',
+        building: false,
+        timestamp: 1700000000000,
+        duration: 61000,
+        actions: [{}, { causes: [{ shortDescription: 'Started by user Ada' }] }],
+        changeSets: [{ items: [{ commitId: 'abc123', msg: 'Tighten the timeout', author: { fullName: 'Ada' } }] }],
+      });
+    }
+    if (where.includes('healthReport')) {
+      return sent({
+        fullName: 'platform/deploy',
+        color: 'red_anime',
+        buildable: true,
+        inQueue: false,
+        healthReport: [{ score: 40 }],
+        lastBuild: { number: 412, result: 'FAILURE', timestamp: 1700000000000 },
+        lastSuccessfulBuild: { number: 409 },
+        lastFailedBuild: { number: 412 },
+        property: [
+          {},
+          {
+            parameterDefinitions: [
+              {
+                name: 'BRANCH',
+                type: 'StringParameterDefinition',
+                description: 'Which branch to deploy',
+                defaultParameterValue: { value: 'main' },
+              },
+            ],
+          },
+        ],
+      });
+    }
+    return sent({ number: 412, result: 'FAILURE', building: false });
+  };
+
+  let opened;
+  let listed;
+  let built;
+  let log;
+  let queued;
+  let started;
+  try {
+    globalThis.orknux.http.get = (where, headers) => {
+      asked.push({ url: where, method: 'GET', headers });
+      return sent({ crumb: 'c0ffee', crumbRequestField: 'Jenkins-Crumb' });
+    };
+    globalThis.orknux.http.request = (what) => {
+      asked.push(what);
+      return answer(what);
+    };
+
+    const site = { url: 'https://ci.example.com/', user: 'ada', token: 't' };
+    /* A pasted link to a build, asked about as a job: the build is not the job. */
+    opened = configured(site)('job').run('https://ci.example.com/job/platform/job/deploy/412/');
+    listed = configured(site)('jobs').run('', 2);
+    /* The same build, by its link, with `which` left at its default. */
+    built = configured(site)('build').run('https://ci.example.com/job/platform/job/deploy/412/', 'lastBuild');
+    log = configured(site)('buildLog').run('deploy', 'lastBuild', 200);
+    started = configured(site)('trigger').run('platform/deploy', { BRANCH: 'feature/x' });
+    queued = configured(site)('queueItem').run('https://ci.example.com/queue/item/77/');
+
+    /* An instance read anonymously sends no credential at all. */
+    configured({ url: 'https://ci.example.com' })('job').run('deploy');
+
+    assert.throws(
+      () => configured(site)('queueItem').run('99'),
+      /queue item 99 is not in the queue any more/,
+    );
+  } finally {
+    globalThis.orknux.http.request = door;
+    globalThis.orknux.http.get = front;
+  }
+
+  /* A folder path, a url and a plain name all arrive at `job/a/job/b`. */
+  assert.match(asked[0].url, /^https:\/\/ci\.example\.com\/job\/platform\/job\/deploy\/api\/json\?tree=/);
+  assert.equal(asked[0].method, 'GET');
+  assert.equal(
+    Buffer.from(asked[0].headers.authorization.slice('Basic '.length), 'base64').toString('utf8'),
+    'ada:t',
+  );
+  /* The colour is translated, and the parameter's class name is not its type. */
+  assert.equal(opened.name, 'platform/deploy');
+  assert.equal(opened.status, 'failing');
+  assert.equal(opened.building, true);
+  assert.equal(opened.health, 40);
+  assert.equal(opened.lastStarted, '2023-11-14T22:13:20.000Z');
+  assert.deepEqual(opened.parameters, [
+    { name: 'BRANCH', type: 'String', default: 'main', description: 'Which branch to deploy' },
+  ]);
+  assert.equal(opened.url, 'https://ci.example.com/job/platform/job/deploy/');
+
+  /* One more than the limit is asked for, which is how `more` is known. */
+  assert.match(asked[1].url, /\{0,3\}$/);
+  assert.equal(listed.more, true);
+  assert.deepEqual(
+    listed.jobs.map((one) => [one.name, one.folder, one.status]),
+    [
+      ['deploy', false, 'passing'],
+      ['platform', true, null],
+    ],
+  );
+
+  /* A link that names a build answers that build, whatever `which` said. */
+  assert.match(asked[2].url, /\/job\/platform\/job\/deploy\/412\/api\/json/);
+  assert.equal(built.number, 412);
+  assert.equal(built.cause, 'Started by user Ada');
+  assert.deepEqual(built.changes, [{ commit: 'abc123', message: 'Tighten the timeout', author: 'Ada' }]);
+  assert.equal(built.url, 'https://ci.example.com/job/platform/job/deploy/412/');
+
+  /*
+   * The log: what the build is, then a HEAD for its length, then a window off
+   * the end of it — 200 lines at 240 bytes — rather than five megabytes.
+   */
+  assert.match(asked[3].url, /\/job\/deploy\/lastBuild\/api\/json\?tree=number,result,building$/);
+  assert.equal(asked[4].method, 'HEAD');
+  assert.match(asked[5].url, /\/logText\/progressiveText\?start=4952000$/);
+  assert.equal(log.build, 412);
+  assert.equal(log.truncated, true);
+  /* The offset landed mid-line, and half a line is not a line. */
+  assert.equal(log.text, 'nine\nten');
+  assert.equal(log.lines, 2);
+
+  /* A trigger fetches a crumb first, sends it, and reads the queue item off the header. */
+  assert.equal(asked[6].url, 'https://ci.example.com/crumbIssuer/api/json');
+  assert.equal(asked[7].method, 'POST');
+  assert.equal(
+    asked[7].url,
+    'https://ci.example.com/job/platform/job/deploy/buildWithParameters?BRANCH=feature%2Fx',
+  );
+  assert.equal(asked[7].headers['Jenkins-Crumb'], 'c0ffee');
+  assert.equal(started.id, '77');
+  assert.equal(started.waiting, true);
+  assert.equal(started.build, null);
+
+  /* And the item, once it has a build: the url is built here, not read off Jenkins. */
+  assert.match(asked[8].url, /\/queue\/item\/77\/api\/json\?tree=/);
+  assert.equal(queued.waiting, false);
+  assert.equal(queued.build, 413);
+  assert.equal(queued.url, 'https://ci.example.com/job/platform/job/deploy/413/');
+
+  /* Anonymous: no authorization header at all, rather than an empty one. */
+  assert.equal(asked[9].headers.authorization, undefined);
+});
+
 test('the prometheus plugin declares what the server would accept', async () => {
   const inspected = await inspect(shipped('prometheus'));
 
@@ -1850,6 +2113,7 @@ test('the sweeps below are sweeping something', () => {
     'date',
     'github',
     'http',
+    'jenkins',
     'jira',
     'markdown',
     'mermaid',

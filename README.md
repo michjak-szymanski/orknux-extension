@@ -6,9 +6,9 @@
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2020-brightgreen)](package.json)
 [![Licence](https://img.shields.io/badge/licence-Apache--2.0-blue)](LICENSE)
 
-Fourteen production plugins — Slack, GitHub, Jira, Confluence, Prometheus,
-Mermaid, nomnoml, PDF, web search, HTTP and more — with the library and CLI to
-write your own.
+Fifteen production plugins — Slack, GitHub, Jira, Confluence, Jenkins,
+Prometheus, Mermaid, nomnoml, PDF, web search, HTTP and more — with the library
+and CLI to write your own.
 
 Extending [orknux-server](https://github.com/michjak-szymanski/orknux-server):
 the library you write a plugin against, and the tool that turns it into the one
@@ -67,6 +67,13 @@ moves it through its workflow and raises new ones — the other half of the
 sentence the github plugin starts.
 
     https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/jira/jira.js
+
+**[jenkins](plugins/jenkins/jenkins.js)** answers the question asked in the
+minute after a build goes red — the job's state, the build's result, the failing
+tests, the end of the log — and runs the job again. The log is fetched by its
+tail rather than whole, because a console log is megabytes and a sandbox is not.
+
+    https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/jenkins/jenkins.js
 
 **[prometheus](plugins/prometheus/prometheus.js)** lists the metric names a
 Prometheus knows and executes PromQL against it, so a condition can ask what the

@@ -68,6 +68,7 @@ const BRANDED = [
   { plugin: 'github', from: 'simple', icon: 'siGithub' },
   { plugin: 'confluence', from: 'simple', icon: 'siConfluence' },
   { plugin: 'jira', from: 'simple', icon: 'siJira' },
+  { plugin: 'jenkins', from: 'simple', icon: 'siJenkins' },
   { plugin: 'prometheus', from: 'simple', icon: 'siPrometheus' },
   { plugin: 'mermaid', from: 'simple', icon: 'siMermaid' },
   { plugin: 'markdown', from: 'simple', icon: 'siMarkdown' },
