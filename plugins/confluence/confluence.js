@@ -183,6 +183,42 @@ function personQuery(settings, person) {
 }
 
 /**
+ * The scheme and host, without whatever path the wiki sits under.
+ *
+ * An avatar's path is absolute from the host rather than from the wiki, and on
+ * Cloud it already carries the `/wiki` the configured url ends with — so
+ * joining the two the obvious way asked for `/wiki/wiki/aa-avatar/…` and got a
+ * 404. Everything else here hangs off the wiki root; this is the one thing
+ * that hangs off the site.
+ */
+function originOf(url) {
+  const found = String(url).match(/^(https?:\/\/[^/]+)/);
+  return found === null ? null : found[1];
+}
+
+/** An avatar's address, from whatever shape Confluence wrote its path in. */
+function avatarAt(settings, path) {
+  if (typeof path !== 'string' || path.length === 0) {
+    return null;
+  }
+  if (/^https?:\/\//.test(path)) {
+    return path;
+  }
+  const origin = originOf(root(settings));
+  return origin === null ? null : origin + (path.startsWith('/') ? path : `/${path}`);
+}
+
+/** A short name for bytes read out of Confluence, derived from the thing itself. */
+function keyFor(text) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `confluence.${hash.toString(36)}`;
+}
+
+/**
  * The content id, from an id or from any of the urls Confluence spells a page
  * as — Cloud's `/spaces/KEY/pages/123/Title` and Server's `?pageId=123` both.
  */
@@ -393,7 +429,32 @@ the same way as a subject nobody has written about.`,
             description: 'known, app, anonymous, unknown — an app is a bot, not somebody to ask.',
           },
           { name: 'external', kind: 'boolean', description: 'A guest rather than a member of the site.' },
-          { name: 'picture', kind: 'string', description: 'Their avatar, as a url.' },
+          {
+            name: 'avatarUrl',
+            kind: 'string',
+            description:
+              'Their avatar as a url, never the image itself - null where Confluence offers ' +
+              'none. Named for what it holds because a field called picture was read as image ' +
+              'content by something downstream, which then refused a url as bad base64. Behind ' +
+              'the same login as the wiki, so it opens for a person and not for a service.',
+          },
+          {
+            name: 'avatar',
+            kind: 'string',
+            description:
+              'The picture itself as base64, and only where withAvatar asked for it - null ' +
+              'otherwise, and null again where fetching it failed, because an avatar is not ' +
+              'worth failing a lookup over.',
+          },
+          { name: 'avatarType', kind: 'string', description: 'What those bytes are: image/png, image/svg+xml.' },
+          {
+            name: 'avatarKey',
+            kind: 'string',
+            description:
+              'Where the picture is kept for the rest of this session. Hand it to slack_upload ' +
+              'or slack_uploadBinary as contentKey rather than copying the base64 out. Empty ' +
+              'where nothing was fetched, or where there is no session to keep it in.',
+          },
           { name: 'url', kind: 'string', description: 'Their profile, for a person to open.' },
         ],
       }),
@@ -531,18 +592,53 @@ the same way as a subject nobody has written about.`,
           'profile url, or a mention copied straight out of a page body, which is the usual one: ' +
           'a page carries a mention as <ri:user ri:account-id="..."/> rather than as a name, so ' +
           'openPage answers those ids in its mentions list and this turns one into a person. A ' +
-          'display name is not an identifier and will not work - search for the person instead.',
-        params: [{ name: 'person', type: 'string' }],
+          'display name is not an identifier and will not work - search for the person instead. ' +
+          'withAvatar fetches their picture as base64 too, which is off by default: a name and ' +
+          'an email are what this is usually for, and the avatar sits behind the same login as ' +
+          'the wiki, so the url alone opens for nobody else.',
+        params: [
+          { name: 'person', type: 'string' },
+          { name: 'withAvatar', type: 'boolean', required: false, default: false },
+        ],
         returnType: 'User',
-        run: (person) => {
+        run: (person, withAvatar) => {
           const query = personQuery(this.settings, person);
           const found = read(this.settings, `/rest/api/user?${query}`);
 
           const site = root(this.settings);
           const base = at(at(found, '_links'), 'base') ?? site;
-          const picture = at(at(found, 'profilePicture'), 'path');
+          const avatarUrl = avatarAt(this.settings, at(at(found, 'profilePicture'), 'path'));
           const id = at(found, 'accountId') ?? at(found, 'userKey');
           const username = at(found, 'username');
+
+          /*
+           * The picture itself, only when somebody asked for it.
+           *
+           * An avatar behind a login is a url nothing else can open: the
+           * credential that reads it is this plugin's, so a caller holding
+           * the link still cannot see the face. Fetching is therefore worth
+           * offering and not worth doing on every lookup - a name and an
+           * email are what openUser is usually for, and bytes nobody wanted
+           * are bytes through the model.
+           *
+           * A refusal is not an error. An avatar is decoration, and failing a
+           * whole lookup because a default picture 404ed would be the wrong
+           * trade entirely.
+           */
+          let avatar = null;
+          let avatarType = null;
+          let avatarKey = '';
+          if (withAvatar === true && avatarUrl !== null) {
+            const fetched = orknux.http.download(avatarUrl, {
+              authorization: authorization(this.settings),
+            });
+            if (fetched.error === undefined && fetched.status < 400) {
+              avatar = fetched.base64;
+              avatarType = fetched.contentType;
+              const key = keyFor(avatarUrl);
+              avatarKey = orknux.session.store.put(key, fetched.base64).error === undefined ? key : '';
+            }
+          }
 
           return {
             id: id,
@@ -552,7 +648,10 @@ the same way as a subject nobody has written about.`,
             email: at(found, 'email'),
             type: at(found, 'type') ?? at(found, 'accountType'),
             external: at(found, 'isExternalCollaborator') === true,
-            picture: typeof picture === 'string' ? base + picture : null,
+            avatarUrl: avatarUrl,
+            avatar: avatar,
+            avatarType: avatarType,
+            avatarKey: avatarKey,
             /*
              * The two deployments keep a profile in different places, and
              * neither answers the link in the user itself.

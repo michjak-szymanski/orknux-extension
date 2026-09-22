@@ -14,7 +14,7 @@ makes the calls; the plugin never holds the token.
 |---|---|
 | `search(query, limit = 20)` | `total` and `matches` — `id`, `type`, `title`, `space`, an `excerpt` around the match, `updated` and `url` each. `openPage` takes either the id or the url. |
 | `openPage(page)` | One page whole: `id`, `title`, `space`, `version`, `updated`, `by` — who last changed it — `url`, and the `body`. |
-| `openUser(person)` | Who an id belongs to: display name, email where Atlassian will say, whether it is a person or an app, and a profile link. Takes a mention copied straight out of a page. |
+| `openUser(person, withAvatar)` | Who an id belongs to: display name, email where Atlassian will say, whether it is a person or an app, and a profile link. Takes a mention copied straight out of a page. `withAvatar` fetches the picture itself as base64. |
 
 Both are fronted to agents, which is most of the point: a model that can look
 something up on the wiki stops guessing at it.
@@ -78,6 +78,26 @@ decides that the same way it decides everything else — off `email`. On Cloud
 it is an account id, because Cloud retired usernames. On Server a
 32-character hex string is a user key and anything else is a username, which
 is the distinction Confluence itself draws.
+
+### The avatar, and why fetching it is opt-in
+
+`avatarUrl` is a url and never the image — and it sits behind the same login
+as the wiki, so handing it to somebody who is not signed in shows them
+nothing. `withAvatar: true` therefore fetches the picture with the plugin's
+own credential and answers it three ways: `avatar` as base64, `avatarType`
+as what the bytes are, and `avatarKey` naming them in the session store —
+pass that key to `slack_upload` rather than copying base64 through a model.
+
+It is off by default because a name and an email are what a lookup is usually
+for, and bytes nobody asked for are bytes through the model. A fetch that
+fails leaves all three empty and the lookup intact: an avatar is decoration,
+and failing a whole lookup over a missing default picture would be the wrong
+trade.
+
+**The url hangs off the site, not off the wiki.** Cloud's `_links.base` ends
+in `/wiki` and the avatar path *begins* with `/wiki`, so joining them the
+obvious way asks for `/wiki/wiki/aa-avatar/…` and 404s. This builds it from
+the scheme and host instead, which is right on both deployments.
 
 **A display name is not an identifier.** There is no `openUser("Jo Smith")`:
 Confluence looks a person up by key, not by label. Search for the person, or

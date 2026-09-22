@@ -881,12 +881,74 @@ test('confluence turns the ids a page mentions into people, on either deployment
   assert.equal(person.name, 'Jo Smith');
   assert.equal(person.username, 'jsmith');
   assert.equal(person.id, 'ff8080816f2b1c34016f2b1c34000001');
-  assert.equal(person.picture, 'https://wiki.acme.com/images/jo.png');
+  /* A url, under a name that says so - the field is not image content. */
+  assert.equal(person.avatarUrl, 'https://wiki.acme.com/images/jo.png');
   assert.equal(person.url, 'https://wiki.acme.com/display/~jsmith');
 
   /* And a bare id on Cloud is an account id, because Cloud has nothing else. */
   assert.equal(asked[2], 'https://acme.atlassian.net/wiki/rest/api/user?accountId=5b10ac8d82e05b22cc7d4ef5');
   assert.equal(onCloud.external, false);
+
+  /*
+   * An avatar hangs off the site, not off the wiki. Cloud's `_links.base`
+   * ends in `/wiki` and its avatar path *begins* with `/wiki`, so joining the
+   * two the obvious way asked for `/wiki/wiki/aa-avatar/…` and got a 404.
+   */
+  const fetched = [];
+  const held = globalThis.orknux.http.get;
+  const bytes = globalThis.orknux.http.download;
+  const session = globalThis.orknux.session;
+  let withPicture;
+  let refusedPicture;
+  try {
+    globalThis.orknux.http.get = () => ({
+      status: 200,
+      headers: {},
+      body: '{}',
+      json: {
+        type: 'known',
+        accountId: '5b10ac8d82e05b22cc7d4ef5',
+        displayName: 'Ada Lovelace',
+        profilePicture: { path: '/wiki/aa-avatar/5b10ac8d82e05b22cc7d4ef5' },
+        _links: { base: 'https://acme.atlassian.net/wiki' },
+      },
+    });
+    globalThis.orknux.http.download = (where, headers) => {
+      fetched.push({ where, headers });
+      return { status: 200, headers: {}, base64: 'aVZCT1J3MEtHZ28=', size: 11, contentType: 'image/png' };
+    };
+    globalThis.orknux.session = { store: { put: () => ({}), get: () => null } };
+
+    withPicture = configured(cloud)('openUser').run('5b10ac8d82e05b22cc7d4ef5', true);
+
+    /* And a refusal, which must not take the lookup down with it. */
+    globalThis.orknux.http.download = () => ({ error: 'the avatar is not there' });
+    refusedPicture = configured(cloud)('openUser').run('5b10ac8d82e05b22cc7d4ef5', true);
+  } finally {
+    globalThis.orknux.http.get = held;
+    globalThis.orknux.http.download = bytes;
+    globalThis.orknux.session = session;
+  }
+
+  assert.equal(withPicture.avatarUrl, 'https://acme.atlassian.net/wiki/aa-avatar/5b10ac8d82e05b22cc7d4ef5');
+  assert.doesNotMatch(withPicture.avatarUrl, /wiki\/wiki/, 'the wiki path was doubled into the avatar url');
+
+  /* Fetched with the wiki's own credential, because the avatar is behind it. */
+  assert.equal(fetched[0].where, withPicture.avatarUrl);
+  assert.match(fetched[0].headers.authorization, /^Basic /);
+  assert.equal(withPicture.avatar, 'aVZCT1J3MEtHZ28=');
+  assert.equal(withPicture.avatarType, 'image/png');
+  assert.ok(withPicture.avatarKey.startsWith('confluence.'));
+
+  /* An avatar is decoration; a lookup is not worth failing over one. */
+  assert.equal(refusedPicture.avatar, null);
+  assert.equal(refusedPicture.avatarType, null);
+  assert.equal(refusedPicture.avatarKey, '');
+  assert.equal(refusedPicture.name, 'Ada Lovelace');
+
+  /* And nothing is fetched unless it was asked for. */
+  assert.equal(person.avatar, null);
+  assert.equal(person.avatarKey, '');
 
   /* The other spellings of the same question, resolved before any request. */
   assert.throws(() => configured({})('openUser').run('   '), /nobody to look up/);
