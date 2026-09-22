@@ -545,6 +545,8 @@ function searchAs(token, query, limit) {
     ts: at(one, 'ts'),
     /* Slack answers a search match by name where a thread answers by id. */
     user: at(one, 'user') ?? at(one, 'username'),
+    /* And it carries the name beside the id, so this one costs no lookup at all. */
+    userName: at(one, 'username') ?? null,
     text: at(one, 'text'),
     permalink: at(one, 'permalink'),
   }));
@@ -598,6 +600,51 @@ function workspaceUrl(settings) {
   const who = slackApi(settings, 'auth.test', {});
   const url = at(who, 'url');
   return typeof url === 'string' ? url.replace(/\/+$/, '') : null;
+}
+
+/**
+ * How many people one call will look up before it stops asking.
+ *
+ * A name costs a request, and a busy channel has a long tail of one-message
+ * authors. Twenty covers a thread or a scan several times over; past that the
+ * ids come back unresolved rather than the call taking a minute.
+ */
+const NAMED = 20;
+
+/**
+ * Names for the people who wrote a set of messages, each asked for once.
+ *
+ * A thread of forty messages from three people is three lookups, not forty:
+ * Slack writes an author as `U0123ABCD` on every single one, and the same id
+ * resolves to the same person all day. A lookup that fails leaves the name
+ * null rather than failing the read - an unresolved author is a worse answer
+ * than an id, and a missing thread is worse than both.
+ */
+function namesFor(connection, settings, ids, cap) {
+  const names = new Map();
+  for (const id of ids) {
+    if (typeof id !== 'string' || id.length === 0 || names.has(id)) {
+      continue;
+    }
+    if (names.size >= cap) {
+      names.set(id, null);
+      continue;
+    }
+    const found = through((use) => orknux.slack.user(use, id), connection, settings.slack);
+    names.set(
+      id,
+      found.error === undefined
+        ? at(found, 'displayName') || at(found, 'realName') || at(found, 'name') || null
+        : null,
+    );
+  }
+  return names;
+}
+
+/** The same messages, each carrying who wrote it rather than only their id. */
+function withAuthors(connection, settings, messages) {
+  const names = namesFor(connection, settings, messages.map((one) => at(one, 'user')), NAMED);
+  return messages.map((one) => ({ ...one, userName: names.get(at(one, 'user')) ?? null }));
 }
 
 /** Whether every word is somewhere in the text, in any order and whatever the capitals. */
@@ -746,7 +793,15 @@ export default class Slack extends OrknuxPlugin {
         description: 'One message in a thread.',
         properties: [
           { name: 'ts', kind: 'string', description: "Slack's timestamp, which is also the message's id." },
-          { name: 'user', kind: 'string', description: 'Who wrote it, or null where Slack said neither.' },
+          { name: 'user', kind: 'string', description: 'Who wrote it, as an id, or null where Slack said neither.' },
+          {
+            name: 'userName',
+            kind: 'string',
+            description:
+              'Who that id is, resolved - the display name, or the real name where there is no ' +
+              'display name. Null where withNames was off, where the lookup was refused, or ' +
+              'past the twentieth distinct author in one call.',
+          },
           { name: 'text', kind: 'string', description: 'What it says, in mrkdwn.' },
           {
             name: 'parent',
@@ -808,7 +863,14 @@ export default class Slack extends OrknuxPlugin {
           { name: 'channel', kind: 'string', description: 'The channel id.' },
           { name: 'channelName', kind: 'string', description: 'Its name, without the hash.' },
           { name: 'ts', kind: 'string', description: 'The message timestamp.' },
-          { name: 'user', kind: 'string', description: 'Who wrote it.' },
+          { name: 'user', kind: 'string', description: 'Who wrote it, as Slack named them in the match.' },
+          {
+            name: 'userName',
+            kind: 'string',
+            description:
+              "Their name. Free from search, which carries one in the match; looked up by " +
+              'findRecent, which gets an id like everything that reads history.',
+          },
           { name: 'text', kind: 'string', description: 'What it says.' },
           { name: 'permalink', kind: 'string', description: 'The way back to it — readMessage takes this.' },
         ],
@@ -1378,20 +1440,37 @@ adding a message to anybody's unread count.`,
           'to carries it under files, with the id readAttachment takes - so a question about "the ' +
           'file" is answered by reading the thread rather than by guessing a timestamp. Pass the channel id and the thread\'s ts (threadTs on an event; a message\'s ' +
           'own ts when it is the parent). Pass the connection the event came in on, or an empty string to ' +
-          'use the configured one. An empty string is always safe: a connection named by an older event may since have been deleted. limit caps how many messages come back.',
+          'use the configured one. An empty string is always safe: a connection named by an older event may since have been deleted. limit caps how many messages come back. Each message says who wrote it as a userName as well as an id, ' +
+          'so a thread reads as people rather than as U0123ABCD - that costs one lookup per ' +
+          'distinct author and can be turned off with withNames where the ids are all you need.',
         params: [
           { name: 'connection', type: 'string' },
           { name: 'channel', type: 'string' },
           { name: 'threadTs', type: 'string' },
           { name: 'limit', type: 'number', required: false, default: 20 },
+          { name: 'withNames', type: 'boolean', required: false, default: true },
         ],
         returnType: 'Thread',
-        run: (connection, channel, threadTs, limit) => {
+        run: (connection, channel, threadTs, limit, withNames) => {
           const read = through((use) => orknux.slack.thread(use, channel, threadTs, limit), connection, this.settings.slack);
           if (read.error !== undefined) {
             throw new Error(`could not read the thread: ${read.error}`);
           }
-          return read;
+          const messages = at(read, 'messages') ?? [];
+          /*
+           * On by default, because an id is not an answer. A thread where
+           * every author reads `U0123ABCD` is one a model has to look four
+           * people up to understand, and it will either spend four calls
+           * doing it or guess - and the same ids resolve to the same people
+           * whatever asks, so doing it once here is cheaper than any of that.
+           */
+          return {
+            ...read,
+            messages:
+              withNames === false
+                ? messages.map((one) => ({ ...one, userName: null }))
+                : withAuthors(connection, this.settings, messages),
+          };
         },
       }),
 
@@ -1505,7 +1584,19 @@ adding a message to anybody's unread count.`,
           if (found.error !== undefined) {
             throw new Error(`could not search Slack: ${found.error}`);
           }
-          return found;
+          /*
+           * The field exists on every match whichever path ran. Slack's own
+           * search carries the author's name beside the id, so this is free
+           * here - and a caller reading `userName` should not have to know
+           * which of two routes answered it.
+           */
+          return {
+            ...found,
+            matches: (at(found, 'matches') ?? []).map((one) => ({
+              ...one,
+              userName: at(one, 'userName') ?? at(one, 'username') ?? null,
+            })),
+          };
         },
       }),
 
@@ -1522,15 +1613,17 @@ adding a message to anybody's unread count.`,
           'if not given. Answers the matches newest first with a permalink each, how much was read ' +
           'to find them, and whether the window was read whole. This is a scan and not an index: ' +
           'it sees recent history rather than the archive, and nothing in a channel the bot was ' +
-          'never invited to.',
+          'never invited to. Each match says who wrote it as a userName as well as an id, which costs ' +
+          'one lookup per distinct author among the matches shown.',
         params: [
           { name: 'query', type: 'string' },
           { name: 'channel', type: 'string', required: false, default: '' },
           { name: 'days', type: 'number', required: false, default: 7 },
           { name: 'limit', type: 'number', required: false, default: 20 },
+          { name: 'withNames', type: 'boolean', required: false, default: true },
         ],
         returnType: 'RecentResult',
-        run: (query, channel, days, limit) => {
+        run: (query, channel, days, limit, withNames) => {
           const terms = (typeof query === 'string' ? query : '')
             .trim()
             .toLowerCase()
@@ -1628,8 +1721,15 @@ adding a message to anybody's unread count.`,
 
           /* Newest first, which is the order a person asking about last week means. */
           matches.sort((first, second) => Number(second.ts) - Number(first.ts));
+          /*
+           * Names for the ones actually coming back, not for everything read.
+           * A scan of fifteen channels turns up authors by the dozen and
+           * answers twenty of them; looking up the rest would be requests
+           * spent on messages nobody is going to see.
+           */
+          const shown = matches.slice(0, capped);
           return {
-            matches: matches.slice(0, capped),
+            matches: withNames === false ? shown : withAuthors('', this.settings, shown),
             total: matches.length,
             channels: reading.length - refusals.length,
             messages: read,

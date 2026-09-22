@@ -631,6 +631,76 @@ test('the teams plugin declares what the server would accept', async () => {
   );
 });
 
+test('slack reads a thread as people, and looks each of them up once', async () => {
+  const url = new URL(`../../plugins/slack/slack.js`, import.meta.url);
+  const { default: Slack } = await import(url.href);
+
+  const plugin = Object.create(Slack.prototype);
+  Object.defineProperty(plugin, 'settings', { value: Object.freeze({ slack: 'C-DEFAULT' }) });
+  const call = (name) => plugin.functions().find((one) => one.name === name);
+
+  /* Four messages, three of them from the same person. */
+  const thread = {
+    replies: 4,
+    messages: [
+      { ts: '1700000000.000100', user: 'U1', text: 'the deploy is stuck', parent: true },
+      { ts: '1700000100.000100', user: 'U2', text: 'looking now' },
+      { ts: '1700000200.000100', user: 'U1', text: 'thanks' },
+      { ts: '1700000300.000100', user: 'U1', text: 'still stuck' },
+    ],
+  };
+  const people = {
+    U1: { id: 'U1', name: 'ada', realName: 'Ada Lovelace', displayName: 'Ada', bot: false },
+    U2: { id: 'U2', name: 'bot', realName: 'Deploy Bot', displayName: '', bot: true },
+  };
+
+  const looked = [];
+  const thread_ = globalThis.orknux.slack.thread;
+  const user_ = globalThis.orknux.slack.user;
+  let read;
+  let bare;
+  try {
+    globalThis.orknux.slack.thread = () => thread;
+    globalThis.orknux.slack.user = (_connection, id) => {
+      looked.push(id);
+      return people[id] ?? { error: 'user_not_found' };
+    };
+
+    read = call('readThread').run('', 'C1', '1700000000.000100', 20, true);
+    bare = call('readThread').run('', 'C1', '1700000000.000100', 20, false);
+  } finally {
+    globalThis.orknux.slack.thread = thread_;
+    globalThis.orknux.slack.user = user_;
+  }
+
+  /*
+   * Three messages from Ada cost one lookup, not three. Slack writes the id
+   * on every message and the same id is the same person all day, so the
+   * saving is the whole reason this belongs in the plugin rather than in
+   * whatever is reading the thread.
+   */
+  assert.deepEqual(looked, ['U1', 'U2']);
+
+  assert.deepEqual(
+    read.messages.map((one) => one.userName),
+    ['Ada', 'Deploy Bot', 'Ada', 'Ada'],
+  );
+  /* A display name where there is one, the real name where there is not. */
+  assert.equal(read.messages[1].userName, 'Deploy Bot');
+
+  /* The id is still there beside it, and everything else the thread said. */
+  assert.equal(read.messages[0].user, 'U1');
+  assert.equal(read.messages[0].text, 'the deploy is stuck');
+  assert.equal(read.replies, 4);
+
+  /* Off, and the field is null rather than missing - one shape either way. */
+  assert.deepEqual(
+    bare.messages.map((one) => one.userName),
+    [null, null, null, null],
+  );
+  assert.equal(looked.length, 2, 'withNames: false still looked somebody up');
+});
+
 test('slack findRecent reads what the bot was invited to, and nothing else', async () => {
   const url = new URL(`../../plugins/slack/slack.js`, import.meta.url);
   const { default: Slack } = await import(url.href);

@@ -29,7 +29,7 @@ configured `slack` parameter. The section after the tables says why.
 
 | Function | Answers |
 |---|---|
-| `readThread(connection, channel, threadTs, limit)` | `messages` — each with `ts`, `user`, `text` and whether it is the `parent` — and `replies`, Slack's own count of the whole thread rather than of the page. `limit` defaults to 20. |
+| `readThread(connection, channel, threadTs, limit, withNames)` | `messages` — each with `ts`, `user`, `text` and whether it is the `parent` — and `replies`, Slack's own count of the whole thread rather than of the page. `limit` defaults to 20. |
 | `readMessage(connection, link)` | The one message a permalink points at: `channel`, `ts`, `user`, `text`, `threadTs`. For when a message quotes another by link. |
 | `whoIs(connection, userId)` | Who an id belongs to: `id`, `name`, `realName`, `displayName`, `bot`. Takes the id bare or as the whole `<@U…>` notation a message carries it in. |
 | `search(connection, query, limit)` | `matches` — `channel`, `channelName`, `ts`, `user`, `text`, `permalink` each — and `total`, how many the whole search holds. Slack's search syntax works: `in:#channel`, `from:@name`, `"an exact phrase"`. |
@@ -62,6 +62,28 @@ is in:
 |---|---|
 | `listAttachments(channel, ts)` | `files` hanging on one message — `id`, `name`, `title`, `filetype`, `mimetype`, `size`, `permalink` each. A message with no files answers an empty list. Reads channel history, falling back to the thread, because a reply is not in the channel's history. |
 | `readAttachment(file)` | One attachment by id: `name`, `mimetype`, `size`, and exactly one of `content` (text as text) or `base64` (binary as bytes), the other `null` — plus a `key` naming whichever it was. Hand that straight to `uploadBinary` or `upload` as `contentKey` to move a file between channels without either of you retyping it. |
+
+## A thread reads as people, not as ids
+
+Slack writes an author as `U0123ABCD` on every message, so a thread arrives
+as four ids and a model has to look each of them up to understand who is
+talking — or guess. `readThread` and `findRecent` resolve them: every message
+carries a `userName` beside its `user`.
+
+**Each person is looked up once.** A thread of forty messages from three
+people is three requests, because the same id is the same person all day.
+That saving is the reason this belongs in the plugin rather than in whatever
+reads the thread.
+
+| | |
+|---|---|
+| `withNames` | on by default; pass `false` where the ids are all you need |
+| cost | one lookup per **distinct** author, capped at twenty per call |
+| a failed lookup | leaves that name null — an unresolved author beats a failed read |
+| `search` | free: Slack's own match carries the name beside the id |
+
+The name is the display name, falling back to the real name where somebody
+set none. `whoIs` is still there for one id on its own.
 
 ## Passing content by key
 
