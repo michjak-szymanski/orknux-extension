@@ -647,6 +647,34 @@ function withAuthors(connection, settings, messages) {
   return messages.map((one) => ({ ...one, userName: names.get(at(one, 'user')) ?? null }));
 }
 
+/**
+ * How much of a workspace's directory one search will read.
+ *
+ * `users.list` is the only way to match a name - Slack has no user search for
+ * a bot - and it answers two hundred accounts a page. Five pages covers a
+ * thousand people, which is most workspaces whole; past that the answer says
+ * it was cut rather than pretending nobody else matched.
+ */
+const DIRECTORY = 5;
+
+/** What an address looks like, closely enough to decide which call to make. */
+const ADDRESS = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/** One Slack account as the declared `User` shape — see objects(). */
+function userOf(one) {
+  const profile = at(one, 'profile');
+  const shown = at(profile, 'display_name');
+  return {
+    id: at(one, 'id'),
+    name: at(one, 'name'),
+    realName: at(profile, 'real_name') ?? at(one, 'real_name'),
+    /* Slack writes an empty string for somebody who set none; null says it plainer. */
+    displayName: typeof shown === 'string' && shown.length > 0 ? shown : null,
+    email: at(profile, 'email'),
+    bot: at(one, 'is_bot') === true,
+  };
+}
+
 /** Whether every word is somewhere in the text, in any order and whatever the capitals. */
 function carries(text, terms) {
   const haystack = String(text ?? '').toLowerCase();
@@ -852,7 +880,31 @@ export default class Slack extends OrknuxPlugin {
           { name: 'name', kind: 'string', description: 'The username.' },
           { name: 'realName', kind: 'string', description: 'Their actual name, where they set one.' },
           { name: 'displayName', kind: 'string', description: 'What Slack shows in a channel.' },
+          {
+            name: 'email',
+            kind: 'string',
+            description:
+              'Their address, where the token may see one - it takes the users:read.email scope, ' +
+              'and is null without it. whoIs answers null here; findUsers fills it in.',
+          },
           { name: 'bot', kind: 'boolean', description: 'Whether this is an app rather than a person.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'FoundUsers',
+        description: 'What looking for people came to.',
+        properties: [
+          { name: 'users', kind: 'array', of: 'User', description: 'Capped by limit.' },
+          { name: 'total', kind: 'number', description: 'How many matched what was read, before limit.' },
+          { name: 'read', kind: 'number', description: 'How many accounts were looked at to find them.' },
+          {
+            name: 'complete',
+            kind: 'boolean',
+            description:
+              'The whole directory was read. False means a big workspace ran past the page cap ' +
+              'and somebody further down may match - narrow the query, or use an email.',
+          },
         ],
       }),
 
@@ -1219,6 +1271,7 @@ adding a message to anybody's unread count.`,
     return [
       new OrknuxFunctionTool({ function: 'readMessage' }),
       new OrknuxFunctionTool({ function: 'whoIs' }),
+      new OrknuxFunctionTool({ function: 'findUsers' }),
       new OrknuxFunctionTool({ function: 'mention' }),
       new OrknuxFunctionTool({ function: 'readThread' }),
       /*
@@ -1428,7 +1481,106 @@ adding a message to anybody's unread count.`,
           if (found.error !== undefined) {
             throw new Error(`could not look the user up: ${found.error}`);
           }
-          return found;
+          /* The field exists whichever call answered, so nothing has to ask which did. */
+          return { ...found, email: at(found, 'email') ?? null };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'findUsers',
+        description:
+          'Finds people by name or by email, for turning "the person called Ada" or an address ' +
+          'into the U… id every other call here takes. An email is matched exactly, which is one ' +
+          'cheap request; anything else is matched against usernames, real names, display names ' +
+          'and addresses, with every word having to appear somewhere - so "ada lovelace" and ' +
+          '"lovelace" both find her and "ada bob" finds nobody. Answers the people, how many ' +
+          'matched, how many accounts were read to find them, and whether the whole directory ' +
+          'was read - false there means a large workspace ran past the page cap and somebody ' +
+          'further down may match, so narrow the query or use an address. Runs on the bot token ' +
+          'and needs users:read, plus users:read.email for anything to do with addresses.',
+        params: [
+          { name: 'query', type: 'string' },
+          { name: 'limit', type: 'number', required: false, default: 10 },
+        ],
+        returnType: 'FoundUsers',
+        run: (query, limit) => {
+          const asked = typeof query === 'string' ? query.trim() : '';
+          if (asked.length === 0) {
+            throw new Error('there is nobody to look for');
+          }
+          const capped = Math.min(Math.max(Math.trunc(limit), 1), 100);
+
+          /*
+           * An address is an exact question, and Slack has an exact answer for
+           * it. Reading the whole directory to find something it can look up
+           * directly would be a hundred times the work for the same person.
+           */
+          if (ADDRESS.test(asked)) {
+            let found;
+            try {
+              found = slackApi(this.settings, 'users.lookupByEmail', { email: asked });
+            } catch (thrown) {
+              /*
+               * Nobody at that address is an answer, not a failure - the
+               * question was whether they are here, and they are not.
+               */
+              if (/users_not_found/.test(thrown.message)) {
+                return { users: [], total: 0, read: 1, complete: true };
+              }
+              throw thrown;
+            }
+            const one = at(found, 'user');
+            return {
+              users: one === null ? [] : [userOf(one)],
+              total: one === null ? 0 : 1,
+              read: 1,
+              complete: true,
+            };
+          }
+
+          /*
+           * And a name is not, because Slack has no user search for a bot at
+           * all: `users.list` and a filter is the whole of what there is. It
+           * is paged rather than read whole, and the answer says whether it
+           * reached the end.
+           */
+          const terms = asked.toLowerCase().split(/\s+/).filter((one) => one.length > 0);
+          const matches = [];
+          let read = 0;
+          let cursor = '';
+          let complete = false;
+          for (let page = 0; page < DIRECTORY; page += 1) {
+            const listed = slackApi(this.settings, 'users.list', { limit: '200', cursor: cursor });
+            const members = at(listed, 'members') ?? [];
+            read += members.length;
+
+            for (const member of members) {
+              /* A deactivated account is not somebody to find. */
+              if (at(member, 'deleted') === true) {
+                continue;
+              }
+              const person = userOf(member);
+              const haystack =
+                `${person.name ?? ''} ${person.realName ?? ''} ` +
+                `${person.displayName ?? ''} ${person.email ?? ''}`;
+              if (carries(haystack, terms)) {
+                matches.push(person);
+              }
+            }
+
+            cursor = at(at(listed, 'response_metadata'), 'next_cursor') ?? '';
+            if (typeof cursor !== 'string' || cursor.length === 0) {
+              complete = true;
+              break;
+            }
+          }
+
+          return {
+            users: matches.slice(0, capped),
+            total: matches.length,
+            read: read,
+            complete: complete,
+          };
         },
       }),
 

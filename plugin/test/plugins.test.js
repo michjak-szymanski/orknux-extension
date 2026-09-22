@@ -217,6 +217,7 @@ test('the slack plugin declares what the server would accept', async () => {
       'isFirstReply',
       'readMessage',
       'whoIs',
+      'findUsers',
       'readThread',
       'post',
       'react',
@@ -243,6 +244,7 @@ test('the slack plugin declares what the server would accept', async () => {
     [
       'readMessage',
       'whoIs',
+      'findUsers',
       'mention',
       'readThread',
       'post',
@@ -629,6 +631,110 @@ test('the teams plugin declares what the server would accept', async () => {
     inspected.functions.map((declared) => declared.name),
     ['verify', 'text', 'sender', 'message', 'channelUrl', 'replyUrl'],
   );
+});
+
+test('slack finds people by email exactly, and by name through the directory', async () => {
+  const url = new URL(`../../plugins/slack/slack.js`, import.meta.url);
+  const { default: Slack } = await import(url.href);
+
+  const plugin = Object.create(Slack.prototype);
+  Object.defineProperty(plugin, 'settings', { value: Object.freeze({ botToken: 'xoxb-t' }) });
+  const call = (name) => plugin.functions().find((one) => one.name === name);
+
+  const ada = {
+    id: 'U1',
+    name: 'ada',
+    deleted: false,
+    is_bot: false,
+    profile: { real_name: 'Ada Lovelace', display_name: 'Ada', email: 'ada@acme.com' },
+  };
+  const pages = [
+    {
+      ok: true,
+      members: [
+        ada,
+        { id: 'U2', name: 'bob', profile: { real_name: 'Bob Adams', display_name: '' } },
+        { id: 'U3', name: 'gone', deleted: true, profile: { real_name: 'Ada Ghost' } },
+      ],
+      response_metadata: { next_cursor: 'PAGE2' },
+    },
+    {
+      ok: true,
+      members: [{ id: 'U4', name: 'lovelace2', profile: { real_name: 'Ada Lovelace', display_name: 'Ada L' } }],
+      response_metadata: { next_cursor: '' },
+    },
+  ];
+
+  const asked = [];
+  const door = globalThis.orknux.http.request;
+  let byEmail;
+  let missing;
+  let byName;
+  let narrow;
+  try {
+    globalThis.orknux.http.request = (what) => {
+      asked.push(what);
+      const method = what.url.slice('https://slack.com/api/'.length);
+      if (method === 'users.lookupByEmail') {
+        return what.body.includes('ada%40acme.com')
+          ? { status: 200, headers: {}, body: '{}', json: { ok: true, user: ada } }
+          : { status: 200, headers: {}, body: '{}', json: { ok: false, error: 'users_not_found' } };
+      }
+      const page = what.body.includes('cursor=PAGE2') ? pages[1] : pages[0];
+      return { status: 200, headers: {}, body: '{}', json: page };
+    };
+
+    byEmail = call('findUsers').run('ada@acme.com', 10);
+    missing = call('findUsers').run('nobody@acme.com', 10);
+    byName = call('findUsers').run('ada lovelace', 10);
+    narrow = call('findUsers').run('ada', 1);
+  } finally {
+    globalThis.orknux.http.request = door;
+  }
+
+  /*
+   * An address is an exact question with an exact answer - one request, not a
+   * walk through everybody. Reading the directory to find what Slack can look
+   * up directly would be a hundred times the work for the same person.
+   */
+  assert.equal(asked[0].url, 'https://slack.com/api/users.lookupByEmail');
+  assert.equal(byEmail.users.length, 1);
+  assert.equal(byEmail.users[0].email, 'ada@acme.com');
+  assert.equal(byEmail.read, 1);
+  assert.equal(byEmail.complete, true);
+
+  /* Nobody at that address is an answer, not a failure. */
+  assert.deepEqual(missing.users, []);
+  assert.equal(missing.total, 0);
+
+  /*
+   * A name has no exact call behind it: Slack gives a bot no user search at
+   * all, so it is users.list and a filter, paged to the end.
+   */
+  assert.equal(asked[2].url, 'https://slack.com/api/users.list');
+  assert.match(asked[3].body, /cursor=PAGE2/);
+  assert.deepEqual(
+    byName.users.map((one) => one.id),
+    ['U1', 'U4'],
+    'both Ada Lovelaces should match across two pages',
+  );
+  /* Bob Adams carries "ada" inside his surname and neither of the other words. */
+  assert.equal(byName.total, 2);
+  assert.equal(byName.complete, true);
+  assert.equal(byName.read, 4, 'every account read counts, deactivated ones included');
+
+  /* A deactivated account is not somebody to find. */
+  assert.ok(!byName.users.some((one) => one.id === 'U3'));
+
+  /* An empty display name is null rather than the empty string Slack writes. */
+  assert.equal(byName.users[0].displayName, 'Ada');
+  assert.equal(byName.users[1].displayName, 'Ada L');
+
+  /* One word matches more, and a limit says how many there were. */
+  assert.equal(narrow.users.length, 1);
+  assert.equal(narrow.total, 3, 'ada, Bob Adams and the second Lovelace all carry "ada"');
+
+  assert.throws(() => call('findUsers').run('   ', 10), /nobody to look for/);
 });
 
 test('slack reads a thread as people, and looks each of them up once', async () => {

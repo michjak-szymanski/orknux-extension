@@ -31,6 +31,7 @@ configured `slack` parameter. The section after the tables says why.
 |---|---|
 | `readThread(connection, channel, threadTs, limit, withNames)` | `messages` — each with `ts`, `user`, `text` and whether it is the `parent` — and `replies`, Slack's own count of the whole thread rather than of the page. `limit` defaults to 20. |
 | `readMessage(connection, link)` | The one message a permalink points at: `channel`, `ts`, `user`, `text`, `threadTs`. For when a message quotes another by link. |
+| `findUsers(query, limit)` | People by **name or email**, for turning "the person called Ada" into the `U…` id everything else takes. An email is one exact request; a name reads the directory. Runs on `botToken`. |
 | `whoIs(connection, userId)` | Who an id belongs to: `id`, `name`, `realName`, `displayName`, `bot`. Takes the id bare or as the whole `<@U…>` notation a message carries it in. |
 | `search(connection, query, limit)` | `matches` — `channel`, `channelName`, `ts`, `user`, `text`, `permalink` each — and `total`, how many the whole search holds. Slack's search syntax works: `in:#channel`, `from:@name`, `"an exact phrase"`. |
 | `findRecent(query, channel, days, limit)` | `matches` in the same shape, newest first, by **reading recent history with the bot token** and filtering it — for a workspace with no user token to search with. Plus how much was read and whether the window was whole. Takes no `connection`: it runs on `botToken`. |
@@ -62,6 +63,30 @@ is in:
 |---|---|
 | `listAttachments(channel, ts)` | `files` hanging on one message — `id`, `name`, `title`, `filetype`, `mimetype`, `size`, `permalink` each. A message with no files answers an empty list. Reads channel history, falling back to the thread, because a reply is not in the channel's history. |
 | `readAttachment(file)` | One attachment by id: `name`, `mimetype`, `size`, and exactly one of `content` (text as text) or `base64` (binary as bytes), the other `null` — plus a `key` naming whichever it was. Hand that straight to `uploadBinary` or `upload` as `contentKey` to move a file between channels without either of you retyping it. |
+
+## Finding somebody
+
+`findUsers` answers the question an id cannot: who is Ada, and what is her
+`U…`. The two halves of it are not alike, and the difference is Slack's:
+
+| given | what happens | cost |
+|---|---|---|
+| `ada@acme.com` | `users.lookupByEmail` — an exact answer | one request |
+| `ada lovelace` | `users.list`, filtered here | a page per 200 accounts, five pages max |
+
+There is no user search for a bot token, which is why a name means reading
+the directory. Every word has to appear somewhere across username, real name,
+display name and address, so `lovelace` and `ada lovelace` both find her while
+`ada bob` finds nobody. Deactivated accounts are skipped.
+
+`complete: false` means a large workspace ran past the page cap and somebody
+further down may match — narrow the query, or use an address, which never
+pages at all. Nobody at an address is an answer rather than a failure: the
+question was whether they are here.
+
+Scopes: `users:read`, plus `users:read.email` for anything involving
+addresses. Without the second, `email` is null and an email query finds
+nothing.
 
 ## A thread reads as people, not as ids
 
