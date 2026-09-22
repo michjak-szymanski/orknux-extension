@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
+import { inflateRawSync } from 'node:zlib';
 import { existsSync, readdirSync } from 'node:fs';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -1092,6 +1093,198 @@ test('the jenkins plugin names a job however it was spelled, and takes a log by 
   assert.equal(asked[9].headers.authorization, undefined);
 });
 
+test('the plantuml plugin declares what the server would accept', async () => {
+  const inspected = await inspect(shipped('plantuml'));
+
+  assert.equal(inspected.id, 'plantuml');
+  assert.deepEqual(validate(inspected), []);
+
+  assert.deepEqual(
+    inspected.parameters.map((parameter) => parameter.name),
+    ['url'],
+  );
+  /*
+   * No permission: the url's encoding is base64 in a different order over a
+   * deflate stream that compresses nothing, and `orknux.encoding` does the one
+   * part needing the server — the UTF-8 — ungranted.
+   */
+  assert.deepEqual(inspected.permissions, []);
+  assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
+  assert.deepEqual(
+    inspected.functions.map((declared) => declared.name),
+    ['render', 'ascii', 'check', 'links'],
+  );
+  assert.deepEqual(
+    inspected.tools.map((declared) => declared.name),
+    ['render', 'ascii', 'check', 'links'],
+  );
+  assert.deepEqual(
+    inspected.objects.map((declared) => declared.name),
+    ['Drawing', 'Ascii', 'Checked', 'Links'],
+  );
+});
+
+test('a plantuml url really is deflate, in plantuml’s own alphabet', async () => {
+  const url = new URL(`../../plugins/plantuml/plantuml.js`, import.meta.url);
+  const { default: PlantUml } = await import(url.href);
+
+  const configured = (settings) => {
+    const plugin = Object.create(PlantUml.prototype);
+    Object.defineProperty(plugin, 'settings', { value: Object.freeze(settings) });
+    const functions = plugin.functions();
+    return (name) => functions.find((one) => one.name === name);
+  };
+  const site = { url: 'https://plantuml.example.com/plantuml' };
+
+  /*
+   * The encoding is the whole of what this plugin does without a server, and
+   * it is written by hand: a deflate stream of stored blocks, then base64 in
+   * an order that is not base64's. So it is decoded here with a real
+   * inflater — if `inflateRawSync` can read it, so can a PlantUML, and that
+   * is the only claim worth making about a hand-rolled stream.
+   */
+  const ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_';
+  const unpacked = (written) => {
+    const bytes = [];
+    let held = 0;
+    let bits = 0;
+    for (const character of written) {
+      held = (held << 6) | ALPHABET.indexOf(character);
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        bytes.push((held >> bits) & 0xff);
+      }
+    }
+    return Buffer.from(bytes);
+  };
+
+  /* Something with a character outside ASCII in it, because that is the part a plugin cannot do alone. */
+  const source = '@startuml\nactor Ada\nAda -> Bob : Zażółć gęślą jaźń\nBob --> Ada : ✓\n@enduml';
+  const links = configured(site)('links').run(source);
+
+  const path = links.svg.slice(`${site.url}/svg/`.length);
+  assert.equal(inflateRawSync(unpacked(path)).subarray(0, Buffer.byteLength(source)).toString('utf8'), source);
+
+  /* Five urls off one encoding, and the markdown is the png wrapped for a comment. */
+  assert.equal(links.png, `${site.url}/png/${path}`);
+  assert.equal(links.txt, `${site.url}/txt/${path}`);
+  assert.equal(links.editor, `${site.url}/uml/${path}`);
+  assert.equal(links.markdown, `![diagram](${site.url}/png/${path})`);
+
+  /* Nothing to draw, and a diagram too long to travel in a url, are both said rather than sent. */
+  assert.throws(() => configured(site)('links').run('   '), /no diagram source to draw/);
+  assert.throws(
+    () => configured(site)('render').run(`@startuml\n${'note over A : padding\n'.repeat(400)}@enduml`, 'svg'),
+    /too long to travel in a url/,
+  );
+  assert.throws(() => configured(site)('render').run('@startuml\n@enduml', 'jpeg'), /no format called jpeg/);
+  assert.throws(() => configured({})('links').run('@startuml\n@enduml'), /url parameter is not set/);
+});
+
+test('plantuml reads a syntax error out of the headers, where the answer is a picture of it', async () => {
+  const url = new URL(`../../plugins/plantuml/plantuml.js`, import.meta.url);
+  const { default: PlantUml } = await import(url.href);
+
+  const plugin = Object.create(PlantUml.prototype);
+  Object.defineProperty(plugin, 'settings', {
+    value: Object.freeze({ url: 'https://plantuml.example.com/plantuml' }),
+  });
+  const call = (name) => plugin.functions().find((one) => one.name === name);
+
+  const asked = [];
+  const door = globalThis.orknux.http.get;
+  const bytes = globalThis.orknux.http.download;
+  const session = globalThis.orknux.session;
+
+  const broken = '@startuml\nactor Ada\nAda -> Bob : Hello\nnonsense !!! rubbish\n@enduml';
+  let drawn;
+  let toModel;
+  let checked;
+  let failed;
+  try {
+    globalThis.orknux.http.get = (where) => {
+      asked.push(where);
+      /*
+       * What a PlantUML actually answers a bad diagram: 400, a picture of the
+       * error as the body, and the only readable part of it in the headers -
+       * in the case they come back in, which nothing here decides.
+       */
+      return {
+        status: 400,
+        headers: {
+          'Content-Type': 'image/svg+xml',
+          'X-PlantUML-Diagram-Error': 'Syntax Error? (Assumed diagram type: sequence)',
+          'X-PlantUML-Diagram-Error-Line': '4',
+        },
+        body: '<svg>a picture of the words "syntax error"</svg>',
+      };
+    };
+    checked = call('check').run(broken);
+
+    globalThis.orknux.http.download = (where) => {
+      asked.push(where);
+      return {
+        status: 200,
+        headers: {
+          'x-plantuml-diagram-width': '198',
+          'x-plantuml-diagram-height': '248',
+          'x-plantuml-diagram-description': '(2 participants)',
+        },
+        base64: 'iVBORw0KGgo=',
+        size: 8,
+        contentType: 'image/png',
+      };
+    };
+    globalThis.orknux.session = { store: { put: () => ({}), get: () => null } };
+    drawn = call('render').run('@startuml\nAda -> Bob : Hello\n@enduml');
+    /* The same call as an agent makes it, which is the one that must not carry bytes. */
+    toModel = plugin
+      .tools()
+      .find((one) => one.name === 'render')
+      .run('@startuml\nAda -> Bob : Hello\n@enduml', 'png');
+
+    try {
+      call('render').run(broken, 'svg');
+    } catch (thrown) {
+      failed = thrown.message;
+    }
+  } finally {
+    globalThis.orknux.http.get = door;
+    globalThis.orknux.http.download = bytes;
+    globalThis.orknux.session = session;
+  }
+
+  /* A refusal names the line and quotes it, because that is what gets fixed. */
+  assert.equal(failed, 'Syntax Error? (Assumed diagram type: sequence) on line 4: nonsense !!! rubbish');
+
+  /* And check answers the same thing as data, for a condition that has to decide. */
+  assert.equal(checked.ok, false);
+  assert.equal(checked.line, 4);
+  assert.equal(checked.source, 'nonsense !!! rubbish');
+
+  /*
+   * The picture's size is the server's measurement, not an echo of a request:
+   * nothing in the sandbox can look at a PNG and say how wide it is.
+   */
+  assert.equal(drawn.width, 198);
+  assert.equal(drawn.height, 248);
+  assert.equal(drawn.description, '(2 participants)');
+  assert.equal(drawn.png, 'iVBORw0KGgo=');
+  assert.equal(drawn.svg, '');
+  assert.match(asked[1], /^https:\/\/plantuml\.example\.com\/plantuml\/png\//);
+
+  /*
+   * And the tool a model calls carries the key instead of the picture: a
+   * hundred kilobytes of base64 read back out into the next tool call is a
+   * hundred kilobytes that has to come out perfect, and it does not.
+   */
+  assert.equal(toModel.png, '');
+  assert.equal(toModel.svg, '');
+  assert.ok(toModel.key.startsWith('plantuml.'), 'the tool answered no key to fetch the bytes by');
+  assert.equal(toModel.width, 198);
+});
+
 test('the prometheus plugin declares what the server would accept', async () => {
   const inspected = await inspect(shipped('prometheus'));
 
@@ -2119,6 +2312,7 @@ test('the sweeps below are sweeping something', () => {
     'mermaid',
     'nomnoml',
     'pdf',
+    'plantuml',
     'prometheus',
     'slack',
     'teams',

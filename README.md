@@ -6,9 +6,9 @@
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2020-brightgreen)](package.json)
 [![Licence](https://img.shields.io/badge/licence-Apache--2.0-blue)](LICENSE)
 
-Fifteen production plugins — Slack, GitHub, Jira, Confluence, Jenkins,
-Prometheus, Mermaid, nomnoml, PDF, web search, HTTP and more — with the library
-and CLI to write your own.
+Sixteen production plugins — Slack, GitHub, Jira, Confluence, Jenkins,
+Prometheus, Mermaid, PlantUML, nomnoml, PDF, web search, HTTP and more — with
+the library and CLI to write your own.
 
 Extending [orknux-server](https://github.com/michjak-szymanski/orknux-server):
 the library you write a plugin against, and the tool that turns it into the one
@@ -86,6 +86,15 @@ the sandbox — no browser, no DOM, nothing fetched — and links to the live ed
 for the diagram kinds it does not draw.
 
     https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/mermaid/mermaid.js
+
+**[plantuml](plugins/plantuml/plantuml.js)** draws what mermaid is worst at —
+sequence diagrams with activation and grouping, class diagrams with real
+cardinality, gantt, mindmaps, wireframes — on a PlantUML server, and reads one
+back as box-drawing characters, which is a diagram a model can actually read. A
+syntax error comes back as the line it is on rather than as a picture of the
+words "syntax error".
+
+    https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/plantuml/plantuml.js
 
 **[nomnoml](plugins/nomnoml/nomnoml.js)** draws the UML-shaped diagrams mermaid
 is awkward at — classes with their fields, actors, packages inside packages,

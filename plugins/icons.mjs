@@ -110,6 +110,26 @@ const DRAWN = [
     paths: ['M2.5 3.5h8v6h-8Z', 'M13.5 14.5h8v6h-8Z', 'M6.5 9.5v6a2 2 0 0 0 2 2h5'],
   },
   {
+    /*
+     * The one drawn icon that does front a service. PlantUML's mark is its own
+     * cartoon character, published under its own terms rather than a licence
+     * this repository could carry a copy under — so what is drawn here is what
+     * the plugin makes, not whose it is.
+     */
+    plugin: 'plantuml',
+    title: 'Two lifelines and the messages between them',
+    paths: [
+      'M3.5 2.5h6v3.5h-6Z',
+      'M14.5 2.5h6v3.5h-6Z',
+      'M6.5 6v15.5',
+      'M17.5 6v15.5',
+      'M6.5 11.5h9.5',
+      'm14 9.5 2 2-2 2',
+      'M17.5 17h-9.5',
+      'm10 15-2 2 2 2',
+    ],
+  },
+  {
     plugin: 'todo',
     title: 'A list with its first items checked off',
     paths: ['m3.5 7.5 2 2 3.5-4', 'm3.5 17 2 2 3.5-4', 'M13 7.5h7.5', 'M13 17h7.5'],
