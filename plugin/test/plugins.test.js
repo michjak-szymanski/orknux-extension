@@ -773,11 +773,11 @@ test('the confluence plugin declares what the server would accept', async () => 
   assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
-    ['search', 'openPage'],
+    ['search', 'openPage', 'openUser'],
   );
   assert.deepEqual(
     inspected.tools.map((declared) => declared.name),
-    ['search', 'openPage'],
+    ['search', 'openPage', 'openUser'],
   );
 });
 
@@ -800,6 +800,115 @@ test('the confluence plugin reads a page id out of either spelling of a page url
     () => declared.run('https://wiki.example.com/pages/viewpage.action?pageId=99'),
     /url parameter is not set/,
   );
+});
+
+test('confluence turns the ids a page mentions into people, on either deployment', async () => {
+  const url = new URL(`../../plugins/confluence/confluence.js`, import.meta.url);
+  const { default: Confluence } = await import(url.href);
+
+  const configured = (settings) => {
+    const plugin = Object.create(Confluence.prototype);
+    Object.defineProperty(plugin, 'settings', { value: Object.freeze(settings) });
+    const functions = plugin.functions();
+    return (name) => functions.find((one) => one.name === name);
+  };
+
+  const cloud = { url: 'https://acme.atlassian.net/wiki', email: 'ada@acme.com', token: 't' };
+  const server = { url: 'https://wiki.acme.com', token: 't' };
+
+  /*
+   * A body as Confluence actually stores one: a mention is markup carrying an
+   * id, not a name. Server writes `ri:userkey`, Cloud `ri:account-id`, and the
+   * profile macro wraps an `ri:user` the same way - so all three are the same
+   * question, which is who that is.
+   */
+  const body =
+    '<p>Owner: <ac:link><ri:user ri:userkey="ff8080816f2b1c34016f2b1c34000001"/></ac:link></p>' +
+    '<p>Backup: <ac:link><ri:user ri:userkey="ff8080816f2b1c34016f2b1c34000002"/></ac:link></p>' +
+    '<p>See <ac:link><ri:user ri:userkey="ff8080816f2b1c34016f2b1c34000001"/></ac:link> again</p>';
+
+  const asked = [];
+  const door = globalThis.orknux.http.get;
+  let page;
+  let person;
+  let onCloud;
+  try {
+    globalThis.orknux.http.get = (where) => {
+      asked.push(where);
+      if (where.includes('/rest/api/content/')) {
+        return {
+          status: 200,
+          headers: {},
+          body: '{}',
+          json: { id: '123', title: 'Runbook', body: { storage: { value: body } }, _links: { webui: '/x' } },
+        };
+      }
+      return {
+        status: 200,
+        headers: {},
+        body: '{}',
+        json: {
+          type: 'known',
+          username: 'jsmith',
+          userKey: 'ff8080816f2b1c34016f2b1c34000001',
+          displayName: 'Jo Smith',
+          profilePicture: { path: '/images/jo.png' },
+          _links: { base: 'https://wiki.acme.com' },
+        },
+      };
+    };
+
+    page = configured(server)('openPage').run('123');
+    person = configured(server)('openUser').run(
+      '<ac:link><ri:user ri:userkey="ff8080816f2b1c34016f2b1c34000001"/></ac:link>',
+    );
+    onCloud = configured(cloud)('openUser').run('5b10ac8d82e05b22cc7d4ef5');
+  } finally {
+    globalThis.orknux.http.get = door;
+  }
+
+  /*
+   * The ids are read out of the markup rather than asked for - they are
+   * already in the body - and each is listed once however often it is used.
+   */
+  assert.deepEqual(page.mentions, [
+    'ff8080816f2b1c34016f2b1c34000001',
+    'ff8080816f2b1c34016f2b1c34000002',
+  ]);
+
+  /* A userkey is Server's, and Server looks a person up by `key`. */
+  assert.equal(asked[1], 'https://wiki.acme.com/rest/api/user?key=ff8080816f2b1c34016f2b1c34000001');
+  assert.equal(person.name, 'Jo Smith');
+  assert.equal(person.username, 'jsmith');
+  assert.equal(person.id, 'ff8080816f2b1c34016f2b1c34000001');
+  assert.equal(person.picture, 'https://wiki.acme.com/images/jo.png');
+  assert.equal(person.url, 'https://wiki.acme.com/display/~jsmith');
+
+  /* And a bare id on Cloud is an account id, because Cloud has nothing else. */
+  assert.equal(asked[2], 'https://acme.atlassian.net/wiki/rest/api/user?accountId=5b10ac8d82e05b22cc7d4ef5');
+  assert.equal(onCloud.external, false);
+
+  /* The other spellings of the same question, resolved before any request. */
+  assert.throws(() => configured({})('openUser').run('   '), /nobody to look up/);
+  for (const [named, expected] of [
+    ['<ri:user ri:username="jsmith"/>', 'username=jsmith'],
+    ['https://wiki.acme.com/display/~jsmith', 'username=jsmith'],
+    ['https://acme.atlassian.net/wiki/people/5b10ac8d82e05b22cc7d4ef5', 'accountId=5b10ac8d82e05b22cc7d4ef5'],
+    ['jsmith', 'username=jsmith'],
+  ]) {
+    const seen = [];
+    const held = globalThis.orknux.http.get;
+    try {
+      globalThis.orknux.http.get = (where) => {
+        seen.push(where);
+        return { status: 200, headers: {}, body: '{}', json: { type: 'known' } };
+      };
+      configured(server)('openUser').run(named);
+    } finally {
+      globalThis.orknux.http.get = held;
+    }
+    assert.ok(seen[0].endsWith(expected), `${named} asked for ${seen[0]}`);
+  }
 });
 
 test('the jira plugin declares what the server would accept', async () => {

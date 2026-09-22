@@ -100,6 +100,88 @@ function plain(text) {
   return typeof text === 'string' ? text.replace(/@@@(?:end)?hl@@@/g, '') : null;
 }
 
+/** Whether this is Atlassian Cloud, which is what having an email to send means. */
+function isCloud(settings) {
+  return typeof settings.email === 'string' && settings.email.length > 0;
+}
+
+/**
+ * How a mention is written in a page's body.
+ *
+ * A mention in storage format is not a name — it is an id inside markup:
+ * `<ac:link><ri:user ri:account-id="5b10ac8d…"/></ac:link>` on Cloud, and
+ * `ri:userkey` or `ri:username` on Server. So a model reading a page sees who
+ * was mentioned only as a string of hex, which is the whole reason `openUser`
+ * exists.
+ */
+const MENTION = /ri:(account-id|userkey|username)="([^"]+)"/g;
+
+/** Every person a page's body mentions, in the order the page mentions them. */
+function mentionedIn(body) {
+  if (typeof body !== 'string') {
+    return [];
+  }
+  const found = [];
+  for (const one of body.matchAll(MENTION)) {
+    if (!found.includes(one[2])) {
+      found.push(one[2]);
+    }
+  }
+  return found;
+}
+
+/**
+ * Which query names a person, from whatever was passed.
+ *
+ * The same idea as `pageId` below: take what somebody actually has. That is a
+ * mention copied out of a page body, a profile url, or the bare id — and which
+ * *kind* of id a bare string is depends on the deployment, because Cloud
+ * retired usernames for account ids and Server never had one.
+ */
+function personQuery(settings, person) {
+  const asked = typeof person === 'string' ? person.trim() : String(person ?? '');
+  if (asked.length === 0) {
+    throw new Error('there is nobody to look up');
+  }
+
+  /* A mention, pasted whole out of a page. */
+  const mention = new RegExp(MENTION.source).exec(asked);
+  if (mention !== null) {
+    const held = mention[2];
+    return mention[1] === 'account-id'
+      ? `accountId=${encodeURIComponent(held)}`
+      : mention[1] === 'userkey'
+        ? `key=${encodeURIComponent(held)}`
+        : `username=${encodeURIComponent(held)}`;
+  }
+
+  /* A profile url: Cloud's `/people/<accountId>`, Server's `/display/~<username>`. */
+  const cloudProfile = asked.match(/\/people\/([^/?#]+)/);
+  if (cloudProfile !== null) {
+    return `accountId=${encodeURIComponent(decodeURIComponent(cloudProfile[1]))}`;
+  }
+  const serverProfile = asked.match(/\/display\/~([^/?#]+)/);
+  if (serverProfile !== null) {
+    return `username=${encodeURIComponent(decodeURIComponent(serverProfile[1]))}`;
+  }
+  const named = asked.match(/[?&](accountId|username|key)=([^&]+)/);
+  if (named !== null) {
+    return `${named[1]}=${encodeURIComponent(decodeURIComponent(named[2]))}`;
+  }
+
+  /*
+   * A bare id. On Cloud that is an account id and there is nothing else it
+   * could be; on Server a 32-character hex string is a user key and anything
+   * else is a username, which is the distinction Confluence itself draws.
+   */
+  if (isCloud(settings)) {
+    return `accountId=${encodeURIComponent(asked)}`;
+  }
+  return /^[0-9a-f]{32}$/i.test(asked)
+    ? `key=${encodeURIComponent(asked)}`
+    : `username=${encodeURIComponent(asked)}`;
+}
+
 /**
  * The content id, from an id or from any of the urls Confluence spells a page
  * as — Cloud's `/spaces/KEY/pages/123/Title` and Server's `?pageId=123` both.
@@ -218,6 +300,25 @@ Read the excerpts first and open the **one** page that answers the question.
 Opening five to see which is right costs five page bodies in your context and
 usually the first one was right.
 
+## A mention is an id, not a name
+
+The body does not say who was mentioned. It says this:
+
+    <ac:link><ri:user ri:userkey="ff8080816f2b1c34016f2b1c34000001"/></ac:link>
+
+So "who owns this runbook" reads as a string of hex, and the same is true of
+any macro wrapping an \`<ri:user>\`. \`openPage\` collects those ids into
+\`mentions\`, and \`confluence_openUser\` turns one into a person - pass the id or
+the whole mention, whichever you have.
+
+Resolve the one that matters rather than all of them. A page mentioning eight
+people costs eight calls if you ask for eight, and the question was almost
+always about the owner.
+
+**A display name will not work.** Confluence looks a person up by key, not by
+label, so there is no way to ask for "Jo Smith" here - take the id off the
+page, or search.
+
 ## The body is XHTML, not markdown
 
 \`openPage\` answers Confluence **storage format**, which is XHTML: \`<p>\`, \`<h2>\`,
@@ -265,6 +366,39 @@ the same way as a subject nobody has written about.`,
       }),
 
       new OrknuxObject({
+        name: 'User',
+        description: 'Who a mention or an id on a page belongs to.',
+        properties: [
+          {
+            name: 'id',
+            kind: 'string',
+            description: "The account id on Cloud, the user key on Server — what Confluence calls them.",
+          },
+          {
+            name: 'username',
+            kind: 'string',
+            description: 'Server only. Null on Cloud, which retired usernames for account ids.',
+          },
+          { name: 'name', kind: 'string', description: 'The display name — what a page shows where the mention is.' },
+          {
+            name: 'email',
+            kind: 'string',
+            description:
+              'Often null, and that is an answer rather than a gap: Atlassian hides an address ' +
+              'the person has not made public, whatever the token can otherwise see.',
+          },
+          {
+            name: 'type',
+            kind: 'string',
+            description: 'known, app, anonymous, unknown — an app is a bot, not somebody to ask.',
+          },
+          { name: 'external', kind: 'boolean', description: 'A guest rather than a member of the site.' },
+          { name: 'picture', kind: 'string', description: 'Their avatar, as a url.' },
+          { name: 'url', kind: 'string', description: 'Their profile, for a person to open.' },
+        ],
+      }),
+
+      new OrknuxObject({
         name: 'Page',
         description: 'One Confluence page, whole.',
         properties: [
@@ -279,6 +413,14 @@ the same way as a subject nobody has written about.`,
             kind: 'string',
             description: 'Confluence storage format, which is XHTML — read it as HTML.',
           },
+          {
+            name: 'mentions',
+            kind: 'array',
+            of: 'string',
+            description:
+              'Everybody the body mentions, as the ids the markup carries rather than as names ' +
+              '— openUser turns one into a person. Empty where the page mentions nobody.',
+          },
           { name: 'url', kind: 'string', description: 'The link for a person to open.' },
         ],
       }),
@@ -290,6 +432,7 @@ the same way as a subject nobody has written about.`,
     return [
       new OrknuxFunctionTool({ function: 'search' }),
       new OrknuxFunctionTool({ function: 'openPage' }),
+      new OrknuxFunctionTool({ function: 'openUser' }),
     ];
   }
 
@@ -363,6 +506,7 @@ the same way as a subject nobody has written about.`,
           );
           const links = at(opened, '_links');
           const webui = at(links, 'webui');
+          const body = at(at(at(opened, 'body'), 'storage'), 'value');
           return {
             id: at(opened, 'id'),
             title: at(opened, 'title'),
@@ -370,8 +514,57 @@ the same way as a subject nobody has written about.`,
             version: at(at(opened, 'version'), 'number'),
             updated: at(at(opened, 'version'), 'when'),
             by: at(at(at(opened, 'version'), 'by'), 'displayName'),
-            body: at(at(at(opened, 'body'), 'storage'), 'value'),
+            body: body,
+            /* Read out of the markup rather than asked for: a mention is already in the body. */
+            mentions: mentionedIn(body),
             url: typeof webui === 'string' ? (at(links, 'base') ?? root(this.settings)) + webui : null,
+          };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'openUser',
+        description:
+          'Who somebody on Confluence is: their display name, their email where Atlassian will ' +
+          'say, whether the account is a person or an app, and a link to their profile. Takes ' +
+          'whatever names them - an account id (Cloud) or username or user key (Server), a ' +
+          'profile url, or a mention copied straight out of a page body, which is the usual one: ' +
+          'a page carries a mention as <ri:user ri:account-id="..."/> rather than as a name, so ' +
+          'openPage answers those ids in its mentions list and this turns one into a person. A ' +
+          'display name is not an identifier and will not work - search for the person instead.',
+        params: [{ name: 'person', type: 'string' }],
+        returnType: 'User',
+        run: (person) => {
+          const query = personQuery(this.settings, person);
+          const found = read(this.settings, `/rest/api/user?${query}`);
+
+          const site = root(this.settings);
+          const base = at(at(found, '_links'), 'base') ?? site;
+          const picture = at(at(found, 'profilePicture'), 'path');
+          const id = at(found, 'accountId') ?? at(found, 'userKey');
+          const username = at(found, 'username');
+
+          return {
+            id: id,
+            username: username,
+            /* Cloud answers a public name where a display name is withheld. */
+            name: at(found, 'displayName') ?? at(found, 'publicName'),
+            email: at(found, 'email'),
+            type: at(found, 'type') ?? at(found, 'accountType'),
+            external: at(found, 'isExternalCollaborator') === true,
+            picture: typeof picture === 'string' ? base + picture : null,
+            /*
+             * The two deployments keep a profile in different places, and
+             * neither answers the link in the user itself.
+             */
+            url:
+              isCloud(this.settings)
+                ? id === null
+                  ? null
+                  : `${base}/people/${encodeURIComponent(id)}`
+                : typeof username === 'string'
+                  ? `${base}/display/~${encodeURIComponent(username)}`
+                  : null,
           };
         },
       }),
