@@ -47,6 +47,14 @@
  * commenting and the agent tasks are wanted. Declared as a secret, so it lives
  * in a workspace variable, never typed into a page.
  *
+ * `classicToken` is a second credential for one corner of the API. The commit
+ * status endpoints refuse a fine-grained token — 403 — in setups a classic
+ * token still reads: an organization that has not approved fine-grained
+ * tokens, or a token minted without the commit statuses or checks
+ * permission. So `buildStatus` asks under `token` first and, on a 403, asks
+ * again under the classic one. Nothing else reaches for it, and a workspace
+ * whose fine-grained token reads builds fine never sets it.
+ *
  * `organization` is the owner every function falls back to when a call does not
  * name one — so "search the backlog" does not need the org spelled into every
  * query — and search queries that do not say where to look are scoped to it.
@@ -92,6 +100,7 @@ import {
   ownerOr,
   pageSize,
   read,
+  readOrClassic,
   repoNamed,
   repoPath,
   scoped,
@@ -162,6 +171,19 @@ export default class Github extends OrknuxPlugin {
         // Optional the other way round: a workspace that only verifies webhook
         // deliveries never calls the API. Every API function checks for it and
         // says so when it is missing.
+        required: false,
+        secret: true,
+      }),
+      new OrknuxParameter({
+        name: 'classicToken',
+        description:
+          'A classic personal access token with repo scope, asked when the token above is refused ' +
+          '(403) reading a commit\'s status or check runs. Only buildStatus reaches for it.',
+        type: 'string',
+        // Optional twice over: only `buildStatus` falls back to it, and only
+        // on a 403 the fine-grained token drew. A workspace whose token reads
+        // builds fine never sets it, and one that does keeps it a secret the
+        // same way as the other two.
         required: false,
         secret: true,
       }),
@@ -1166,10 +1188,19 @@ not obviously say so.`,
            * what older integrations set, and check runs are what GitHub
            * Actions and the newer apps write. Reading only one says "success"
            * about a commit the other knows is red.
+           *
+           * Both through `readOrClassic`: these are the two endpoints a
+           * fine-grained token gets a 403 from where a classic one still
+           * reads, so each is asked again under `classicToken` when there is
+           * one. Each on its own, because a token can be refused one and
+           * not the other.
            */
-          const combined = read(this.settings, { path: `${base}/commits/${marked}/status` }).json;
+          const combined = readOrClassic(this.settings, { path: `${base}/commits/${marked}/status` }).json;
           const runs =
-            at(read(this.settings, { path: `${base}/commits/${marked}/check-runs?per_page=100` }).json, 'check_runs') ?? [];
+            at(
+              readOrClassic(this.settings, { path: `${base}/commits/${marked}/check-runs?per_page=100` }).json,
+              'check_runs',
+            ) ?? [];
 
           const statuses = (at(combined, 'statuses') ?? []).map((one) => ({
             context: at(one, 'context'),

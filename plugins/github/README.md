@@ -119,11 +119,26 @@ searches the org's work rather than all of GitHub.
 |---|---|
 | `webhookSecret` | The secret GitHub signs deliveries with. **Secret**, so a typed-in value is refused — a workspace variable is the only answer it takes. Only `verify` uses it. |
 | `token` | A fine-grained personal access token, or a GitHub App user token. **Secret**. Every function except the webhook pair needs it. |
+| `classicToken` | A classic personal access token with `repo` scope. **Secret**. Only `buildStatus` reaches for it, and only when `token` was refused — see below. |
 | `organization` | The owner to fall back to, as above. Optional. |
 | `apiUrl` | Points the whole surface at a GitHub Enterprise Server. Empty means `api.github.com`. |
 
-All four are optional at load: a workspace that only wants the webhook half
+All five are optional at load: a workspace that only wants the webhook half
 sets `webhookSecret` and nothing else.
+
+### When `buildStatus` wants a classic token
+
+The commit status endpoints refuse a fine-grained token — `403` — in setups
+a classic token still reads: an organization that has not approved
+fine-grained tokens, or a token minted without the *commit statuses* or
+*checks* permission. Everything else keeps working, and the one call that
+does not is the one a review most needs.
+
+So `buildStatus` asks under `token` first and, on a `403`, asks again under
+`classicToken`. Each of its two reads — the combined status and the check
+runs — falls back on its own, because a token can be refused one and not the
+other. Any other answer, and a `403` with no classic token configured, is the
+error it always was. Nothing else in the plugin ever sends the classic token.
 
 ## Setting up the webhook
 
@@ -160,6 +175,7 @@ no network of its own — the server makes each call on its behalf.
 |---|---|
 | Everything that reads | Read on the repositories it should see |
 | `comment`, `reviewComment`, `replyToComment`, `messageAgentTask` | Write on pull requests |
+| `buildStatus` | Read on commit statuses and checks — or, failing that, a `classicToken` with `repo` scope |
 | The agent-task functions | A **user** token with Copilot access |
 
 ## Three caveats worth knowing before you debug them

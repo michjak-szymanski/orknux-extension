@@ -101,21 +101,23 @@ test('the github plugin declares what the server would accept', async () => {
   assert.deepEqual(validate(inspected), []);
 
   /*
-   * Both credentials are secrets: a typed-in value is refused by the server.
-   * Neither is required, because the plugin has two halves — a webhook-only
-   * workspace never sets the token, an API-only one never sets the secret.
+   * All three credentials are secrets: a typed-in value is refused by the
+   * server. None is required, because the plugin has two halves — a
+   * webhook-only workspace never sets a token, an API-only one never sets the
+   * secret — and the classic token is only for a build status the
+   * fine-grained one was refused.
    */
   assert.deepEqual(
     inspected.parameters.map((parameter) => parameter.name),
-    ['webhookSecret', 'token', 'organization', 'apiUrl'],
+    ['webhookSecret', 'token', 'classicToken', 'organization', 'apiUrl'],
   );
   assert.deepEqual(
     inspected.parameters.map((parameter) => parameter.secret),
-    [true, true, false, false],
+    [true, true, true, false, false],
   );
   assert.deepEqual(
     inspected.parameters.map((parameter) => parameter.required),
-    [false, false, false, false],
+    [false, false, false, false, false],
   );
 
   assert.deepEqual(inspected.permissions, ['TEXT_ENCODING']);
@@ -260,6 +262,95 @@ test('github reviews answer where each person stands, not what they last did', a
   assert.equal(blocked.state, 'changes requested');
   assert.deepEqual(blocked.blockers, ['eve']);
   assert.equal(blocked.approvals, 1, 'ada still approved; she is just outvoted by a block');
+});
+
+test('github buildStatus asks again with the classic token where the fine-grained one drew a 403', async () => {
+  const url = new URL(`../../plugins/github/github.js`, import.meta.url);
+  const { default: Github } = await import(url.href);
+
+  const withSettings = (settings) => {
+    const plugin = Object.create(Github.prototype);
+    Object.defineProperty(plugin, 'settings', { value: Object.freeze(settings) });
+    return plugin.functions().find((one) => one.name === 'buildStatus');
+  };
+
+  const green = { status: 200, headers: {}, body: '{}', json: { state: 'success', sha: 'abc', statuses: [{ context: 'ci', state: 'success' }] } };
+  const runs = { status: 200, headers: {}, body: '{}', json: { check_runs: [] } };
+  const refused = { status: 403, headers: {}, body: '{}', json: { message: 'Resource not accessible by personal access token' } };
+
+  /* Which token each request carried, in the order they were made. */
+  const carried = () => asked.map((one) => `${one.headers.authorization} ${one.url.split('/').slice(-1)[0]}`);
+  let asked = [];
+  const door = globalThis.orknux.http.request;
+  try {
+    /*
+     * The status endpoint refuses the fine-grained token and the check runs
+     * do not: only the refused read is asked again, and under the classic
+     * token.
+     */
+    globalThis.orknux.http.request = (what) => {
+      asked.push(what);
+      if (what.url.endsWith('/status')) {
+        return what.headers.authorization === 'Bearer ghp_classic' ? green : refused;
+      }
+      return runs;
+    };
+    const built = withSettings({ token: 'github_pat_fine', classicToken: 'ghp_classic', organization: 'acme' }).run(
+      '',
+      'api',
+      'abc',
+    );
+    assert.equal(built.overall, 'success');
+    assert.equal(built.sha, 'abc');
+    assert.deepEqual(carried(), [
+      'Bearer github_pat_fine status',
+      'Bearer ghp_classic status',
+      'Bearer github_pat_fine check-runs?per_page=100',
+    ]);
+
+    /* Without a classic token, the 403 is the error it always was — and no second request. */
+    asked = [];
+    assert.throws(
+      () => withSettings({ token: 'github_pat_fine', organization: 'acme' }).run('', 'api', 'abc'),
+      /GitHub answered 403: Resource not accessible by personal access token for \/repos\/acme\/api\/commits\/abc\/status/,
+    );
+    assert.deepEqual(carried(), ['Bearer github_pat_fine status']);
+
+    /* A classic token refused too is a 403 reported once, from the second try. */
+    asked = [];
+    globalThis.orknux.http.request = (what) => {
+      asked.push(what);
+      return what.url.endsWith('/status') ? refused : runs;
+    };
+    assert.throws(
+      () => withSettings({ token: 'github_pat_fine', classicToken: 'ghp_classic', organization: 'acme' }).run('', 'api', 'abc'),
+      /GitHub answered 403/,
+    );
+    assert.deepEqual(carried(), ['Bearer github_pat_fine status', 'Bearer ghp_classic status']);
+
+    /* Only a 403 falls back: a 404 under the fine-grained token is not asked again. */
+    asked = [];
+    globalThis.orknux.http.request = (what) => {
+      asked.push(what);
+      return { status: 404, headers: {}, body: '{}', json: { message: 'Not Found' } };
+    };
+    assert.throws(
+      () => withSettings({ token: 'github_pat_fine', classicToken: 'ghp_classic', organization: 'acme' }).run('', 'api', 'abc'),
+      /GitHub answered 404: Not Found/,
+    );
+    assert.deepEqual(carried(), ['Bearer github_pat_fine status']);
+
+    /* And a fine-grained token that reads builds fine never sends the classic one at all. */
+    asked = [];
+    globalThis.orknux.http.request = (what) => {
+      asked.push(what);
+      return what.url.endsWith('/status') ? green : runs;
+    };
+    withSettings({ token: 'github_pat_fine', classicToken: 'ghp_classic', organization: 'acme' }).run('', 'api', 'abc');
+    assert.ok(asked.every((one) => one.headers.authorization === 'Bearer github_pat_fine'));
+  } finally {
+    globalThis.orknux.http.request = door;
+  }
 });
 
 test('a github api call without a token is a thrown sentence, not a request', async () => {

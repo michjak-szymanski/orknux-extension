@@ -43,9 +43,12 @@ function apiRoot(settings) {
  * The status is *not* checked here: `read` below insists on an answer, and the
  * one caller that wants to see a 404 for itself — `listRepos`, deciding whether
  * an owner is an organization or a user — calls this directly.
+ *
+ * Authenticated with the plugin's `token` unless `asked.token` names another
+ * one, which is how `readOrClassic` below asks again with the classic token.
  */
 export function call(settings, asked) {
-  const token = settings.token;
+  const token = asked.token === undefined ? settings.token : asked.token;
   if (typeof token !== 'string' || token.length === 0) {
     throw new Error("the plugin's token parameter is not set, and every GitHub API call needs it");
   }
@@ -78,6 +81,32 @@ export function statusError(answered, path) {
 /** The same call, insisting on an answer: a 4xx or 5xx is thrown, not returned. */
 export function read(settings, asked) {
   const answered = call(settings, asked);
+  if (answered.status >= 400) {
+    throw statusError(answered, asked.path);
+  }
+  return answered;
+}
+
+/**
+ * The same read, asked again with the classic token where the first one was
+ * refused.
+ *
+ * A fine-grained token is refused outright — 403 — on the commit status
+ * endpoints in setups a classic token still reads: an organization that has
+ * not approved fine-grained tokens, or a token minted without the commit
+ * statuses or checks permission. So a 403 under `token` is asked again under
+ * `classicToken`, where one is configured; every other answer, and a 403
+ * with nothing to fall back to, is what `read` would have made of it.
+ *
+ * Only a 403. A 404 is the repository not being there, or being invisible to
+ * both tokens alike, and asking again would only say the same thing twice.
+ */
+export function readOrClassic(settings, asked) {
+  const answered = call(settings, asked);
+  const classic = settings.classicToken;
+  if (answered.status === 403 && typeof classic === 'string' && classic.length > 0) {
+    return read(settings, { ...asked, token: classic });
+  }
   if (answered.status >= 400) {
     throw statusError(answered, asked.path);
   }
