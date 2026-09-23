@@ -316,6 +316,8 @@ test('the slack plugin declares what the server would accept', async () => {
       'isFirstReply',
       'readMessage',
       'whoIs',
+      'findChannels',
+      'listThreads',
       'findUsers',
       'readThread',
       'post',
@@ -344,6 +346,8 @@ test('the slack plugin declares what the server would accept', async () => {
       'readMessage',
       'whoIs',
       'findUsers',
+      'findChannels',
+      'listThreads',
       'mention',
       'readThread',
       'post',
@@ -730,6 +734,160 @@ test('the teams plugin declares what the server would accept', async () => {
     inspected.functions.map((declared) => declared.name),
     ['verify', 'text', 'sender', 'message', 'channelUrl', 'replyUrl'],
   );
+});
+
+test('slack finds channels, and lists the threads inside one', async () => {
+  const url = new URL(`../../plugins/slack/slack.js`, import.meta.url);
+  const { default: Slack } = await import(url.href);
+
+  const plugin = Object.create(Slack.prototype);
+  Object.defineProperty(plugin, 'settings', { value: Object.freeze({ botToken: 'xoxb-t' }) });
+  const call = (name) => plugin.functions().find((one) => one.name === name);
+
+  const channels = [
+    {
+      id: 'C1',
+      name: 'deploys',
+      is_private: false,
+      is_member: true,
+      num_members: 40,
+      topic: { value: 'releases and rollbacks' },
+      purpose: { value: '' },
+    },
+    { id: 'C2', name: 'random', is_private: false, is_member: false, num_members: 120, purpose: { value: 'nonsense' } },
+    {
+      id: 'C3',
+      name: 'platform-private',
+      is_private: true,
+      is_member: false,
+      num_members: 8,
+      purpose: { value: 'deploy policy' },
+    },
+  ];
+
+  /* A channel's history: two threads, one plain message, one bot noise. */
+  const history = {
+    ok: true,
+    has_more: false,
+    messages: [
+      {
+        ts: '1700000100.000100',
+        user: 'U1',
+        text: 'rollback failed on prod',
+        reply_count: 4,
+        reply_users_count: 3,
+        latest_reply: '1700009000.000100',
+      },
+      { ts: '1700000200.000100', user: 'U2', text: 'anybody around?' },
+      {
+        ts: '1700000300.000100',
+        user: 'U2',
+        text: 'release notes?',
+        reply_count: 1,
+        reply_users_count: 1,
+        latest_reply: '1700000400.000100',
+      },
+      { ts: '1700000050.000100', user: 'U3', text: 'has joined the channel', subtype: 'channel_join' },
+    ],
+  };
+
+  const asked = [];
+  const door = globalThis.orknux.http.request;
+  const user_ = globalThis.orknux.slack.user;
+  let found;
+  let listing;
+  let threads;
+  let refused;
+  try {
+    globalThis.orknux.slack.user = (_connection, id) =>
+      ({ U1: { displayName: 'Ada' }, U2: { displayName: 'Bob' } })[id] ?? { error: 'user_not_found' };
+    globalThis.orknux.http.request = (what) => {
+      asked.push(what);
+      const method = what.url.slice('https://slack.com/api/'.length);
+      if (method === 'auth.test') {
+        return { status: 200, headers: {}, body: '{}', json: { ok: true, url: 'https://acme.slack.com/' } };
+      }
+      if (method === 'conversations.list') {
+        return { status: 200, headers: {}, body: '{}', json: { ok: true, channels: channels } };
+      }
+      if (method === 'users.conversations') {
+        return {
+          status: 200,
+          headers: {},
+          body: '{}',
+          json: { ok: true, channels: [{ id: 'C1', name: 'deploys' }] },
+        };
+      }
+      return { status: 200, headers: {}, body: '{}', json: history };
+    };
+
+    found = call('findChannels').run('deploy', 20, false);
+    listing = call('findChannels').run('', 20, false);
+    threads = call('listThreads').run('#deploys', 7, 20, true);
+    try {
+      call('listThreads').run('random', 7, 20, true);
+    } catch (thrown) {
+      refused = thrown.message;
+    }
+  } finally {
+    globalThis.orknux.http.request = door;
+    globalThis.orknux.slack.user = user_;
+  }
+
+  /*
+   * Matched on name, topic and purpose alike - "deploys" by its name, the
+   * private one by what it says it is for. Archived channels are left out
+   * unless asked for.
+   */
+  assert.deepEqual(
+    found.channels.map((one) => one.name),
+    ['deploys', 'platform-private'],
+  );
+  assert.match(asked[1].body, /exclude_archived=true/);
+
+  /*
+   * `member` is the field that decides what else can be done with a channel:
+   * findRecent and listThreads read what the bot was invited to, and nothing
+   * about a scope changes that.
+   */
+  assert.equal(found.channels[0].member, true);
+  assert.equal(found.channels[1].member, false);
+  assert.equal(found.channels[1].private, true);
+  assert.equal(found.channels[0].url, 'https://acme.slack.com/archives/C1');
+  assert.equal(found.channels[0].members, 40);
+
+  /* An empty query is a listing, which is the same search with nothing to match. */
+  assert.equal(listing.channels.length, 3);
+  assert.equal(listing.complete, true);
+
+  /*
+   * A thread is a message that has been replied to - Slack writes the count
+   * on the parent and nowhere else. The plain message and the join noise are
+   * not threads.
+   */
+  assert.equal(threads.total, 2);
+  assert.equal(threads.messages, 4);
+
+  /* Newest *activity* first: the one answered hours later leads. */
+  assert.deepEqual(
+    threads.threads.map((one) => one.text),
+    ['rollback failed on prod', 'release notes?'],
+  );
+  assert.equal(threads.threads[0].replies, 4);
+  assert.equal(threads.threads[0].repliers, 3);
+  assert.equal(threads.threads[0].ts, '1700000100.000100', 'the ts is what readThread takes');
+  assert.equal(threads.threads[0].permalink, 'https://acme.slack.com/archives/C1/p1700000100000100');
+  assert.match(threads.threads[0].started, /^2023-11-/);
+
+  /* And the authors are people, the same way a thread reads as people. */
+  assert.deepEqual(
+    threads.threads.map((one) => one.userName),
+    ['Ada', 'Bob'],
+  );
+
+  /* The fence again: a channel the bot is not in is refused by name. */
+  assert.match(refused, /the bot is not in random/);
+  assert.throws(() => call('listThreads').run('  ', 7, 20, true), /no channel to look in/);
 });
 
 test('slack finds people by email exactly, and by name through the directory', async () => {

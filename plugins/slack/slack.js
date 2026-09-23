@@ -660,6 +660,33 @@ const DIRECTORY = 5;
 /** What an address looks like, closely enough to decide which call to make. */
 const ADDRESS = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
+/** One conversation as the declared `Channel` shape — see objects(). */
+function channelOf(one, site) {
+  const id = at(one, 'id');
+  return {
+    id: id,
+    name: at(one, 'name'),
+    private: at(one, 'is_private') === true,
+    archived: at(one, 'is_archived') === true,
+    /*
+     * Whether the bot is in it, which is the field that decides what else can
+     * be done with the answer: findRecent and listThreads read the channels
+     * the bot was invited to and nothing else.
+     */
+    member: at(one, 'is_member') === true,
+    members: at(one, 'num_members'),
+    topic: at(at(one, 'topic'), 'value'),
+    purpose: at(at(one, 'purpose'), 'value'),
+    url: site === null || typeof id !== 'string' ? null : `${site}/archives/${id}`,
+  };
+}
+
+/** A Slack timestamp as a moment anybody can read. */
+function whenOf(ts) {
+  const seconds = Number(String(ts ?? '').split('.')[0]);
+  return Number.isFinite(seconds) && seconds > 0 ? new Date(seconds * 1000).toISOString() : null;
+}
+
 /** One Slack account as the declared `User` shape — see objects(). */
 function userOf(one) {
   const profile = at(one, 'profile');
@@ -888,6 +915,76 @@ export default class Slack extends OrknuxPlugin {
               'and is null without it. whoIs answers null here; findUsers fills it in.',
           },
           { name: 'bot', kind: 'boolean', description: 'Whether this is an app rather than a person.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Channel',
+        description: 'One conversation in the workspace.',
+        properties: [
+          { name: 'id', kind: 'string', description: 'The C… id every other call takes.' },
+          { name: 'name', kind: 'string', description: 'Without the hash.' },
+          { name: 'private', kind: 'boolean', description: 'A private channel rather than a public one.' },
+          { name: 'archived', kind: 'boolean', description: 'Kept but closed. Excluded unless withArchived asked for them.' },
+          {
+            name: 'member',
+            kind: 'boolean',
+            description:
+              'The bot is in it — which decides what else can be done with this channel, because ' +
+              'reading history needs an invitation and no scope substitutes for one.',
+          },
+          { name: 'members', kind: 'number', description: 'How many people are in it.' },
+          { name: 'topic', kind: 'string', description: 'What the channel says it is about right now.' },
+          { name: 'purpose', kind: 'string', description: 'What it was made for.' },
+          { name: 'url', kind: 'string', description: 'The channel, for a person to open.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Channels',
+        description: 'What looking for channels came to.',
+        properties: [
+          { name: 'channels', kind: 'array', of: 'Channel', description: 'Capped by limit.' },
+          { name: 'total', kind: 'number', description: 'How many matched what was read, before limit.' },
+          { name: 'read', kind: 'number', description: 'How many conversations were looked at.' },
+          {
+            name: 'complete',
+            kind: 'boolean',
+            description: 'The whole list was read. False means a large workspace ran past the page cap.',
+          },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'ThreadSummary',
+        description: 'A thread in a channel, as the parent message and what came of it.',
+        properties: [
+          { name: 'ts', kind: 'string', description: "The parent's timestamp — this is the threadTs every other call takes." },
+          { name: 'user', kind: 'string', description: 'Who started it, as an id.' },
+          { name: 'userName', kind: 'string', description: 'Who that is, resolved, unless withNames was off.' },
+          { name: 'text', kind: 'string', description: 'What the parent says, which is what the thread is about.' },
+          { name: 'replies', kind: 'number', description: "Slack's own count of the replies under it." },
+          { name: 'repliers', kind: 'number', description: 'How many different people answered.' },
+          { name: 'started', kind: 'string', description: 'When the parent was posted, as ISO 8601.' },
+          { name: 'lastReply', kind: 'string', description: 'When it was last answered, as ISO 8601.' },
+          { name: 'permalink', kind: 'string', description: 'The way into it — readThread takes the channel and ts.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Threads',
+        description: 'The threads found in one channel, newest activity first.',
+        properties: [
+          { name: 'channel', kind: 'string', description: 'The channel they are in, as an id.' },
+          { name: 'threads', kind: 'array', of: 'ThreadSummary', description: 'Capped by limit.' },
+          { name: 'total', kind: 'number', description: 'How many threads the window held, before limit.' },
+          { name: 'messages', kind: 'number', description: 'How many messages were read to find them.' },
+          { name: 'since', kind: 'string', description: 'The oldest moment read, as ISO 8601.' },
+          {
+            name: 'complete',
+            kind: 'boolean',
+            description: 'The window was read whole. False means older messages in it went unread.',
+          },
         ],
       }),
 
@@ -1272,6 +1369,8 @@ adding a message to anybody's unread count.`,
       new OrknuxFunctionTool({ function: 'readMessage' }),
       new OrknuxFunctionTool({ function: 'whoIs' }),
       new OrknuxFunctionTool({ function: 'findUsers' }),
+      new OrknuxFunctionTool({ function: 'findChannels' }),
+      new OrknuxFunctionTool({ function: 'listThreads' }),
       new OrknuxFunctionTool({ function: 'mention' }),
       new OrknuxFunctionTool({ function: 'readThread' }),
       /*
@@ -1483,6 +1582,165 @@ adding a message to anybody's unread count.`,
           }
           /* The field exists whichever call answered, so nothing has to ask which did. */
           return { ...found, email: at(found, 'email') ?? null };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'findChannels',
+        description:
+          'Finds channels by name, topic or purpose - every word of the query has to appear ' +
+          'somewhere in one of the three, in any order and whatever the capitals. Leave the query ' +
+          'empty to list what is there. Answers each channel\'s id, name, whether it is private, ' +
+          'how many people are in it, its topic and purpose, a url, and - the field that decides ' +
+          'what else you can do with it - whether the bot is a member, because reading a ' +
+          'channel\'s history needs an invitation and no scope substitutes for one. Runs on the ' +
+          'bot token and needs channels:read, plus groups:read for private channels. ' +
+          'withArchived includes the closed ones, which are left out otherwise.',
+        params: [
+          { name: 'query', type: 'string', required: false, default: '' },
+          { name: 'limit', type: 'number', required: false, default: 20 },
+          { name: 'withArchived', type: 'boolean', required: false, default: false },
+        ],
+        returnType: 'Channels',
+        run: (query, limit, withArchived) => {
+          const terms = (typeof query === 'string' ? query : '')
+            .trim()
+            .toLowerCase()
+            .split(/\s+/)
+            .filter((one) => one.length > 0);
+          const capped = Math.min(Math.max(Math.trunc(limit), 1), 200);
+          const site = workspaceUrl(this.settings);
+
+          const matches = [];
+          let read = 0;
+          let cursor = '';
+          let complete = false;
+          for (let page = 0; page < DIRECTORY; page += 1) {
+            const listed = slackApi(this.settings, 'conversations.list', {
+              types: 'public_channel,private_channel',
+              exclude_archived: withArchived === true ? 'false' : 'true',
+              limit: '200',
+              cursor: cursor,
+            });
+            const channels = at(listed, 'channels') ?? [];
+            read += channels.length;
+
+            for (const one of channels) {
+              const channel = channelOf(one, site);
+              /* An empty query is a listing, which is the same search with nothing to match. */
+              const haystack = `${channel.name ?? ''} ${channel.topic ?? ''} ${channel.purpose ?? ''}`;
+              if (terms.length === 0 || carries(haystack, terms)) {
+                matches.push(channel);
+              }
+            }
+
+            cursor = at(at(listed, 'response_metadata'), 'next_cursor') ?? '';
+            if (typeof cursor !== 'string' || cursor.length === 0) {
+              complete = true;
+              break;
+            }
+          }
+
+          return {
+            channels: matches.slice(0, capped),
+            total: matches.length,
+            read: read,
+            complete: complete,
+          };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'listThreads',
+        description:
+          'The threads in one channel, newest activity first: what each is about, who started it, ' +
+          'how many replied, and the ts readThread takes to read one. Slack has no call that ' +
+          'lists threads, so this reads the channel\'s recent history and picks out the messages ' +
+          'that have replies - which means it sees the window days asks for and not the archive ' +
+          'behind it. Pass the channel as a name, a #name or an id; the bot has to be in it. days ' +
+          'is how far back to read, a week if not given. Use it to find the conversation worth ' +
+          'reading before reading one, rather than opening threads to see what they are.',
+        params: [
+          { name: 'channel', type: 'string' },
+          { name: 'days', type: 'number', required: false, default: 7 },
+          { name: 'limit', type: 'number', required: false, default: 20 },
+          { name: 'withNames', type: 'boolean', required: false, default: true },
+        ],
+        returnType: 'Threads',
+        run: (channel, days, limit, withNames) => {
+          const asked = typeof channel === 'string' ? channel.trim().replace(/^#/, '') : '';
+          if (asked.length === 0) {
+            throw new Error('there is no channel to look in');
+          }
+          const back = Math.min(Math.max(Math.trunc(days), 1), 90);
+          const capped = Math.min(Math.max(Math.trunc(limit), 1), 200);
+          const oldest = Math.floor(Date.now() / 1000) - back * 86400;
+
+          /* The bot's own memberships, which is both how a name resolves and the fence. */
+          const where = joined(this.settings).find((one) => one.id === asked || one.name === asked);
+          if (where === undefined) {
+            throw new Error(
+              `the bot is not in ${channel}, so there is nothing of it to read - invite it there first`,
+            );
+          }
+
+          const history = slackApi(this.settings, 'conversations.history', {
+            channel: where.id,
+            oldest: String(oldest),
+            limit: String(PAGE),
+          });
+          const messages = at(history, 'messages') ?? [];
+          const site = workspaceUrl(this.settings);
+
+          /*
+           * A thread is a message that has been replied to. Slack writes the
+           * count on the parent and nowhere else, so the parents in a page of
+           * history are the whole of what there is to find - and a thread
+           * whose parent is older than the window is not in it, however
+           * recently somebody answered.
+           */
+          const threads = [];
+          for (const one of messages) {
+            const replies = at(one, 'reply_count');
+            if (typeof replies !== 'number' || replies < 1) {
+              continue;
+            }
+            const ts = at(one, 'ts');
+            threads.push({
+              ts: ts,
+              user: at(one, 'user') ?? at(one, 'username'),
+              userName: null,
+              text: at(one, 'text'),
+              replies: replies,
+              repliers: at(one, 'reply_users_count'),
+              started: whenOf(ts),
+              lastReply: whenOf(at(one, 'latest_reply')),
+              permalink:
+                site === null || typeof ts !== 'string'
+                  ? null
+                  : `${site}/archives/${where.id}/p${ts.replace('.', '')}`,
+            });
+          }
+
+          /*
+           * Newest activity first, which is when it was last *answered* rather
+           * than when it was started: a question from Monday that somebody
+           * replied to an hour ago is the live conversation, and the thread
+           * opened this morning and ignored is not. ISO 8601 in UTC sorts as
+           * text, which is the whole reason these are answered in it.
+           */
+          const active = (one) => one.lastReply ?? one.started ?? '';
+          threads.sort((first, second) => active(second).localeCompare(active(first)));
+          const shown = threads.slice(0, capped);
+
+          return {
+            channel: where.id,
+            threads: withNames === false ? shown : withAuthors('', this.settings, shown),
+            total: threads.length,
+            messages: messages.length,
+            since: new Date(oldest * 1000).toISOString(),
+            complete: at(history, 'has_more') !== true,
+          };
         },
       }),
 

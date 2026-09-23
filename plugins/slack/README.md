@@ -11,14 +11,14 @@ the **server** to talk to Slack, under a capability somebody accepted and
 through a connection the workspace pointed it at. The four file functions are
 the exception, and say so below.
 
-## Fifteen functions, fourteen of them tools
+## Eighteen functions, seventeen of them tools
 
 Everything except `isFirstReply` is fronted to agents as a tool. That one is a
 workflow's gate, written to be a condition — a model reading a thread has
 better ways to ask.
 
-Thirteen of those fourteen are the function itself, under a name an agent can
-call. The fourteenth, `uploadBinary`, is a tool of its own with a different
+Sixteen of those seventeen are the function itself, under a name an agent can
+call. The seventeenth, `uploadBinary`, is a tool of its own with a different
 signature — see *Two surfaces* below for why.
 
 Every function in the first two groups takes `connection` first: pass the
@@ -31,6 +31,8 @@ configured `slack` parameter. The section after the tables says why.
 |---|---|
 | `readThread(connection, channel, threadTs, limit, withNames)` | `messages` — each with `ts`, `user`, `text` and whether it is the `parent` — and `replies`, Slack's own count of the whole thread rather than of the page. `limit` defaults to 20. |
 | `readMessage(connection, link)` | The one message a permalink points at: `channel`, `ts`, `user`, `text`, `threadTs`. For when a message quotes another by link. |
+| `findChannels(query, limit, withArchived)` | Channels by name, topic or purpose — with `member` saying whether the bot is in it, which decides what else you can do with it. An empty query lists what is there. |
+| `listThreads(channel, days, limit, withNames)` | The threads in one channel, newest activity first: what each is about, how many replied, and the `ts` `readThread` takes. |
 | `findUsers(query, limit)` | People by **name or email**, for turning "the person called Ada" into the `U…` id everything else takes. An email is one exact request; a name reads the directory. Runs on `botToken`. |
 | `whoIs(connection, userId)` | Who an id belongs to: `id`, `name`, `realName`, `displayName`, `bot`. Takes the id bare or as the whole `<@U…>` notation a message carries it in. |
 | `search(connection, query, limit)` | `matches` — `channel`, `channelName`, `ts`, `user`, `text`, `permalink` each — and `total`, how many the whole search holds. Slack's search syntax works: `in:#channel`, `from:@name`, `"an exact phrase"`. |
@@ -63,6 +65,42 @@ is in:
 |---|---|
 | `listAttachments(channel, ts)` | `files` hanging on one message — `id`, `name`, `title`, `filetype`, `mimetype`, `size`, `permalink` each. A message with no files answers an empty list. Reads channel history, falling back to the thread, because a reply is not in the channel's history. |
 | `readAttachment(file)` | One attachment by id: `name`, `mimetype`, `size`, and exactly one of `content` (text as text) or `base64` (binary as bytes), the other `null` — plus a `key` naming whichever it was. Hand that straight to `uploadBinary` or `upload` as `contentKey` to move a file between channels without either of you retyping it. |
+
+## Finding a channel, and what is being talked about in it
+
+`findChannels` matches every word against name, topic and purpose, so
+`findChannels('deploy')` turns up `#deploys` by its name and the private
+channel whose purpose says "deploy policy". An empty query lists what is
+there. Archived channels are left out unless `withArchived` asks for them.
+
+The field to read is **`member`**. It says whether the bot is in the channel,
+and that is what decides whether anything else here can read it —
+`listThreads` and `findRecent` see what the bot was invited to, and no scope
+substitutes for an invitation.
+
+`listThreads` then answers what is being discussed without reading any of it:
+
+```
+listThreads('#deploys')  →  threads, newest activity first, each with
+                            text, replies, repliers, and the ts readThread takes
+```
+
+**Slack has no call that lists threads.** A thread is a message that has been
+replied to, and Slack writes that count on the parent and nowhere else — so
+this reads the channel's recent history and picks the parents out of it. Two
+consequences worth knowing:
+
+- it sees the window `days` asks for, not the archive behind it
+- a thread whose **parent** is older than the window is not in the answer,
+  however recently somebody replied to it
+
+Sorting is by last reply rather than by when the thread started: a question
+from Monday answered an hour ago is the live conversation, and this morning's
+ignored thread is not. `complete: false` means older messages in the window
+went unread.
+
+Scopes: `channels:read` for finding channels and `channels:history` for
+listing threads, plus the `groups:*` pair for private ones.
 
 ## Finding somebody
 
