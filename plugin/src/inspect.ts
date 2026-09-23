@@ -12,6 +12,7 @@ import type {
   DeclaredParameter,
   DeclaredProperty,
   DeclaredSkill,
+  DeclaredType,
   DeclaredTool,
   Declaration,
 } from './validate.js';
@@ -52,6 +53,7 @@ export interface Inspection extends Declaration {
   libraries: string[];
   skills: DeclaredSkill[];
   objects: DeclaredObject[];
+  types: DeclaredType[];
   file: string;
   bytes: number;
   /** The digest the server will store, so the two can be compared. */
@@ -225,6 +227,17 @@ export async function inspect(file: string): Promise<Inspection> {
   }
   const objects = shapes.map((one) => readObject(one as Record<string, unknown>));
 
+  /*
+   * The value types it defines. Read as declared, plus whether each offered
+   * the two functions - which is all the server keeps, since the calls go to
+   * the source.
+   */
+  const kinds = typeof held['types'] === 'function' ? answer('types') : [];
+  if (!Array.isArray(kinds)) {
+    throw new NotAPluginError('types() did not answer with an array');
+  }
+  const types = kinds.map((one) => readType(one as Record<string, unknown>));
+
   return {
     id: id.trim(),
     apiVersion,
@@ -236,6 +249,7 @@ export async function inspect(file: string): Promise<Inspection> {
     libraries,
     skills,
     objects,
+    types,
     file,
     bytes: source.byteLength,
     sha256,
@@ -338,6 +352,18 @@ function readTool(declared: Record<string, unknown>, functions: DeclaredFunction
       };
     }),
     proxyOf: null,
+  };
+}
+
+function readType(declared: Record<string, unknown>): DeclaredType {
+  const asked = Array.isArray(declared['parameters']) ? declared['parameters'] : [];
+  return {
+    name: text(declared, 'name') ?? refuse('a type has no name'),
+    description: text(declared, 'description') ?? null,
+    base: text(declared, 'base') ?? refuse('a type has no base'),
+    parameters: asked.map((one) => readParameter(one as Record<string, unknown>)),
+    suggests: typeof declared['suggest'] === 'function',
+    validates: typeof declared['validate'] === 'function',
   };
 }
 

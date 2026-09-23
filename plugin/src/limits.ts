@@ -147,6 +147,20 @@ export const MAX_OBJECTS = 50;
 export const MAX_PROPERTIES = 100;
 
 /**
+ * Value types a plugin may define. Lower still than objects: each one is an
+ * entry in the type picker of every variable in every workspace, and a plugin
+ * that needs twenty kinds of string is describing an API rather than a
+ * vocabulary. `MAX_TYPES` in `PluginRunner`.
+ */
+export const MAX_TYPES = 20;
+
+/** What one type may ask to be told; a connection and a couple of settings. `MAX_TYPE_PARAMETERS` in `PluginRunner`. */
+export const MAX_TYPE_PARAMETERS = 10;
+
+/** What a type is underneath: one of the three a workspace variable can hold. `BASES` in `PluginDeclarations`. */
+export const TYPE_BASES = ['string', 'number', 'boolean'] as const;
+
+/**
  * What an exported object may be called: an identifier, conventionally
  * PascalCase, because it reads as a type. Held to the same rule a workspace's
  * own object names are, and prefixed with the plugin's key when it is stored.
@@ -218,6 +232,7 @@ export const CAPABILITIES = [
   'SLACK_READ_USER',
   'SLACK_MENTION',
   'SLACK_SEARCH',
+  'SLACK_SUGGEST',
   'NETWORK_REQUEST',
   'RENDER_PNG',
   'RENDER_PDF',

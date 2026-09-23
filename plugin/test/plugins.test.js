@@ -308,6 +308,7 @@ test('the slack plugin declares what the server would accept', async () => {
     'SLACK_POST_MESSAGE',
     'SLACK_ADD_REACTION',
     'SLACK_SEARCH',
+    'SLACK_SUGGEST',
     'NETWORK_REQUEST',
   ]);
   assert.deepEqual(

@@ -19,6 +19,7 @@ export {
   OrknuxPlugin,
   OrknuxSkill,
   OrknuxTool,
+  OrknuxType,
 } from './contract.js';
 export type {
   OrknuxFunctionConstructor,
@@ -28,6 +29,7 @@ export type {
   OrknuxPluginBase,
   OrknuxSkillConstructor,
   OrknuxToolConstructor,
+  OrknuxTypeConstructor,
 } from './contract.js';
 
 export { definePlugin, fn, functionTool, param, tool } from './define.js';
@@ -53,12 +55,15 @@ export {
   MAX_SKILL_NAME_LENGTH,
   MAX_SOURCE_BYTES,
   MAX_TOOLS,
+  MAX_TYPES,
+  MAX_TYPE_PARAMETERS,
   OBJECT_NAME,
   PARAMETER_TYPES,
   PERMISSIONS,
   PLUGIN_ID,
   PROPERTY_KINDS,
   SUPPORTED_API_VERSIONS,
+  TYPE_BASES,
   VALUE_TYPES,
 } from './limits.js';
 
@@ -92,6 +97,11 @@ export type {
   OrknuxStorePut,
   OrknuxToolDeclaration,
   OrknuxToolInstance,
+  OrknuxTypeBase,
+  OrknuxTypeDeclaration,
+  OrknuxTypeInstance,
+  OrknuxTypeSuggestion,
+  OrknuxTypeVerdict,
   OrknuxValues,
   OrknuxValueType,
   SlackConnectionArgument,
@@ -100,6 +110,7 @@ export type {
   SlackPost,
   SlackReaction,
   SlackSearchResult,
+  SlackSuggestions,
   SlackThread,
   SlackThreadMessage,
   SlackUserInfo,
@@ -118,6 +129,7 @@ export {
   validatePermissions,
   validateSkills,
   validateTools,
+  validateTypes,
 } from './validate.js';
 export type {
   DeclaredFunction,
@@ -127,6 +139,7 @@ export type {
   DeclaredProperty,
   DeclaredSkill,
   DeclaredTool,
+  DeclaredType,
   Declaration,
   Problem,
 } from './validate.js';

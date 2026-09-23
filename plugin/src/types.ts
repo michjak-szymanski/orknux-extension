@@ -432,6 +432,63 @@ export interface OrknuxObjectInstance {
   readonly properties: readonly OrknuxProperty[];
 }
 
+/** What a type a plugin defines is underneath: one of the three a variable can hold. */
+export type OrknuxTypeBase = 'string' | 'number' | 'boolean';
+
+/** One thing a type offers for what was typed into a variable of it. */
+export interface OrknuxTypeSuggestion {
+  /** What the variable is set to when this is taken. */
+  value: string | number | boolean;
+  /** What the row says; the value itself when absent. */
+  label?: string;
+  /** A second line - a real name beside a handle. */
+  detail?: string;
+}
+
+/** Whether a type accepts a value, and if not, why - in a sentence somebody will read on the form. */
+export type OrknuxTypeVerdict = { ok: true } | { ok: false; reason: string };
+
+/**
+ * A value type the plugin defines.
+ *
+ * A Slack user id is a string, but it is a string only some values of are
+ * real, and the plugin is the one thing that can say which. So a plugin names
+ * a type over a base type, says what it needs to be told to check one (a
+ * connection, usually), and offers `suggest` for the picker and `validate`
+ * for the save. Neither is required: a type with neither is a name on a
+ * string, which still says what a variable is for.
+ *
+ * Both functions run with `this` as the plugin, its settings on it, and are
+ * handed what the variable was told as `args` - a connection argument arrives
+ * as the same handle a connection setting does. A parameter may not be a
+ * secret: what a variable is told is kept beside it, in the clear.
+ */
+export interface OrknuxTypeDeclaration {
+  /** An identifier, conventionally PascalCase. A workspace points at it as `<plugin>:<name>`. */
+  name: string;
+  description?: string | null;
+  base: OrknuxTypeBase;
+  parameters?: readonly (OrknuxParameterDeclaration | OrknuxParameterInstance)[];
+  suggest?: (
+    typed: string,
+    args: Readonly<Record<string, unknown>>,
+  ) => OrknuxTypeSuggestion[] | Promise<OrknuxTypeSuggestion[]>;
+  validate?: (
+    value: string,
+    args: Readonly<Record<string, unknown>>,
+  ) => OrknuxTypeVerdict | Promise<OrknuxTypeVerdict>;
+}
+
+/** What a type is once the sandbox has checked it. */
+export interface OrknuxTypeInstance {
+  readonly name: string;
+  readonly description: string | null;
+  readonly base: OrknuxTypeBase;
+  readonly parameters: readonly OrknuxParameterInstance[];
+  readonly suggest?: OrknuxTypeDeclaration['suggest'];
+  readonly validate?: OrknuxTypeDeclaration['validate'];
+}
+
 /** What a plugin answers when the server asks it what it is. */
 export interface OrknuxPluginInstance {
   /** What this plugin calls itself, and the prefix on everything it declares. */
@@ -479,6 +536,9 @@ export interface OrknuxPluginInstance {
    * names it by the plugin's own spelling.
    */
   objects(): OrknuxObjectInstance[];
+
+  /** The value types it defines, for a workspace\'s variables to be. */
+  types(): OrknuxTypeInstance[];
 
   /** What the workspace answered its parameters with, for the length of a call. */
   readonly settings: OrknuxSettings;
@@ -563,6 +623,17 @@ export type SlackMention =
   | { error: string; mention?: undefined };
 
 /** What a search of Slack's messages came to, or why it could not be run. */
+/** What the workflow editor's target box would offer for what was typed, or why it could not be asked. */
+export type SlackSuggestions =
+  | {
+      outcome: string;
+      message: string;
+      matches: { id: string; name: string; kind: 'CHANNEL' | 'USER'; realName: string | null }[];
+      complete: boolean;
+      error?: undefined;
+    }
+  | { error: string; matches?: undefined };
+
 export type SlackSearchResult =
   | {
       matches: {
@@ -776,6 +847,14 @@ export interface OrknuxHelpers {
      * comes back as the error.
      */
     search(connection: SlackConnectionArgument, query: string, limit?: number): SlackSearchResult;
+
+    /** Members and channels for what was typed, ranked as the workflow editor ranks them. Needs SLACK_SUGGEST. */
+    suggest(
+      connection: SlackConnectionArgument,
+      typed: string,
+      kind?: 'USER' | 'CHANNEL',
+      limit?: number,
+    ): SlackSuggestions;
   };
 
   http: {

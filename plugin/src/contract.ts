@@ -1,4 +1,4 @@
-import { PROPERTY_KINDS } from './limits.js';
+import { PROPERTY_KINDS, TYPE_BASES } from './limits.js';
 import type {
   OrknuxCapability,
   OrknuxFunctionDeclaration,
@@ -17,6 +17,8 @@ import type {
   OrknuxSkillInstance,
   OrknuxToolDeclaration,
   OrknuxToolInstance,
+  OrknuxTypeDeclaration,
+  OrknuxTypeInstance,
   OrknuxValueType,
 } from './types.js';
 
@@ -97,6 +99,69 @@ class OrknuxPluginFallback {
 
   objects(): OrknuxObjectInstance[] {
     return [];
+  }
+
+  types(): OrknuxTypeInstance[] {
+    return [];
+  }
+}
+
+/*
+ * A value type the plugin defines: a name over a base type, what it needs to
+ * be told, and up to two functions the server calls on the plugin's behalf.
+ * The parameters go through OrknuxParameter, so a type is held to the same
+ * rules a plugin's own settings are - except that none may be a secret,
+ * because what a variable of the type is told rides beside it in the clear.
+ * The wording mirrors `PluginRunner.CONTRACT`.
+ */
+class OrknuxTypeFallback {
+  constructor(declared: unknown) {
+    if (declared === null || typeof declared !== 'object') {
+      throw new Error('an OrknuxType needs a declaration');
+    }
+
+    const source = declared as Record<string, unknown>;
+    const self = this as unknown as Record<string, unknown>;
+
+    self['name'] = source['name'];
+    self['description'] = source['description'] === undefined ? null : source['description'];
+    self['base'] = source['base'];
+    const asked = source['parameters'] === undefined ? [] : source['parameters'];
+
+    if (typeof self['name'] !== 'string' || self['name'].length === 0) {
+      throw new Error('an OrknuxType needs a name');
+    }
+    const base = self['base'];
+    if (typeof base !== 'string' || !(TYPE_BASES as readonly string[]).includes(base)) {
+      throw new Error(
+        `${self['name']} is a "${String(base)}", which is not one of ${TYPE_BASES.join(', ')} - ` +
+          'a type is one of those with a name on it',
+      );
+    }
+    if (!Array.isArray(asked)) {
+      throw new Error(`${self['name']} needs parameters, as an array`);
+    }
+    self['parameters'] = asked.map((one: unknown) => {
+      const parameter = (
+        one instanceof OrknuxParameterFallback ? one : new OrknuxParameterFallback(one)
+      ) as unknown as Record<string, unknown>;
+      if (parameter['secret'] === true) {
+        throw new Error(
+          `${self['name']}'s ${String(parameter['name'])} is a secret, and a type cannot be told one: ` +
+            'what a variable of this type is told is kept beside it, in the clear',
+        );
+      }
+      return parameter;
+    });
+
+    if (source['suggest'] !== undefined && typeof source['suggest'] !== 'function') {
+      throw new Error(`${self['name']} has a suggest that is not a function`);
+    }
+    if (source['validate'] !== undefined && typeof source['validate'] !== 'function') {
+      throw new Error(`${self['name']} has a validate that is not a function`);
+    }
+    if (source['suggest'] !== undefined) self['suggest'] = source['suggest'];
+    if (source['validate'] !== undefined) self['validate'] = source['validate'];
   }
 }
 
@@ -379,6 +444,7 @@ function ungrantedHelpers(): OrknuxHelpers {
       user: refused('SLACK_READ_USER'),
       mention: refused('SLACK_MENTION'),
       search: refused('SLACK_SEARCH'),
+      suggest: refused('SLACK_SUGGEST'),
     },
     http: {
       request: refused('NETWORK_REQUEST'),
@@ -555,6 +621,8 @@ declare abstract class OrknuxPluginContract {
    */
   objects(): OrknuxObjectInstance[];
 
+  types(): OrknuxTypeInstance[];
+
   /**
    * What a workspace set those parameters to, keyed by name.
    *
@@ -635,6 +703,10 @@ export interface OrknuxObjectConstructor {
   new (declaration: OrknuxObjectDeclaration): OrknuxObjectInstance;
 }
 
+export interface OrknuxTypeConstructor {
+  new (declaration: OrknuxTypeDeclaration): OrknuxTypeInstance;
+}
+
 const scope = globalThis as unknown as {
   OrknuxPlugin?: unknown;
   OrknuxFunction?: unknown;
@@ -643,6 +715,7 @@ const scope = globalThis as unknown as {
   OrknuxParameter?: unknown;
   OrknuxSkill?: unknown;
   OrknuxObject?: unknown;
+  OrknuxType?: unknown;
   orknux?: unknown;
 };
 
@@ -653,6 +726,7 @@ scope.OrknuxFunctionTool ??= OrknuxFunctionToolFallback;
 scope.OrknuxParameter ??= OrknuxParameterFallback;
 scope.OrknuxSkill ??= OrknuxSkillFallback;
 scope.OrknuxObject ??= OrknuxObjectFallback;
+scope.OrknuxType ??= OrknuxTypeFallback;
 scope.orknux ??= ungrantedHelpers();
 
 export const OrknuxPlugin = scope.OrknuxPlugin as typeof OrknuxPluginContract;
@@ -668,6 +742,8 @@ export const OrknuxParameter = scope.OrknuxParameter as OrknuxParameterConstruct
 export const OrknuxSkill = scope.OrknuxSkill as OrknuxSkillConstructor;
 
 export const OrknuxObject = scope.OrknuxObject as OrknuxObjectConstructor;
+
+export const OrknuxType = scope.OrknuxType as OrknuxTypeConstructor;
 
 /**
  * What the server will do on a plugin's behalf: the Slack calls, one HTTP door,

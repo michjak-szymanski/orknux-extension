@@ -771,6 +771,23 @@ function connectionGone(error) {
  *
  * @param call takes a connection id and answers what the door answered.
  */
+/**
+ * Which connection a type was told, as the id the server's door takes.
+ *
+ * A connection argument arrives as the handle a connection setting does - an
+ * object with an id - and the plugin's configured Slack is the fallback where
+ * the variable said nothing, for the same reason `through` falls back: it is
+ * this workspace's own, and better than answering nothing.
+ */
+function connectionArgument(args, settings) {
+  const told = args && typeof args === 'object' ? args.slack : undefined;
+  const id = told && typeof told === 'object' ? told.id : told;
+  if (id !== undefined && id !== null && String(id).length > 0) return String(id);
+  const configured = settings && settings.slack;
+  const own = configured && typeof configured === 'object' ? configured.id : configured;
+  return own === undefined || own === null || String(own).length === 0 ? null : String(own);
+}
+
 function through(call, asked, configured) {
   const first = call(asked || configured);
   if (first.error === undefined || !asked || asked === configured) return first;
@@ -846,6 +863,7 @@ export default class Slack extends OrknuxPlugin {
       'SLACK_POST_MESSAGE',
       'SLACK_ADD_REACTION',
       'SLACK_SEARCH',
+      'SLACK_SUGGEST',
       // For the two upload functions only, which the capability vocabulary has
       // no narrower spelling for — the header says why.
       'NETWORK_REQUEST',
@@ -1397,6 +1415,88 @@ adding a message to anybody's unread count.`,
    * `isFirstReply` is deliberately not here. It is a workflow's gate, written
    * to be a condition; a model reading a thread has better ways to ask.
    */
+  /**
+   * The value types this plugin defines, for a workspace's variables to be.
+   *
+   * A Slack user id is a string, but it is a string only some values of are
+   * real, and a variable holding one used to be a text box: a typo was found
+   * by the function that failed at three in the morning. `SlackUser` gives
+   * the variable the same picker the workflow editor's target box has, and a
+   * check at the save.
+   *
+   * Told which Slack to look in. A workspace with two Slacks needs to say,
+   * and a variable that says is one that keeps working when the plugin's
+   * configured connection changes underneath it.
+   *
+   * `suggest` lists members through the server's Slack door, the same one
+   * `findUsers` uses, and matches what was typed against handle, real name,
+   * display name and email - so "mich" finds Michał whichever of those it is
+   * in. What is offered is the id, because that is what a function wants,
+   * with the name as the label so somebody can see who they picked.
+   *
+   * `validate` asks Slack for that one user. Deleted accounts are refused
+   * too: an id that resolves to somebody who left is not somebody to notify.
+   */
+  types() {
+    return [
+      new OrknuxType({
+        name: 'SlackUser',
+        description: "A Slack member's id, checked against the workspace's Slack.",
+        base: 'string',
+        parameters: [
+          {
+            name: 'slack',
+            description: 'Which Slack the user is in.',
+            type: 'connection',
+            connectionType: 'SLACK',
+            required: true,
+          },
+        ],
+        suggest: (typed, args) => {
+          const connection = connectionArgument(args, this.settings);
+          if (connection === null) return [];
+          const wanted = String(typed ?? '').trim().replace(/^@/, '').toLowerCase();
+
+          /*
+           * Through the door the workflow editor's target box uses, so the
+           * two agree about what a partial handle matches. Members only: a
+           * channel is not a user, whatever was typed.
+           */
+          const offered = orknux.slack.suggest(connection, wanted, 'USER', 25);
+          if (offered.error !== undefined) {
+            orknux.log.warn(`SlackUser could not be offered: ${offered.error}`);
+            return [];
+          }
+          return (offered.matches ?? []).map((one) => ({
+            value: one.id,
+            label: one.name,
+            detail: one.realName ?? undefined,
+          }));
+        },
+        validate: (value, args) => {
+          const connection = connectionArgument(args, this.settings);
+          if (connection === null) {
+            return { ok: false, reason: 'say which Slack connection to check the user against' };
+          }
+          const id = String(value ?? '').trim().replace(/^<@|>$/g, '');
+          if (!/^[UW][A-Z0-9]{2,}$/.test(id)) {
+            return { ok: false, reason: `"${value}" is not a Slack user id - one looks like U0123ABCD` };
+          }
+          const found = orknux.slack.user(connection, id);
+          if (found.error !== undefined) {
+            return /not_found|users_not_found/.test(found.error)
+              ? { ok: false, reason: `no member of this Slack has the id ${id}` }
+              : { ok: false, reason: `Slack could not be asked about ${id}: ${found.error}` };
+          }
+          if (found.deleted === true) {
+            return { ok: false, reason: `${id} belongs to a deactivated account` };
+          }
+          return { ok: true };
+        },
+      }),
+    ];
+  }
+
   tools() {
     const read = this.functions().find((one) => one.name === 'readAttachment');
     const posted = this.functions().find((one) => one.name === 'post');

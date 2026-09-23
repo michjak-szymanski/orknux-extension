@@ -144,6 +144,17 @@ type SlackMention =
   | { error: string; mention?: undefined };
 
 /** What a search of Slack's messages came to, or why it could not be run. */
+/** What the workflow editor's target box would offer for what was typed, or why it could not be asked. */
+type SlackSuggestions =
+  | {
+      outcome: string;
+      message: string;
+      matches: { id: string; name: string; kind: 'CHANNEL' | 'USER'; realName: string | null }[];
+      complete: boolean;
+      error?: undefined;
+    }
+  | { error: string; matches?: undefined };
+
 type SlackSearchResult =
   | {
       matches: {
@@ -389,6 +400,17 @@ declare const orknux: {
      * @param limit how many matches to bring back; capped to one page.
      */
     search(connection: SlackConnection, query: string, limit?: number): SlackSearchResult;
+
+    /**
+     * Members and channels for what somebody typed, ranked the way the
+     * workflow editor's target box ranks them. Needs `SLACK_SUGGEST`.
+     */
+    suggest(
+      connection: SlackConnection,
+      typed: string,
+      kind?: 'USER' | 'CHANNEL',
+      limit?: number,
+    ): SlackSuggestions;
   };
 
   http: {
@@ -882,6 +904,16 @@ declare abstract class OrknuxPlugin {
   objects(): OrknuxObject[];
 
   /**
+   * The value types this plugin defines, for a workspace's variables to be.
+   *
+   * A name over string, number or boolean, what it needs to be told, and up
+   * to two functions the server calls on the plugin's behalf: `suggest` for
+   * the picker as somebody types, `validate` for the save. Neither is
+   * required.
+   */
+  types(): OrknuxType[];
+
+  /**
    * What a workspace set those parameters to, keyed by name.
    *
    * Frozen, and put there by the server for the length of one call. A
@@ -1000,6 +1032,48 @@ declare class OrknuxObject {
 }
 
 /** What each declared parameter is wrapped in. */
+/** One thing a type offers for what was typed. */
+interface OrknuxTypeSuggestion {
+  /** What the variable is set to when this is taken. */
+  value: string | number | boolean;
+  label?: string;
+  detail?: string;
+}
+
+/** Whether a type accepts a value, and if not, why. */
+type OrknuxTypeVerdict = { ok: true } | { ok: false; reason: string };
+
+/**
+ * A value type the plugin defines - `SlackUser` over string.
+ *
+ * `suggest` and `validate` run with `this` as the plugin, its settings on it,
+ * and are handed what the variable was told as `args`; a connection argument
+ * arrives as the same handle a connection setting does. A parameter may not
+ * be a secret: what a variable of the type is told is kept beside it, in the
+ * clear.
+ */
+declare class OrknuxType {
+  constructor(declaration: {
+    name: string;
+    description?: string | null;
+    base: 'string' | 'number' | 'boolean';
+    parameters?: readonly (OrknuxParameterDeclared | OrknuxParameter)[];
+    suggest?: (
+      typed: string,
+      args: Readonly<Record<string, unknown>>,
+    ) => OrknuxTypeSuggestion[] | Promise<OrknuxTypeSuggestion[]>;
+    validate?: (
+      value: string,
+      args: Readonly<Record<string, unknown>>,
+    ) => OrknuxTypeVerdict | Promise<OrknuxTypeVerdict>;
+  });
+
+  readonly name: string;
+  readonly description: string | null;
+  readonly base: 'string' | 'number' | 'boolean';
+  readonly parameters: readonly OrknuxParameter[];
+}
+
 declare class OrknuxParameter {
   constructor(declaration: OrknuxParameterDeclared);
 

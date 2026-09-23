@@ -18,6 +18,7 @@ import type {
   OrknuxParameterInstance,
   OrknuxPermission,
   OrknuxPluginConstructor,
+  OrknuxTypeInstance,
   OrknuxSkillInstance,
   OrknuxToolDeclaration,
   OrknuxToolInstance,
@@ -156,6 +157,9 @@ export interface OrknuxPluginSpec {
    * `jira` arrives as `jira_Issue`.
    */
   objects?: readonly OrknuxObjectInstance[];
+
+  /** The value types it defines, for a workspace's variables to be. */
+  types?: readonly OrknuxTypeInstance[];
 }
 
 /**
@@ -192,6 +196,7 @@ export function definePlugin(spec: OrknuxPluginSpec): OrknuxPluginConstructor {
   const shipped = spec.libraries === undefined ? [] : [...spec.libraries];
   const taught = spec.skills === undefined ? [] : [...spec.skills];
   const exported = spec.objects === undefined ? [] : [...spec.objects];
+  const defined = spec.types === undefined ? [] : [...spec.types];
 
   /*
    * Checked here rather than left to the upload: a plugin that declares one name
@@ -273,6 +278,10 @@ export function definePlugin(spec: OrknuxPluginSpec): OrknuxPluginConstructor {
 
     override objects(): OrknuxObjectInstance[] {
       return exported.slice();
+    }
+
+    override types(): OrknuxTypeInstance[] {
+      return defined.slice();
     }
   };
 }

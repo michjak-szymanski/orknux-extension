@@ -186,6 +186,22 @@ async function report(file: string): Promise<number> {
    * `Issue` declared by `jira` arrives as `jira_Issue` — so they are shown
    * qualified, the way the functions above are.
    */
+  if (inspected.types.length > 0) {
+    process.stdout.write('\n  It defines these types:\n');
+    for (const type of inspected.types) {
+      const does = [type.suggests ? 'completes' : null, type.validates ? 'checks' : null].filter(
+        (one) => one !== null,
+      );
+      const told = (type.parameters ?? []).map((one) => one.name).join(', ');
+      process.stdout.write(
+        `    ${inspected.id}:${type.name} (${type.base})` +
+          (told === '' ? '' : `, told ${told}`) +
+          (does.length === 0 ? '' : ` - ${does.join(' and ')} values`) +
+          '\n',
+      );
+    }
+  }
+
   if (inspected.objects.length > 0) {
     process.stdout.write('\n  It exports these shapes:\n');
     for (const shape of inspected.objects) {

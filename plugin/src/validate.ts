@@ -16,12 +16,15 @@ import {
   MAX_SKILL_CHARS,
   MAX_SKILL_NAME_LENGTH,
   MAX_TOOLS,
+  MAX_TYPES,
+  MAX_TYPE_PARAMETERS,
   OBJECT_NAME,
   PARAMETER_TYPES,
   PERMISSIONS,
   PLUGIN_ID,
   PROPERTY_KINDS,
   SUPPORTED_API_VERSIONS,
+  TYPE_BASES,
   VALUE_TYPES,
 } from './limits.js';
 
@@ -123,6 +126,7 @@ export interface Declaration {
   skills?: DeclaredSkill[];
   /** The shapes it exports; optional for the same reason. */
   objects?: DeclaredObject[];
+  types?: DeclaredType[];
 }
 
 /** One instruction set a plugin brings, as it reaches the loader. */
@@ -148,6 +152,16 @@ export interface DeclaredObject {
   properties: DeclaredProperty[];
 }
 
+/** A value type a plugin defines, as inspected: what it declared, and whether it offered the two functions. */
+export interface DeclaredType {
+  name: string;
+  description?: string | null;
+  base: string;
+  parameters?: DeclaredParameter[];
+  suggests?: boolean;
+  validates?: boolean;
+}
+
 /** Something that would stop this plugin being accepted. */
 export interface Problem {
   /** Which of the plugin's answers it came from, for grouping in a report. */
@@ -161,7 +175,8 @@ export interface Problem {
     | 'capabilities'
     | 'libraries'
     | 'skills'
-    | 'objects';
+    | 'objects'
+    | 'types';
   message: string;
 }
 
@@ -205,7 +220,60 @@ export function validate(declared: Declaration): Problem[] {
     ...validateLibraries(declared.libraries ?? []),
     ...validateSkills(declared.skills ?? []),
     ...validateObjects(declared.objects ?? []),
+    ...validateTypes(declared.types ?? []),
   ];
+}
+
+/**
+ * The value types a plugin defines, held to what the loader holds them to.
+ *
+ * The wording is the upload's, from `PluginDeclarations.validatedTypes`: a
+ * usable name, one of the three bases, parameters that pass the parameter
+ * rules and none of them a secret.
+ */
+export function validateTypes(declared: DeclaredType[]): Problem[] {
+  const problems: Problem[] = [];
+  const refuse = (message: string): void => {
+    problems.push({ part: 'types', message });
+  };
+
+  if (declared.length > MAX_TYPES) {
+    refuse(`types() declared more than ${MAX_TYPES} types`);
+    return problems;
+  }
+
+  const names = new Set<string>();
+  for (const type of declared) {
+    const name = typeof type?.name === 'string' ? type.name.trim() : '';
+    if (!IDENTIFIER.test(name)) {
+      refuse(`"${name}" is not a usable type name`);
+      continue;
+    }
+    if (names.has(name)) refuse(`it declares the type ${name} more than once`);
+    names.add(name);
+
+    const base = typeof type.base === 'string' ? type.base.trim().toLowerCase() : '';
+    if (!(TYPE_BASES as readonly string[]).includes(base)) {
+      refuse(`${name} is a "${String(type.base)}", and a type is one of ${TYPE_BASES.join(', ')} with a name on it`);
+    }
+
+    const parameters = type.parameters ?? [];
+    if (parameters.length > MAX_TYPE_PARAMETERS) {
+      refuse(`${name} declares more than ${MAX_TYPE_PARAMETERS} parameters`);
+      continue;
+    }
+    const secret = parameters.find((one) => one.secret === true);
+    if (secret !== undefined) {
+      refuse(
+        `${name} asks to be told ${secret.name} as a secret, and a type cannot be told one: ` +
+          'what a variable of the type is told is kept beside it, in the clear.',
+      );
+    }
+    for (const problem of validateParameters(parameters)) {
+      refuse(`${name}: ${problem.message}`);
+    }
+  }
+  return problems;
 }
 
 /**

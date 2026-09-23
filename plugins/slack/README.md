@@ -234,6 +234,21 @@ That only works because nothing that makes bytes leaves them unnamed:
 | `pdf_fromHtml` | the document |
 | `slack_readAttachment` | whichever half it read — so a file moves between channels without passing through anybody |
 
+## A variable can be a Slack user
+
+The plugin defines one value type, `SlackUser`, for a workspace's variables to
+be. A variable of that type gets the picker the workflow editor's target box
+has - type part of a handle, a real name or an email and pick the member - and
+a check at the save: an id that is nobody's, or somebody's who has left, is
+refused with a sentence saying so. What a function is handed is the id, which
+is what every function here takes.
+
+A `SlackUser` variable is told which Slack connection to look in. That is a
+choice on the variable rather than the plugin's own `slack` parameter, because
+a workspace with two Slacks has to say, and a variable that says keeps working
+when the plugin's configured connection changes underneath it. Left unsaid, the
+configured one is used.
+
 ## Parameters
 
 | Name | |
@@ -308,9 +323,10 @@ workspace with one Slack wants and one fewer thing to wire.
 `TEXT_ENCODING`, for the byte length a file upload declares — the length of
 text is a fact about its UTF-8 encoding, not its character count.
 
-Seven Slack capabilities, one per call: `SLACK_READ_THREAD`,
+Eight Slack capabilities, one per call: `SLACK_READ_THREAD`,
 `SLACK_READ_MESSAGE`, `SLACK_READ_USER`, `SLACK_MENTION`,
-`SLACK_POST_MESSAGE`, `SLACK_ADD_REACTION`, `SLACK_SEARCH`. Each is the server
+`SLACK_POST_MESSAGE`, `SLACK_ADD_REACTION`, `SLACK_SEARCH`, `SLACK_SUGGEST`.
+Each is the server
 making one call for the plugin; the plugin never sees a token and could not use
 one.
 
