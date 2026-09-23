@@ -129,6 +129,7 @@ test('the github plugin declares what the server would accept', async () => {
     'searchCode',
     'searchCommits',
     'openCommit',
+    'reviews',
     'buildStatus',
     'openFile',
     'fileHistory',
@@ -161,6 +162,104 @@ test('the github plugin declares what the server would accept', async () => {
     assert.equal(declared.returnType, fronted.returnType);
     assert.equal(declared.description, fronted.description);
   }
+});
+
+test('github reviews answer where each person stands, not what they last did', async () => {
+  const url = new URL(`../../plugins/github/github.js`, import.meta.url);
+  const { default: Github } = await import(url.href);
+
+  const plugin = Object.create(Github.prototype);
+  Object.defineProperty(plugin, 'settings', {
+    value: Object.freeze({ token: 'ghp_x', organization: 'acme' }),
+  });
+  const call = (name) => plugin.functions().find((one) => one.name === name);
+
+  /*
+   * The history GitHub actually keeps, which is every event rather than a
+   * tally. Ada asked for changes and approved after lunch; Bob commented
+   * twice and never took a position; Cora approved and had it dismissed when
+   * the branch moved.
+   */
+  const events = [
+    { user: { login: 'ada' }, state: 'CHANGES_REQUESTED', submitted_at: '2026-09-01T09:00:00Z', body: 'no' },
+    { user: { login: 'bob' }, state: 'COMMENTED', submitted_at: '2026-09-01T10:00:00Z', body: 'a thought' },
+    { user: { login: 'cora' }, state: 'APPROVED', submitted_at: '2026-09-01T11:00:00Z', body: '' },
+    { user: { login: 'ada' }, state: 'APPROVED', submitted_at: '2026-09-01T13:00:00Z', body: 'better' },
+    { user: { login: 'cora' }, state: 'DISMISSED', submitted_at: '2026-09-01T14:00:00Z', body: '' },
+    { user: { login: 'bob' }, state: 'COMMENTED', submitted_at: '2026-09-01T15:00:00Z', body: 'another' },
+  ];
+
+  const asked = [];
+  const door = globalThis.orknux.http.request;
+  let stood;
+  let blocked;
+  try {
+    globalThis.orknux.http.request = (what) => {
+      asked.push(what.url);
+      if (what.url.endsWith('/requested_reviewers')) {
+        return {
+          status: 200,
+          headers: {},
+          body: '{}',
+          json: { users: [{ login: 'dee' }], teams: [{ slug: 'platform' }] },
+        };
+      }
+      return { status: 200, headers: {}, body: '{}', json: events };
+    };
+    stood = call('reviews').run('', 'api', 7);
+
+    /* And the same pull request with somebody still standing on changes. */
+    globalThis.orknux.http.request = (what) => {
+      if (what.url.endsWith('/requested_reviewers')) {
+        return { status: 200, headers: {}, body: '{}', json: { users: [], teams: [] } };
+      }
+      return {
+        status: 200,
+        headers: {},
+        body: '{}',
+        json: [...events, { user: { login: 'eve' }, state: 'CHANGES_REQUESTED', submitted_at: '2026-09-01T16:00:00Z' }],
+      };
+    };
+    /* And the repo as owner/name in one, which is how people say it. */
+    blocked = call('reviews').run('', 'acme/api', 7);
+  } finally {
+    globalThis.orknux.http.request = door;
+  }
+
+  /* The configured organization fills in the owner nobody passed. */
+  assert.equal(asked[0], 'https://api.github.com/repos/acme/api/pulls/7/reviews?per_page=100');
+  assert.equal(asked[1], 'https://api.github.com/repos/acme/api/pulls/7/requested_reviewers');
+
+  /*
+   * Ada approved after asking for changes, so she counts once and as an
+   * approval. Counting events would have called this blocked.
+   */
+  assert.deepEqual(stood.approvers, ['ada']);
+  assert.deepEqual(stood.blockers, []);
+  assert.equal(stood.approvals, 1);
+  assert.equal(stood.approved, true);
+  assert.equal(stood.state, 'approved');
+
+  /* A dismissal clears an approval rather than leaving it standing. */
+  assert.ok(!stood.approvers.includes('cora'));
+
+  /* And commenting is not a position: Bob is in neither list. */
+  assert.ok(!stood.approvers.includes('bob') && !stood.blockers.includes('bob'));
+
+  /* The history is all of it, in order, one entry per event. */
+  assert.equal(stood.reviews.length, 6);
+  assert.equal(stood.reviews[0].state, 'CHANGES_REQUESTED');
+  assert.equal(stood.reviews[0].user, 'ada');
+
+  /* Who has been asked and has not answered — people and teams apart. */
+  assert.deepEqual(stood.requested, ['dee']);
+  assert.deepEqual(stood.requestedTeams, ['platform']);
+
+  /* One blocker outweighs any number of approvals. */
+  assert.equal(blocked.approved, false);
+  assert.equal(blocked.state, 'changes requested');
+  assert.deepEqual(blocked.blockers, ['eve']);
+  assert.equal(blocked.approvals, 1, 'ada still approved; she is just outvoted by a block');
 });
 
 test('a github api call without a token is a thrown sentence, not a request', async () => {

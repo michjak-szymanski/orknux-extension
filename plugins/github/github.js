@@ -323,6 +323,75 @@ export default class Github extends OrknuxPlugin {
       }),
 
       new OrknuxObject({
+        name: 'Review',
+        description: 'One review somebody left on a pull request.',
+        properties: [
+          { name: 'user', kind: 'string', description: 'Who left it.' },
+          {
+            name: 'state',
+            kind: 'string',
+            description: 'APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED.',
+          },
+          { name: 'submitted', kind: 'string', description: 'When, as ISO 8601.' },
+          { name: 'body', kind: 'string', description: 'What they wrote, where they wrote anything.' },
+          { name: 'url', kind: 'string', description: 'The review, for a person to open.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Reviews',
+        description: 'Where a pull request stands with its reviewers.',
+        properties: [
+          {
+            name: 'approved',
+            kind: 'boolean',
+            description:
+              'Somebody approved and nobody is standing on changes requested. This is the ' +
+              'question "has it been approved" actually means, and it is not the same as ' +
+              'mergeable, which is only about conflicts.',
+          },
+          {
+            name: 'state',
+            kind: 'string',
+            description: 'changes requested, approved, commented, or none where nobody has reviewed.',
+          },
+          { name: 'approvals', kind: 'number', description: 'How many people currently stand at approved.' },
+          {
+            name: 'changesRequested',
+            kind: 'number',
+            description: 'How many currently stand at changes requested — any of them blocks.',
+          },
+          {
+            name: 'approvers',
+            kind: 'array',
+            of: 'string',
+            description: 'Who those approvals belong to, which is what a policy asking for two of them needs.',
+          },
+          {
+            name: 'blockers',
+            kind: 'array',
+            of: 'string',
+            description: 'Who is asking for changes, and therefore who has to look again.',
+          },
+          {
+            name: 'requested',
+            kind: 'array',
+            of: 'string',
+            description: 'Asked to review and has not yet — the people a nudge would go to.',
+          },
+          { name: 'requestedTeams', kind: 'array', of: 'string', description: 'The same, for teams.' },
+          {
+            name: 'reviews',
+            kind: 'array',
+            of: 'Review',
+            description:
+              'Every review left, oldest first — one person appears as often as they reviewed. ' +
+              'The counts above already resolve that; this is the history behind them.',
+          },
+        ],
+      }),
+
+      new OrknuxObject({
         name: 'BuildStatus',
         description: 'What every build said about one commit, both reporting schemes together.',
         properties: [
@@ -601,6 +670,7 @@ not obviously say so.`,
       new OrknuxFunctionTool({ function: 'searchCode' }),
       new OrknuxFunctionTool({ function: 'searchCommits' }),
       new OrknuxFunctionTool({ function: 'openCommit' }),
+      new OrknuxFunctionTool({ function: 'reviews' }),
       new OrknuxFunctionTool({ function: 'buildStatus' }),
       new OrknuxFunctionTool({ function: 'openFile' }),
       new OrknuxFunctionTool({ function: 'fileHistory' }),
@@ -987,6 +1057,89 @@ not obviously say so.`,
             deletions: at(at(commit, 'stats'), 'deletions'),
             url: at(commit, 'html_url'),
             files: (at(commit, 'files') ?? []).map(changedFile),
+          };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'reviews',
+        description:
+          'Where a pull request stands with its reviewers: whether it is approved, who approved ' +
+          'it, who is asking for changes, who was asked and has not answered, and every review ' +
+          'in order. Pass owner and repo (or the repo as owner/name, or an empty owner for the ' +
+          'configured organization) and the pull request number. approved means somebody approved ' +
+          'and nobody is standing on changes requested - which is what "has it been approved" ' +
+          'asks, and is not what mergeable answers, that being about conflicts alone. GitHub ' +
+          'keeps every review event, so one person can appear several times and only their latest ' +
+          'approval or change request counts; a comment-only review never changes where they ' +
+          'stand. The counts here already resolve that.',
+        params: [
+          { name: 'owner', type: 'string' },
+          { name: 'repo', type: 'string' },
+          { name: 'number', type: 'number' },
+        ],
+        returnType: 'Reviews',
+        run: (owner, repo, number) => {
+          const base = repoPath(this.settings, owner, repo);
+          const at_ = `${base}/pulls/${encodeURIComponent(number)}`;
+
+          /* Oldest first, which is what makes "the latest one wins" a single pass. */
+          const listed = read(this.settings, { path: `${at_}/reviews?per_page=100` }).json ?? [];
+          const waiting = read(this.settings, { path: `${at_}/requested_reviewers` }).json;
+
+          /*
+           * Where each person stands, which is not the same as what they last
+           * did. GitHub's own rule: an approval or a change request replaces
+           * that person's previous one, a dismissal clears it, and a review
+           * that only comments leaves it exactly as it was. Counting the
+           * events instead would call a pull request blocked because somebody
+           * asked for changes in the morning and approved it after lunch.
+           */
+          const standing = new Map();
+          const reviews = [];
+          for (const one of listed) {
+            const user = at(at(one, 'user'), 'login');
+            const state = at(one, 'state');
+            reviews.push({
+              user: user,
+              state: state,
+              submitted: at(one, 'submitted_at'),
+              body: at(one, 'body'),
+              url: at(one, 'html_url'),
+            });
+            if (state === 'APPROVED' || state === 'CHANGES_REQUESTED' || state === 'DISMISSED') {
+              standing.set(user, state);
+            }
+          }
+
+          const approvers = [];
+          const blockers = [];
+          for (const [user, state] of standing) {
+            if (state === 'APPROVED') {
+              approvers.push(user);
+            } else if (state === 'CHANGES_REQUESTED') {
+              blockers.push(user);
+            }
+          }
+
+          return {
+            /* One blocker outweighs any number of approvals, which is how GitHub reads it too. */
+            approved: approvers.length > 0 && blockers.length === 0,
+            state:
+              blockers.length > 0
+                ? 'changes requested'
+                : approvers.length > 0
+                  ? 'approved'
+                  : reviews.length > 0
+                    ? 'commented'
+                    : 'none',
+            approvals: approvers.length,
+            changesRequested: blockers.length,
+            approvers: approvers,
+            blockers: blockers,
+            requested: (at(waiting, 'users') ?? []).map((one) => at(one, 'login')),
+            requestedTeams: (at(waiting, 'teams') ?? []).map((one) => at(one, 'slug')),
+            reviews: reviews,
           };
         },
       }),

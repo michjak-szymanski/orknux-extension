@@ -11,7 +11,7 @@ can work a repository the way a person does — look first, then speak. Calls
 go through the server under `NETWORK_REQUEST`, against the token a workspace
 variable holds.
 
-## Nineteen functions, seventeen of them tools
+## Twenty functions, eighteen of them tools
 
 Everything except the webhook pair is fronted to agents. `verify` and
 `describe` are a trigger's, not a model's: one is an HMAC check and the other
@@ -48,6 +48,7 @@ All three take GitHub's own search syntax, and all three are scoped to
 | `fileHistory(owner, repo, path, limit = 20)` | The commits that touched one file, newest first: `sha`, `message`, `author`, `date`, `url`. |
 | `openPull(owner, repo, number)` | One pull request whole — `title`, `body`, `state`, `draft`, `merged`, `author`, `baseRef`, `headRef`, `headSha`, `mergeable`, `additions`, `deletions`, `url` — **and its changed files, each with the patch GitHub shows as the diff.** One call, not a walk. |
 | `openCommit(owner, repo, sha)` | One commit whole, the same way: `message`, `author`, `date`, `parents`, counts, `url`, and the changed files with their patches. Takes a ref that names a commit as well as a sha. |
+| `reviews(owner, repo, number)` | Where a pull request stands with its reviewers: `approved`, who approved, who is blocking, who was asked and has not answered, and every review in order. GitHub keeps each review as an event — this resolves them to where each person **stands**. |
 | `buildStatus(owner, repo, ref)` | What the builds say about one commit, combining the two things GitHub keeps apart: the commit **status** and every **check run**, in one answer. `overall` is `failure`, `pending`, `success`, or `none` where nothing has reported; `statuses` and `checks` carry each reporter by name. Takes a sha, branch or tag. |
 
 ### Copilot agent tasks
@@ -69,6 +70,29 @@ about which token these accept.
 | `comment(owner, repo, number, text)` | The plain kind, under the conversation. Works on an issue as well as a pull request. `text` is GitHub markdown. Answers the comment's `id` and `url`. |
 | `reviewComment(owner, repo, number, path, line, text)` | The review kind, anchored to a file in the diff. `path` is as `openPull` lists it; `line` is the line **in the new version**, or `0` to speak about the file as a whole. |
 | `replyToComment(owner, repo, number, commentId, text)` | Replies in the thread under one review comment. `reviewComment` answers an id, and a `review_comment` webhook carries one. |
+
+## What "approved" means, and what it does not
+
+GitHub keeps every review as an event, so the same person shows up as often as
+they reviewed. Counting those events answers the wrong question — somebody who
+asked for changes in the morning and approved after lunch would read as
+blocking. `reviews` resolves the history the way GitHub itself does:
+
+- an approval or a change request **replaces** that person's previous one
+- a dismissal **clears** it
+- a review that only comments **leaves it exactly as it was**
+
+`approved` is then the useful boolean: somebody approved and nobody is standing
+on changes requested. One blocker outweighs any number of approvals.
+
+**It is not `mergeable`.** That field answers whether the branches conflict, and
+a pull request can be `mergeable: true` with zero approvals and a branch rule
+refusing it — reading it as "ready to merge" is the mistake this call exists to
+stop.
+
+`approvers` and `blockers` name the people, which is what a policy asking for
+two approvals actually needs; `requested` and `requestedTeams` are the ones who
+were asked and have not answered, which is who a nudge goes to.
 
 ## Naming a repository three ways
 
