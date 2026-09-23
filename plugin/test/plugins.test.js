@@ -797,6 +797,8 @@ test('slack finds channels, and lists the threads inside one', async () => {
   let found;
   let listing;
   let threads;
+  let exact;
+  let before;
   let refused;
   try {
     globalThis.orknux.slack.user = (_connection, id) =>
@@ -811,18 +813,16 @@ test('slack finds channels, and lists the threads inside one', async () => {
         return { status: 200, headers: {}, body: '{}', json: { ok: true, channels: channels } };
       }
       if (method === 'users.conversations') {
-        return {
-          status: 200,
-          headers: {},
-          body: '{}',
-          json: { ok: true, channels: [{ id: 'C1', name: 'deploys' }] },
-        };
+        /* The bot's own channels, which Slack answers as whole conversations. */
+        return { status: 200, headers: {}, body: '{}', json: { ok: true, channels: [channels[0]] } };
       }
       return { status: 200, headers: {}, body: '{}', json: history };
     };
 
     found = call('findChannels').run('deploy', 20, false);
     listing = call('findChannels').run('', 20, false);
+    before = asked.length;
+    exact = call('findChannels').run('#deploys', 20, false);
     threads = call('listThreads').run('#deploys', 7, 20, true);
     try {
       call('listThreads').run('random', 7, 20, true);
@@ -843,7 +843,16 @@ test('slack finds channels, and lists the threads inside one', async () => {
     found.channels.map((one) => one.name),
     ['deploys', 'platform-private'],
   );
-  assert.match(asked[1].body, /exclude_archived=true/);
+  /*
+   * The bot's own channels are read first and the workspace's after, because
+   * a channel somebody added the bot to is always in the first list and that
+   * list is short - a workspace with nine thousand channels answers the
+   * directory thirty-seven at a time.
+   */
+  assert.equal(asked[1].url, 'https://slack.com/api/users.conversations');
+  assert.equal(asked[2].url, 'https://slack.com/api/conversations.list');
+  assert.match(asked[2].body, /exclude_archived=true/);
+  assert.match(asked[2].body, /limit=1000/);
 
   /*
    * `member` is the field that decides what else can be done with a channel:
@@ -883,6 +892,20 @@ test('slack finds channels, and lists the threads inside one', async () => {
   assert.deepEqual(
     threads.threads.map((one) => one.userName),
     ['Ada', 'Bob'],
+  );
+
+  /*
+   * An exact name among the bot's own channels is the answer, and reading
+   * nine thousand more to confirm it would be the whole bug again.
+   */
+  assert.deepEqual(
+    exact.channels.map((one) => one.name),
+    ['deploys'],
+  );
+  assert.equal(exact.complete, true);
+  assert.ok(
+    !asked.slice(before).some((one) => one.url.endsWith('conversations.list')),
+    'an exact name among the bot own channels should not walk the directory',
   );
 
   /* The fence again: a channel the bot is not in is refused by name. */

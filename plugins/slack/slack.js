@@ -577,15 +577,40 @@ const NOISE = ['channel_join', 'channel_leave', 'group_join', 'group_leave'];
  * to read one, and no scope changes that.
  */
 function joined(settings) {
-  const found = slackApi(settings, 'users.conversations', {
-    types: 'public_channel,private_channel',
-    exclude_archived: 'true',
-    limit: '1000',
-  });
-  return (at(found, 'channels') ?? []).map((one) => ({
-    id: at(one, 'id'),
-    name: at(one, 'name'),
-  }));
+  return pagesOf(
+    settings,
+    'users.conversations',
+    { types: 'public_channel,private_channel', exclude_archived: 'true', limit: '1000' },
+    MEMBERSHIPS,
+  ).items;
+}
+
+/**
+ * Every page of a listing, to a cap.
+ *
+ * Slack's paged calls do not answer `limit` items and then stop - they answer
+ * *up to* that many, often far fewer, and hand back a cursor. A workspace of
+ * nine and a half thousand channels sent thirty-seven a page, so a scan that
+ * asked for two hundred and read five pages saw a hundred and eighty-five
+ * conversations and concluded the channel did not exist. Following the cursor
+ * is the whole of the fix; the caps below are what keeps that bounded.
+ */
+function pagesOf(settings, method, args, cap) {
+  const items = [];
+  let cursor = '';
+  let complete = false;
+  for (let page = 0; page < cap; page += 1) {
+    const answered = slackApi(settings, method, { ...args, cursor: cursor });
+    for (const one of at(answered, 'channels') ?? []) {
+      items.push(one);
+    }
+    cursor = at(at(answered, 'response_metadata'), 'next_cursor') ?? '';
+    if (typeof cursor !== 'string' || cursor.length === 0) {
+      complete = true;
+      break;
+    }
+  }
+  return { items: items, complete: complete };
 }
 
 /**
@@ -655,7 +680,17 @@ function withAuthors(connection, settings, messages) {
  * thousand people, which is most workspaces whole; past that the answer says
  * it was cut rather than pretending nobody else matched.
  */
-const DIRECTORY = 5;
+const DIRECTORY = 25;
+
+/**
+ * And the pages of the bot's *own* channels, which is a much shorter list.
+ *
+ * Three covers a bot in a few thousand conversations, and it is read first
+ * because a channel somebody has added the bot to is always in it - which
+ * turns "find #ipit-185" from a walk through nine thousand channels into one
+ * request that already has the answer.
+ */
+const MEMBERSHIPS = 3;
 
 /** What an address looks like, closely enough to decide which call to make. */
 const ADDRESS = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -1603,49 +1638,76 @@ adding a message to anybody's unread count.`,
         ],
         returnType: 'Channels',
         run: (query, limit, withArchived) => {
-          const terms = (typeof query === 'string' ? query : '')
-            .trim()
+          /* A #name is how people write a channel, and is not part of its name. */
+          const asked = (typeof query === 'string' ? query : '').trim().replace(/^#/, '');
+          const terms = asked
             .toLowerCase()
             .split(/\s+/)
             .filter((one) => one.length > 0);
           const capped = Math.min(Math.max(Math.trunc(limit), 1), 200);
           const site = workspaceUrl(this.settings);
+          const wanted = (one) => {
+            /* An empty query is a listing, which is the same search with nothing to match. */
+            const haystack = `${one.name ?? ''} ${one.topic ?? ''} ${one.purpose ?? ''}`;
+            return terms.length === 0 || carries(haystack, terms);
+          };
 
+          /*
+           * The bot's own channels first, and not only to be quick about it.
+           * A channel somebody has added the bot to is always in this list,
+           * it is short where the workspace's own is not, and it is the list
+           * every other call here can actually read - so a hit in it is worth
+           * more than a hit in the directory, which may be a channel nothing
+           * can be done with.
+           */
+          const mine = joined(this.settings);
           const matches = [];
-          let read = 0;
-          let cursor = '';
-          let complete = false;
-          for (let page = 0; page < DIRECTORY; page += 1) {
-            const listed = slackApi(this.settings, 'conversations.list', {
-              types: 'public_channel,private_channel',
-              exclude_archived: withArchived === true ? 'false' : 'true',
-              limit: '200',
-              cursor: cursor,
-            });
-            const channels = at(listed, 'channels') ?? [];
-            read += channels.length;
-
-            for (const one of channels) {
-              const channel = channelOf(one, site);
-              /* An empty query is a listing, which is the same search with nothing to match. */
-              const haystack = `${channel.name ?? ''} ${channel.topic ?? ''} ${channel.purpose ?? ''}`;
-              if (terms.length === 0 || carries(haystack, terms)) {
-                matches.push(channel);
-              }
-            }
-
-            cursor = at(at(listed, 'response_metadata'), 'next_cursor') ?? '';
-            if (typeof cursor !== 'string' || cursor.length === 0) {
-              complete = true;
-              break;
+          const seen = new Set();
+          for (const one of mine) {
+            const channel = channelOf(one, site);
+            /* users.conversations answers only what the bot is in, so it is. */
+            channel.member = true;
+            if (wanted(channel)) {
+              matches.push(channel);
+              seen.add(channel.id);
             }
           }
+
+          /*
+           * An exact name among them is the answer and there is nothing to
+           * gain by reading nine thousand more channels to confirm it.
+           */
+          const named = matches.find((one) => String(one.name).toLowerCase() === asked.toLowerCase());
+          if (asked.length > 0 && named !== undefined) {
+            return { channels: [named], total: 1, read: mine.length, complete: true };
+          }
+
+          const directory = pagesOf(
+            this.settings,
+            'conversations.list',
+            {
+              types: 'public_channel,private_channel',
+              exclude_archived: withArchived === true ? 'false' : 'true',
+              limit: '1000',
+            },
+            DIRECTORY,
+          );
+          for (const one of directory.items) {
+            const channel = channelOf(one, site);
+            if (!seen.has(channel.id) && wanted(channel)) {
+              matches.push(channel);
+              seen.add(channel.id);
+            }
+          }
+
+          /* What the bot is in first: those are the ones anything else can read. */
+          matches.sort((first, second) => (first.member === second.member ? 0 : first.member ? -1 : 1));
 
           return {
             channels: matches.slice(0, capped),
             total: matches.length,
-            read: read,
-            complete: complete,
+            read: mine.length + directory.items.length,
+            complete: directory.complete,
           };
         },
       }),

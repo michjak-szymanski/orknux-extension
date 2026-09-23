@@ -69,9 +69,25 @@ is in:
 ## Finding a channel, and what is being talked about in it
 
 `findChannels` matches every word against name, topic and purpose, so
-`findChannels('deploy')` turns up `#deploys` by its name and the private
-channel whose purpose says "deploy policy". An empty query lists what is
-there. Archived channels are left out unless `withArchived` asks for them.
+`findChannels('deploy')` turns up `#deploys` by its name and a channel whose
+purpose says "deploy policy". An empty query lists what is there. Archived
+channels are left out unless `withArchived` asks for them.
+
+**The bot's own channels are read first**, and not only to be quick. A channel
+somebody added the bot to is always in that list; the list is short where the
+workspace's is not; and it is the only list anything else here can read. An
+exact name found in it is answered immediately, without touching the
+directory.
+
+That ordering exists because of how Slack pages. `conversations.list` does not
+answer `limit` channels and stop — it answers **up to** that many, often far
+fewer, and hands back a cursor. A workspace of 9,499 channels sent thirty-seven
+a page, so an early version that asked for 200 and read five pages saw 185
+channels and reported that a channel the bot was sitting in did not exist. The
+fix is to follow the cursor, which this now does, up to 25 pages of a thousand.
+
+`complete: false` still means the directory ran past that cap — on a workspace
+that large, trust `member: true` results and treat a miss as "not found yet".
 
 The field to read is **`member`**. It says whether the bot is in the channel,
 and that is what decides whether anything else here can read it —
