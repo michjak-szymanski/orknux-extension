@@ -324,6 +324,81 @@ function entryNamed(form, key) {
   );
 }
 
+/** A calendar date as `YYYY-MM-DD`, from a Date read in UTC. */
+function dayOf(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * The week before this one, Monday to Sunday: what "last week" means when
+ * a timesheet is being checked, and the range `timeLogged` takes when it is
+ * given none.
+ */
+function previousWeek(now) {
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const sinceMonday = (today.getUTCDay() + 6) % 7;
+  const monday = new Date(today.getTime() - (sinceMonday + 7) * 86400000);
+  const sunday = new Date(monday.getTime() + 6 * 86400000);
+  return { from: dayOf(monday), to: dayOf(sunday) };
+}
+
+/** A date argument checked to be one, or the fallback where it was left empty. */
+function dateOr(given, fallback, what) {
+  const said = typeof given === 'string' ? given.trim() : '';
+  if (said.length === 0) {
+    return fallback;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(said) || Number.isNaN(Date.parse(`${said}T00:00:00Z`))) {
+    throw new Error(`${what} should be a date as YYYY-MM-DD, not "${given}"`);
+  }
+  return said;
+}
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/**
+ * Every issue a JQL query finds, walked page by page.
+ *
+ * `search` answers one page because that is what a caller browsing wants;
+ * a timesheet wants all of them, and there are rarely many. Cloud pages by
+ * a token and Server by an offset, and both stop at a cap that no one
+ * person's week comes near.
+ */
+function everyIssue(settings, jql, fields) {
+  const found = [];
+  let token = null;
+  for (let page = 0; page < 10; page++) {
+    const answered = isCloud(settings)
+      ? call(settings, {
+          method: 'POST',
+          path: '/rest/api/3/search/jql',
+          body: { jql: jql, maxResults: 100, fields: fields, ...(token !== null ? { nextPageToken: token } : {}) },
+        })
+      : call(settings, {
+          path: `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=100&startAt=${found.length}&fields=${fields.join(',')}`,
+        });
+    const held = at(answered, 'issues') ?? [];
+    found.push(...held);
+    if (isCloud(settings)) {
+      token = at(answered, 'nextPageToken');
+      if (typeof token !== 'string' || held.length === 0) {
+        break;
+      }
+    } else if (held.length === 0 || found.length >= (at(answered, 'total') ?? 0)) {
+      break;
+    }
+  }
+  return found;
+}
+
+/** Whether a worklog's author is the user asked about, by whichever id this deployment names users by. */
+function loggedBy(settings, worklog, user) {
+  const author = at(worklog, 'author');
+  return isCloud(settings)
+    ? at(author, 'accountId') === user.accountId
+    : at(author, 'name') === user.name || at(author, 'key') === user.name;
+}
+
 /** A user as Jira wants one on the wire: by account id on Cloud, by username on Server. */
 function userNamed(settings, one) {
   return isCloud(settings) ? { accountId: at(one, 'accountId') } : { name: at(one, 'name') };
@@ -616,6 +691,66 @@ export default class Jira extends OrknuxPlugin {
       }),
 
       new OrknuxObject({
+        name: 'Worklog',
+        description: 'One entry of time logged on an issue.',
+        properties: [
+          { name: 'key', kind: 'string', description: 'The issue it was logged on.' },
+          { name: 'summary', kind: 'string', description: 'That issue\'s title.' },
+          { name: 'hours', kind: 'number', description: 'How long, in hours, to two decimals.' },
+          { name: 'started', kind: 'string', description: 'When the work started, as Jira gives it.' },
+          { name: 'comment', kind: 'string', description: 'What was said about it, or null.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'LoggedDay',
+        description: 'One calendar day of somebody\'s time, present even when nothing was logged.',
+        properties: [
+          { name: 'date', kind: 'string', description: 'YYYY-MM-DD.' },
+          { name: 'weekday', kind: 'string', description: 'Monday… Sunday, so a weekend is not read as a gap.' },
+          { name: 'hours', kind: 'number', description: 'Everything logged that day, in hours. 0 where nothing was.' },
+          { name: 'entries', kind: 'array', of: 'Worklog', description: 'What made up those hours.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'TimeLogged',
+        description: 'What one person logged over a range of days, day by day.',
+        properties: [
+          { name: 'user', kind: 'string', description: 'Who, as they were asked about.' },
+          { name: 'from', kind: 'string', description: 'The first day, YYYY-MM-DD.' },
+          { name: 'to', kind: 'string', description: 'The last day, inclusive.' },
+          { name: 'hours', kind: 'number', description: 'The whole range, in hours.' },
+          {
+            name: 'days',
+            kind: 'array',
+            of: 'LoggedDay',
+            description: 'Every day from first to last, in order, weekends included - a day with nothing says 0.',
+          },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Person',
+        description: 'One Jira user, as a group lists them.',
+        properties: [
+          { name: 'id', kind: 'string', description: 'What timeLogged and a user field take: the account id on Cloud, the username on Server.' },
+          { name: 'name', kind: 'string', description: 'Their display name.' },
+          { name: 'email', kind: 'string', description: 'Their email, where Jira shows it.' },
+          { name: 'active', kind: 'boolean', description: 'Whether the account is still active.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Members',
+        description: 'Who is in a Jira group.',
+        properties: [
+          { name: 'group', kind: 'string', description: 'The group asked about.' },
+          { name: 'people', kind: 'array', of: 'Person', description: 'Its members.' },
+        ],
+      }),
+
+      new OrknuxObject({
         name: 'Linked',
         description: 'Two issues after a link was made between them.',
         properties: [
@@ -827,7 +962,25 @@ from that list rather than trying synonyms.
 
 \`jira_openIssue\` answers \`links\` — what the issue already blocks, depends
 on or relates to, each with the verb from this issue's side — so read it
-before adding one that is already there.`,
+before adding one that is already there.
+
+## Checking a team's timesheets
+
+\`jira_timeLogged(user, from, to)\` answers one person's logged time day by
+day. Left empty, \`from\` and \`to\` are last week, Monday to Sunday, which
+is what "did everyone log last week" means. \`jira_groupMembers(group)\`
+lists who is in a Jira group, so a team is one call and a check is a loop:
+
+1. \`groupMembers\` for the team, then \`timeLogged(person.id)\` for each.
+2. Read \`days\`: every date is there, weekends included, and \`weekday\`
+   says which is which. A weekday with fewer hours than the team expects
+   is a gap; a Saturday with 0 is not.
+3. Say who is short and on which days, with the hours they did log. Do not
+   list the people who are fine one by one - "everyone else is complete"
+   is the sentence.
+
+Time is read from Jira's own work log. Where Tempo or another timesheet app
+is in use, its entries appear here too, but its approval state does not.`,
       }),
     ];
   }
@@ -843,6 +996,8 @@ before adding one that is already there.`,
       new OrknuxFunctionTool({ function: 'createIssue' }),
       new OrknuxFunctionTool({ function: 'updateIssue' }),
       new OrknuxFunctionTool({ function: 'link' }),
+      new OrknuxFunctionTool({ function: 'groupMembers' }),
+      new OrknuxFunctionTool({ function: 'timeLogged' }),
     ];
   }
 
@@ -1216,6 +1371,121 @@ before adding one that is already there.`,
             to: target,
             url: `${root(this.settings)}/browse/${source}`,
           };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'groupMembers',
+        description:
+          'Who is in a Jira group, by the group\'s name - the way a team is usually kept in Jira. ' +
+          'Answers each member\'s id (what timeLogged and a user field take), display name, email ' +
+          'and whether the account is active.',
+        params: [{ name: 'group', type: 'string' }],
+        returnType: 'Members',
+        run: (group) => {
+          const named = typeof group === 'string' ? group.trim() : '';
+          if (named.length === 0) {
+            throw new Error('no group to list');
+          }
+          /* Both deployments still take the name here; Cloud also takes a groupId, which nobody knows. */
+          const answered = call(this.settings, {
+            path: `/rest/api/2/group/member?groupname=${encodeURIComponent(named)}&maxResults=200&includeInactiveUsers=false`,
+          });
+          return {
+            group: named,
+            people: (at(answered, 'values') ?? []).map((one) => ({
+              id: isCloud(this.settings) ? at(one, 'accountId') : at(one, 'name'),
+              name: at(one, 'displayName'),
+              email: at(one, 'emailAddress'),
+              active: at(one, 'active') !== false,
+            })),
+          };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'timeLogged',
+        description:
+          'What one person logged in Jira\'s work log, day by day. Pass the user - "me", a display ' +
+          'name, a username, an email or an id - and a first and last date as YYYY-MM-DD, inclusive; ' +
+          'both empty means last week, Monday to Sunday. Answers the total hours and every day in ' +
+          'the range, weekends included, each with its weekday, its hours (0 where nothing was ' +
+          'logged) and the entries behind them. For "did they log all their hours", compare each ' +
+          'weekday\'s hours against what the team expects.',
+        params: [
+          { name: 'user', type: 'string' },
+          { name: 'from', type: 'string', required: false, default: '' },
+          { name: 'to', type: 'string', required: false, default: '' },
+        ],
+        returnType: 'TimeLogged',
+        run: (user, from, to) => {
+          const who = typeof user === 'string' ? user.trim() : '';
+          if (who.length === 0) {
+            throw new Error('no user to read time for');
+          }
+          const week = previousWeek(new Date());
+          const first = dateOr(from, week.from, 'from');
+          const last = dateOr(to, week.to, 'to');
+          if (first > last) {
+            throw new Error(`from (${first}) is after to (${last})`);
+          }
+
+          /*
+           * Two steps, because that is how Jira keeps it: JQL finds the
+           * issues somebody logged on in the range, then each issue's work
+           * log is read and only their entries in the range are kept -
+           * other people log on the same issues, and the JQL match is by
+           * issue, not by entry.
+           */
+          const resolved = userOf(this.settings, who);
+          const id = isCloud(this.settings) ? resolved.accountId : resolved.name;
+          const jql =
+            `worklogAuthor = "${String(id).replace(/"/g, '\\"')}" AND worklogDate >= "${first}" AND worklogDate <= "${last}"`;
+          const issues = everyIssue(this.settings, jql, ['summary']);
+
+          const byDay = new Map();
+          for (const issue of issues) {
+            const key = at(issue, 'key');
+            const logged = call(this.settings, {
+              path: `/rest/api/2/issue/${encodeURIComponent(key)}/worklog?startAt=0&maxResults=5000`,
+            });
+            for (const one of at(logged, 'worklogs') ?? []) {
+              const started = at(one, 'started');
+              /* The date is the first ten characters: Jira spells started with the logger's own offset. */
+              const day = typeof started === 'string' ? started.slice(0, 10) : null;
+              if (day === null || day < first || day > last || !loggedBy(this.settings, one, resolved)) {
+                continue;
+              }
+              const seconds = at(one, 'timeSpentSeconds') ?? 0;
+              const entries = byDay.get(day) ?? [];
+              entries.push({
+                key: key,
+                summary: at(at(issue, 'fields'), 'summary'),
+                hours: Math.round((seconds / 3600) * 100) / 100,
+                started: started,
+                comment: plainOf(at(one, 'comment')) || null,
+                seconds: seconds,
+              });
+              byDay.set(day, entries);
+            }
+          }
+
+          /* Every day in the range, in order, so a gap is a day with 0 rather than a day that is missing. */
+          const days = [];
+          let total = 0;
+          for (let at_ = new Date(`${first}T00:00:00Z`); dayOf(at_) <= last; at_ = new Date(at_.getTime() + 86400000)) {
+            const date = dayOf(at_);
+            const entries = (byDay.get(date) ?? []).sort((a, b) => (a.started < b.started ? -1 : 1));
+            const seconds = entries.reduce((sum, one) => sum + one.seconds, 0);
+            total += seconds;
+            days.push({
+              date: date,
+              weekday: WEEKDAYS[at_.getUTCDay()],
+              hours: Math.round((seconds / 3600) * 100) / 100,
+              entries: entries.map(({ seconds: _, ...entry }) => entry),
+            });
+          }
+          return { user: who, from: first, to: last, hours: Math.round((total / 3600) * 100) / 100, days: days };
         },
       }),
     ];

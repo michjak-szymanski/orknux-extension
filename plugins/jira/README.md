@@ -19,6 +19,8 @@ behalf under `NETWORK_REQUEST` — the plugin never holds the token.
 | `createIssue(project, type, summary, description, fields = {})` | Raises a new one. `fields` is whatever else the project asks for, keyed by name as `form` lists it. |
 | `updateIssue(key, fields)` | Sets fields on an existing issue — the same map, resolved against that issue's own edit form. |
 | `link(from, relation, to)` | Links two issues, the relation said as a verb — `"depends on"`, `"blocks"`, `"relates to"` — and matched against this Jira's link types. |
+| `groupMembers(group)` | Who is in a Jira group, by name — the way a team is usually kept. |
+| `timeLogged(user, from = "", to = "")` | What one person logged in Jira's work log, day by day. Both dates empty means last week, Monday to Sunday. |
 
 `transition` takes a status or transition **by name**, matched whatever the
 capitals, because an id is a number out of somebody's workflow configuration
@@ -98,6 +100,35 @@ file to find out.
 `labels` and `resolution` as null and empty rather than leaving them out, so
 one shape describes both calls and a caller reading `labels` gets a list either
 way.
+
+## Checking a team's timesheets
+
+"Did everyone log their hours last week" is a loop over a group, and both
+halves are here. `groupMembers` lists a Jira group — each member's `id`,
+which is what the next call takes. `timeLogged(user, from, to)` answers what
+one person logged, day by day, from Jira's own work log:
+
+```
+timeLogged('5b10ac8d82e05b22cc7d4ef5')            // last week, Monday to Sunday
+timeLogged('me', '2026-09-14', '2026-09-20')      // any range, inclusive
+```
+
+Every calendar day in the range is answered, weekends included, each with
+its `weekday`, its `hours` — `0` where nothing was logged — and the entries
+behind them. A gap is therefore a weekday with fewer hours than the team
+expects, not a date that is missing from the list, and a Saturday with `0`
+is not a gap at all. The check itself is the workflow's: it knows whether the
+team logs eight hours or seven and a half.
+
+It is two steps inside, because that is how Jira keeps it: JQL finds the
+issues somebody logged on in the range, then each issue's work log is read
+and only their entries in the range are kept — other people log on the same
+issues. A date is read off the entry's `started`, which Jira spells with the
+logger's own offset, so a day is the day it was for the person logging it.
+
+Where Tempo or another timesheet app is in use, its entries are mirrored
+into Jira's work log and appear here too. Its approval state does not; that
+lives in the app's own API.
 
 ## Linking two issues
 

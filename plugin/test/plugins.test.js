@@ -1640,11 +1640,11 @@ test('the jira plugin declares what the server would accept', async () => {
   assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
-    ['search', 'openIssue', 'comment', 'transition', 'form', 'createIssue', 'updateIssue', 'link'],
+    ['search', 'openIssue', 'comment', 'transition', 'form', 'createIssue', 'updateIssue', 'link', 'groupMembers', 'timeLogged'],
   );
   assert.deepEqual(
     inspected.tools.map((declared) => declared.name),
-    ['search', 'openIssue', 'comment', 'transition', 'form', 'createIssue', 'updateIssue', 'link'],
+    ['search', 'openIssue', 'comment', 'transition', 'form', 'createIssue', 'updateIssue', 'link', 'groupMembers', 'timeLogged'],
   );
   /* The project's own fields ride in a map, optional and empty by default, last. */
   const create = inspected.functions.find((declared) => declared.name === 'createIssue');
@@ -1658,7 +1658,7 @@ test('the jira plugin declares what the server would accept', async () => {
    */
   assert.deepEqual(
     inspected.objects.map((shape) => shape.name),
-    ['Search', 'Comment', 'Moved', 'Raised', 'Link', 'Linked', 'Updated', 'Field', 'Form', 'Issue'],
+    ['Search', 'Comment', 'Moved', 'Raised', 'Link', 'Worklog', 'LoggedDay', 'TimeLogged', 'Person', 'Members', 'Linked', 'Updated', 'Field', 'Form', 'Issue'],
   );
   const issue = inspected.objects.find((shape) => shape.name === 'Issue');
   assert.equal(issue.properties.length, 14);
@@ -1680,12 +1680,12 @@ test('the jira plugin declares what the server would accept', async () => {
 
   assert.deepEqual(
     inspected.functions.map((one) => one.returnType),
-    ['Search', 'Issue', 'Comment', 'Moved', 'Form', 'Raised', 'Updated', 'Linked'],
+    ['Search', 'Issue', 'Comment', 'Moved', 'Form', 'Raised', 'Updated', 'Linked', 'Members', 'TimeLogged'],
   );
   /* A proxy carries its function's own return, so the tools agree by construction. */
   assert.deepEqual(
     inspected.tools.map((one) => one.returnType),
-    ['Search', 'Issue', 'Comment', 'Moved', 'Form', 'Raised', 'Updated', 'Linked'],
+    ['Search', 'Issue', 'Comment', 'Moved', 'Form', 'Raised', 'Updated', 'Linked', 'Members', 'TimeLogged'],
   );
   /* `Search` holds the same shape `openIssue` answers, rather than a second one. */
   const search = inspected.objects.find((shape) => shape.name === 'Search');
@@ -2053,6 +2053,155 @@ test('jira link says the relation as a verb, and openIssue reads links from its 
       { type: 'Dependency', relation: 'depends on', key: 'OKO-4124', summary: 'isPrepaidStoreOrder()', status: 'Done' },
       { type: 'Blocks', relation: 'is blocked by', key: 'OKO-1', summary: 'Something', status: 'To Do' },
     ]);
+  } finally {
+    globalThis.orknux.http.request = door;
+  }
+});
+
+test('jira timeLogged answers every day of a range, and last week when given none', async () => {
+  const url = new URL(`../../plugins/jira/jira.js`, import.meta.url);
+  const { default: Jira } = await import(url.href);
+  const configured = (settings) => {
+    const plugin = Object.create(Jira.prototype);
+    Object.defineProperty(plugin, 'settings', { value: Object.freeze(settings) });
+    const functions = plugin.functions();
+    return (name) => functions.find((one) => one.name === name);
+  };
+  const cloud = configured({ url: 'https://x.atlassian.net', email: 'a@b.c', token: 't' });
+  const server = configured({ url: 'https://jira.example.com', token: 't' });
+
+  assert.throws(() => cloud('timeLogged').run('', '', ''), /no user to read time for/);
+  assert.throws(() => cloud('timeLogged').run('me', '2026-9-1', ''), /from should be a date as YYYY-MM-DD/);
+  assert.throws(() => cloud('timeLogged').run('me', '2026-09-20', '2026-09-14'), /from \(2026-09-20\) is after to/);
+
+  /*
+   * Ada logged on two issues over the week - one of them shared with Bob,
+   * whose entry must not count - and nothing on Wednesday. Thursday's entry
+   * carries a plain comment; Friday's is outside the range and stays out.
+   */
+  const worklogs = {
+    'OKO-1': [
+      { author: { accountId: 'acc-ada', name: 'ada' }, started: '2026-09-14T09:00:00.000+0200', timeSpentSeconds: 4 * 3600, comment: 'morning' },
+      { author: { accountId: 'acc-bob', name: 'bob' }, started: '2026-09-14T10:00:00.000+0200', timeSpentSeconds: 8 * 3600 },
+      { author: { accountId: 'acc-ada', name: 'ada' }, started: '2026-09-14T14:00:00.000+0200', timeSpentSeconds: 4 * 3600 },
+      { author: { accountId: 'acc-ada', name: 'ada' }, started: '2026-09-21T09:00:00.000+0200', timeSpentSeconds: 8 * 3600 },
+    ],
+    'OKO-2': [
+      { author: { accountId: 'acc-ada', name: 'ada' }, started: '2026-09-15T09:00:00.000+0200', timeSpentSeconds: 27000 },
+      { author: { accountId: 'acc-ada', name: 'ada' }, started: '2026-09-17T09:00:00.000+0200', timeSpentSeconds: 8 * 3600 },
+    ],
+  };
+  const issues = [
+    { key: 'OKO-1', fields: { summary: 'First' } },
+    { key: 'OKO-2', fields: { summary: 'Second' } },
+  ];
+  const asked = [];
+  const door = globalThis.orknux.http.request;
+  globalThis.orknux.http.request = (what) => {
+    asked.push(what);
+    if (what.url.includes('/user/search')) {
+      return { status: 200, headers: {}, body: '[]', json: [{ accountId: 'acc-ada', name: 'ada', displayName: 'Ada' }] };
+    }
+    if (what.url.endsWith('/myself')) {
+      return { status: 200, headers: {}, body: '{}', json: { accountId: 'acc-ada', name: 'ada' } };
+    }
+    if (what.url.includes('/search')) {
+      return { status: 200, headers: {}, body: '{}', json: { issues: issues, total: issues.length } };
+    }
+    const key = what.url.match(/\/issue\/([^/]+)\/worklog/)[1];
+    return { status: 200, headers: {}, body: '{}', json: { worklogs: worklogs[key] } };
+  };
+  try {
+    const week = cloud('timeLogged').run('Ada', '2026-09-14', '2026-09-20');
+    assert.equal(week.user, 'Ada');
+    assert.equal(week.from, '2026-09-14');
+    assert.equal(week.to, '2026-09-20');
+    assert.equal(week.hours, 23.5);
+
+    /* Seven days, in order, weekends included, each named. */
+    assert.deepEqual(
+      week.days.map((one) => `${one.weekday} ${one.date} ${one.hours}`),
+      [
+        'Monday 2026-09-14 8',
+        'Tuesday 2026-09-15 7.5',
+        'Wednesday 2026-09-16 0',
+        'Thursday 2026-09-17 8',
+        'Friday 2026-09-18 0',
+        'Saturday 2026-09-19 0',
+        'Sunday 2026-09-20 0',
+      ],
+    );
+    /* Monday is Ada's two entries and not Bob's, in the order they started. */
+    assert.deepEqual(
+      week.days[0].entries.map((one) => [one.key, one.hours, one.comment]),
+      [['OKO-1', 4, 'morning'], ['OKO-1', 4, null]],
+    );
+    assert.equal(week.days[0].entries[0].summary, 'First');
+    assert.deepEqual(week.days[2].entries, []);
+
+    /* The JQL asked Jira for the issues by author and date, on Cloud by account id. */
+    const searched = asked.find((one) => one.url.endsWith('/rest/api/3/search/jql'));
+    assert.equal(searched.body.jql, 'worklogAuthor = "acc-ada" AND worklogDate >= "2026-09-14" AND worklogDate <= "2026-09-20"');
+    assert.deepEqual(searched.body.fields, ['summary']);
+
+    /* No dates means last week, Monday to Sunday, seven days ending before today. */
+    asked.length = 0;
+    const last = cloud('timeLogged').run('me', '', '');
+    assert.equal(last.days.length, 7);
+    assert.equal(last.days[0].weekday, 'Monday');
+    assert.equal(last.days[6].weekday, 'Sunday');
+    const today = new Date().toISOString().slice(0, 10);
+    assert.ok(last.to < today, 'last week ended before today');
+    assert.ok(Date.parse(today) - Date.parse(last.to) <= 7 * 86400000, 'and not more than a week ago');
+    assert.ok(asked.some((one) => one.url.endsWith('/myself')), '"me" is asked of Jira');
+
+    /* Server: the author is matched by username, and the search is the v2 GET. */
+    asked.length = 0;
+    const onServer = server('timeLogged').run('ada', '2026-09-14', '2026-09-20');
+    assert.equal(onServer.hours, 23.5);
+    const searchedServer = asked.find((one) => one.url.includes('/rest/api/2/search?'));
+    assert.match(searchedServer.url, /jql=worklogAuthor%20%3D%20%22ada%22/);
+  } finally {
+    globalThis.orknux.http.request = door;
+  }
+});
+
+test('jira groupMembers lists a team by the id the other calls take', async () => {
+  const url = new URL(`../../plugins/jira/jira.js`, import.meta.url);
+  const { default: Jira } = await import(url.href);
+  const plugin = Object.create(Jira.prototype);
+  Object.defineProperty(plugin, 'settings', {
+    value: Object.freeze({ url: 'https://x.atlassian.net', email: 'a@b.c', token: 't' }),
+  });
+  const members = plugin.functions().find((one) => one.name === 'groupMembers');
+  assert.throws(() => members.run('  '), /no group to list/);
+
+  const asked = [];
+  const door = globalThis.orknux.http.request;
+  globalThis.orknux.http.request = (what) => {
+    asked.push(what);
+    return {
+      status: 200,
+      headers: {},
+      body: '{}',
+      json: {
+        values: [
+          { accountId: 'acc-ada', name: 'ada', displayName: 'Ada', emailAddress: 'ada@example.com', active: true },
+          { accountId: 'acc-bob', name: 'bob', displayName: 'Bob', active: true },
+        ],
+      },
+    };
+  };
+  try {
+    const team = members.run('oko-team');
+    assert.equal(asked[0].url, 'https://x.atlassian.net/rest/api/2/group/member?groupname=oko-team&maxResults=200&includeInactiveUsers=false');
+    assert.deepEqual(team, {
+      group: 'oko-team',
+      people: [
+        { id: 'acc-ada', name: 'Ada', email: 'ada@example.com', active: true },
+        { id: 'acc-bob', name: 'Bob', email: null, active: true },
+      ],
+    });
   } finally {
     globalThis.orknux.http.request = door;
   }
