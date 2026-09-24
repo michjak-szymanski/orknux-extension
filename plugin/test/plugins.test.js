@@ -328,7 +328,31 @@ test('github buildStatus asks again with the classic token where the fine-graine
     );
     assert.deepEqual(carried(), ['Bearer github_pat_fine status', 'Bearer ghp_classic status']);
 
-    /* Only a 403 falls back: a 404 under the fine-grained token is not asked again. */
+    /*
+     * A 404 falls back too: GitHub answers it, not a 403, to a fine-grained
+     * token an organization has not approved, which is the setup the classic
+     * token exists for. Here the classic token reads the status, and the
+     * check runs were never refused.
+     */
+    asked = [];
+    globalThis.orknux.http.request = (what) => {
+      asked.push(what);
+      if (what.url.endsWith('/status')) {
+        return what.headers.authorization === 'Bearer ghp_classic'
+          ? green
+          : { status: 404, headers: {}, body: '{}', json: { message: 'Not Found' } };
+      }
+      return runs;
+    };
+    const unseen = withSettings({ token: 'github_pat_fine', classicToken: 'ghp_classic', organization: 'acme' }).run('', 'api', 'abc');
+    assert.equal(unseen.overall, 'success');
+    assert.deepEqual(carried(), [
+      'Bearer github_pat_fine status',
+      'Bearer ghp_classic status',
+      'Bearer github_pat_fine check-runs?per_page=100',
+    ]);
+
+    /* A repository that is really not there is a 404 from both, reported once. */
     asked = [];
     globalThis.orknux.http.request = (what) => {
       asked.push(what);
@@ -336,9 +360,9 @@ test('github buildStatus asks again with the classic token where the fine-graine
     };
     assert.throws(
       () => withSettings({ token: 'github_pat_fine', classicToken: 'ghp_classic', organization: 'acme' }).run('', 'api', 'abc'),
-      /GitHub answered 404: Not Found/,
+      /GitHub answered 404: Not Found for \/repos\/acme\/api\/commits\/abc\/status/,
     );
-    assert.deepEqual(carried(), ['Bearer github_pat_fine status']);
+    assert.deepEqual(carried(), ['Bearer github_pat_fine status', 'Bearer ghp_classic status']);
 
     /* And a fine-grained token that reads builds fine never sends the classic one at all. */
     asked = [];

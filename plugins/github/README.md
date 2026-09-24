@@ -128,17 +128,20 @@ sets `webhookSecret` and nothing else.
 
 ### When `buildStatus` wants a classic token
 
-The commit status endpoints refuse a fine-grained token — `403` — in setups
-a classic token still reads: an organization that has not approved
-fine-grained tokens, or a token minted without the *commit statuses* or
-*checks* permission. Everything else keeps working, and the one call that
-does not is the one a review most needs.
+The commit status endpoints refuse a fine-grained token in setups a classic
+token still reads, and GitHub refuses it two ways. A token minted without the
+*commit statuses* or *checks* permission draws a `403`. A token an
+organization has not approved draws a `404`, because GitHub will not admit a
+private repository exists to a token it will not show it to. Everything else
+may keep working, and the one call that does not is the one a review most
+needs.
 
-So `buildStatus` asks under `token` first and, on a `403`, asks again under
-`classicToken`. Each of its two reads — the combined status and the check
-runs — falls back on its own, because a token can be refused one and not the
-other. Any other answer, and a `403` with no classic token configured, is the
-error it always was. Nothing else in the plugin ever sends the classic token.
+So `buildStatus` asks under `token` first and, on a `403` or a `404`, asks
+again under `classicToken`. Each of its two reads — the combined status and
+the check runs — falls back on its own, because a token can be refused one and
+not the other. Any other answer, and a refusal with no classic token
+configured, is the error it always was. Nothing else in the plugin ever sends
+the classic token.
 
 ## Setting up the webhook
 

@@ -91,20 +91,25 @@ export function read(settings, asked) {
  * The same read, asked again with the classic token where the first one was
  * refused.
  *
- * A fine-grained token is refused outright — 403 — on the commit status
- * endpoints in setups a classic token still reads: an organization that has
- * not approved fine-grained tokens, or a token minted without the commit
- * statuses or checks permission. So a 403 under `token` is asked again under
- * `classicToken`, where one is configured; every other answer, and a 403
- * with nothing to fall back to, is what `read` would have made of it.
+ * A fine-grained token is refused on the commit status endpoints in setups a
+ * classic token still reads, and GitHub refuses it two ways. A token minted
+ * without the commit statuses or checks permission draws a 403. A token that
+ * may not see the repository at all — an organization that has not approved
+ * fine-grained tokens is the usual case — draws a 404, because GitHub does not
+ * admit a private repository exists to a token it will not show it to. Both
+ * are asked again under `classicToken`, where one is configured; every other
+ * answer, and either with nothing to fall back to, is what `read` would have
+ * made of it.
  *
- * Only a 403. A 404 is the repository not being there, or being invisible to
- * both tokens alike, and asking again would only say the same thing twice.
+ * A 404 for a repository that really is not there costs one more request and
+ * ends in the same sentence, which is cheaper than reading the wrong one of
+ * GitHub's two refusals as the truth.
  */
 export function readOrClassic(settings, asked) {
   const answered = call(settings, asked);
   const classic = settings.classicToken;
-  if (answered.status === 403 && typeof classic === 'string' && classic.length > 0) {
+  const refused = answered.status === 403 || answered.status === 404;
+  if (refused && typeof classic === 'string' && classic.length > 0) {
     return read(settings, { ...asked, token: classic });
   }
   if (answered.status >= 400) {
