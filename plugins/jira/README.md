@@ -18,6 +18,7 @@ behalf under `NETWORK_REQUEST` — the plugin never holds the token.
 | `form(project, type)` | What a new issue of that type in that project has to say: every field by name, which are required, and the values each choice takes. |
 | `createIssue(project, type, summary, description, fields = {})` | Raises a new one. `fields` is whatever else the project asks for, keyed by name as `form` lists it. |
 | `updateIssue(key, fields)` | Sets fields on an existing issue — the same map, resolved against that issue's own edit form. |
+| `link(from, relation, to)` | Links two issues, the relation said as a verb — `"depends on"`, `"blocks"`, `"relates to"` — and matched against this Jira's link types. |
 
 `transition` takes a status or transition **by name**, matched whatever the
 capitals, because an id is a number out of somebody's workflow configuration
@@ -89,6 +90,7 @@ file to find out.
 | `assignee` / `reporter` | string | display names |
 | `labels` | array of string | empty from a search |
 | `resolution` | string | why it closed, or null while open |
+| `links` | array of `Link` | what it blocks, depends on, relates to — each with the verb from this issue's side, the other key, its summary and status. Empty from a search |
 | `created` / `updated` | string | ISO 8601, as Jira gives it |
 | `url` | string | the browse link |
 
@@ -96,6 +98,23 @@ file to find out.
 `labels` and `resolution` as null and empty rather than leaving them out, so
 one shape describes both calls and a caller reading `labels` gets a list either
 way.
+
+## Linking two issues
+
+A link type in Jira is a name and two verbs, one per direction: *Blocks* is
+"blocks" going out and "is blocked by" coming in. `link` takes the verb a
+person would say and reads it against the types this Jira has, so the verb
+picks both the type and which end `from` is:
+
+```
+link('OKO-4219', 'depends on', 'OKO-4124')
+link('OKO-4124', 'is depended on by', 'OKO-4219')   // the same link
+```
+
+Every Jira has its own set — the names are somebody's configuration — so a
+verb it does not have is refused with the ones it does. `openIssue` answers
+`links` from the issue's own side, so what already depends on what is one
+call away before a second copy of a link gets made.
 
 `form` answers **`Form`** — `project`, `type`, the `required` names as the
 short answer, and `fields`, a list of **`Field`**: `id`, `name`, `required`,

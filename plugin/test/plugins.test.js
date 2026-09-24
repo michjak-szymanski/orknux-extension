@@ -1640,11 +1640,11 @@ test('the jira plugin declares what the server would accept', async () => {
   assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
-    ['search', 'openIssue', 'comment', 'transition', 'form', 'createIssue', 'updateIssue'],
+    ['search', 'openIssue', 'comment', 'transition', 'form', 'createIssue', 'updateIssue', 'link'],
   );
   assert.deepEqual(
     inspected.tools.map((declared) => declared.name),
-    ['search', 'openIssue', 'comment', 'transition', 'form', 'createIssue', 'updateIssue'],
+    ['search', 'openIssue', 'comment', 'transition', 'form', 'createIssue', 'updateIssue', 'link'],
   );
   /* The project's own fields ride in a map, optional and empty by default, last. */
   const create = inspected.functions.find((declared) => declared.name === 'createIssue');
@@ -1658,10 +1658,14 @@ test('the jira plugin declares what the server would accept', async () => {
    */
   assert.deepEqual(
     inspected.objects.map((shape) => shape.name),
-    ['Search', 'Comment', 'Moved', 'Raised', 'Updated', 'Field', 'Form', 'Issue'],
+    ['Search', 'Comment', 'Moved', 'Raised', 'Link', 'Linked', 'Updated', 'Field', 'Form', 'Issue'],
   );
   const issue = inspected.objects.find((shape) => shape.name === 'Issue');
-  assert.equal(issue.properties.length, 13);
+  assert.equal(issue.properties.length, 14);
+  /* Links are a list of a declared shape, read from this issue's side. */
+  const links = issue.properties.find((property) => property.name === 'links');
+  assert.equal(links.kind, 'array');
+  assert.equal(links.of, 'Link');
   /* `of` is what stops a shape being flat, and labels is the one that has it. */
   const labels = issue.properties.find((property) => property.name === 'labels');
   assert.equal(labels.kind, 'array');
@@ -1676,12 +1680,12 @@ test('the jira plugin declares what the server would accept', async () => {
 
   assert.deepEqual(
     inspected.functions.map((one) => one.returnType),
-    ['Search', 'Issue', 'Comment', 'Moved', 'Form', 'Raised', 'Updated'],
+    ['Search', 'Issue', 'Comment', 'Moved', 'Form', 'Raised', 'Updated', 'Linked'],
   );
   /* A proxy carries its function's own return, so the tools agree by construction. */
   assert.deepEqual(
     inspected.tools.map((one) => one.returnType),
-    ['Search', 'Issue', 'Comment', 'Moved', 'Form', 'Raised', 'Updated'],
+    ['Search', 'Issue', 'Comment', 'Moved', 'Form', 'Raised', 'Updated', 'Linked'],
   );
   /* `Search` holds the same shape `openIssue` answers, rather than a second one. */
   const search = inspected.objects.find((shape) => shape.name === 'Search');
@@ -1942,6 +1946,113 @@ test('jira updateIssue sets fields on an issue that exists, against its own edit
       () => update.run('OKO-4220', { Assignee: 'Micha' }),
       /"Micha" names 2 users: Michał Szymański, Michalina Nowak/,
     );
+  } finally {
+    globalThis.orknux.http.request = door;
+  }
+});
+
+test('jira link says the relation as a verb, and openIssue reads links from its own side', async () => {
+  const url = new URL(`../../plugins/jira/jira.js`, import.meta.url);
+  const { default: Jira } = await import(url.href);
+  const plugin = Object.create(Jira.prototype);
+  Object.defineProperty(plugin, 'settings', {
+    value: Object.freeze({ url: 'https://x.atlassian.net', email: 'a@b.c', token: 't' }),
+  });
+  const call = (name) => plugin.functions().find((one) => one.name === name);
+
+  /* Nothing to do with is decided before any request. */
+  assert.throws(() => call('link').run('', 'blocks', 'OKO-1'), /a link needs two issue keys/);
+  assert.throws(() => call('link').run('OKO-1', '', 'OKO-2'), /a link needs a relation/);
+  assert.throws(() => call('link').run('OKO-1', 'blocks', 'oko-1'), /cannot be linked to itself/);
+
+  /* A Jira's link types: a name and a verb per direction, somebody's configuration. */
+  const types = {
+    issueLinkTypes: [
+      { id: '10000', name: 'Blocks', outward: 'blocks', inward: 'is blocked by' },
+      { id: '10001', name: 'Dependency', outward: 'depends on', inward: 'is depended on by' },
+      { id: '10003', name: 'Relates', outward: 'relates to', inward: 'relates to' },
+    ],
+  };
+  const asked = [];
+  const door = globalThis.orknux.http.request;
+  globalThis.orknux.http.request = (what) => {
+    asked.push(what);
+    if (what.url.endsWith('/issueLinkType')) {
+      return { status: 200, headers: {}, body: '{}', json: types };
+    }
+    if (what.url.endsWith('/issueLink')) {
+      return { status: 201, headers: {}, body: '', json: undefined };
+    }
+    /* openIssue: OKO-4219 depends on OKO-4124 (outward) and is blocked by OKO-1 (inward). */
+    return {
+      status: 200,
+      headers: {},
+      body: '{}',
+      json: {
+        key: 'OKO-4219',
+        fields: {
+          summary: 'Prepaid flag in the order mail',
+          status: { name: 'In Progress' },
+          issuetype: { name: 'Task' },
+          issuelinks: [
+            {
+              type: { name: 'Dependency', outward: 'depends on', inward: 'is depended on by' },
+              outwardIssue: { key: 'OKO-4124', fields: { summary: 'isPrepaidStoreOrder()', status: { name: 'Done' } } },
+            },
+            {
+              type: { name: 'Blocks', outward: 'blocks', inward: 'is blocked by' },
+              inwardIssue: { key: 'OKO-1', fields: { summary: 'Something', status: { name: 'To Do' } } },
+            },
+          ],
+        },
+      },
+    };
+  };
+  try {
+    /* The verb as a person says it, whatever the capitals, picks the type and the direction. */
+    const made = call('link').run('OKO-4219', 'Depends On', 'OKO-4124');
+    assert.deepEqual(made, {
+      from: 'OKO-4219',
+      relation: 'depends on',
+      to: 'OKO-4124',
+      url: 'https://x.atlassian.net/browse/OKO-4219',
+    });
+    assert.equal(asked[0].url, 'https://x.atlassian.net/rest/api/2/issueLinkType');
+    assert.equal(asked[1].url, 'https://x.atlassian.net/rest/api/2/issueLink');
+    assert.equal(asked[1].method, 'POST');
+    assert.deepEqual(asked[1].body, {
+      type: { name: 'Dependency' },
+      outwardIssue: { key: 'OKO-4219' },
+      inwardIssue: { key: 'OKO-4124' },
+    });
+
+    /* The inward verb from the other issue makes the same link, ends swapped. */
+    asked.length = 0;
+    const same = call('link').run('OKO-4124', 'is depended on by', 'OKO-4219');
+    assert.equal(same.relation, 'is depended on by');
+    assert.deepEqual(asked[1].body, {
+      type: { name: 'Dependency' },
+      outwardIssue: { key: 'OKO-4219' },
+      inwardIssue: { key: 'OKO-4124' },
+    });
+
+    /* A type's name works too, read as its outward direction. */
+    asked.length = 0;
+    call('link').run('OKO-1', 'blocks', 'OKO-2');
+    assert.deepEqual(asked[1].body.outwardIssue, { key: 'OKO-1' });
+
+    /* A verb this Jira does not have is refused with the ones it does. */
+    assert.throws(
+      () => call('link').run('OKO-1', 'is caused by', 'OKO-2'),
+      /this Jira has no "is caused by" link; it has blocks, is blocked by, depends on, is depended on by, relates to, relates to/,
+    );
+
+    /* And an opened issue says what it is linked to, from its own side. */
+    const opened = call('openIssue').run('OKO-4219');
+    assert.deepEqual(opened.links, [
+      { type: 'Dependency', relation: 'depends on', key: 'OKO-4124', summary: 'isPrepaidStoreOrder()', status: 'Done' },
+      { type: 'Blocks', relation: 'is blocked by', key: 'OKO-1', summary: 'Something', status: 'To Do' },
+    ]);
   } finally {
     globalThis.orknux.http.request = door;
   }

@@ -455,6 +455,32 @@ function listed(issue, site) {
     description: plainOf(at(fields, 'description')),
     labels: at(fields, 'labels') ?? [],
     resolution: at(at(fields, 'resolution'), 'name'),
+    links: (at(fields, 'issuelinks') ?? []).map(linked).filter((one) => one !== null),
+  };
+}
+
+/**
+ * One issue link, read from this issue's side of it.
+ *
+ * Jira stores a link once and shows it from both ends: on the issue it goes
+ * out from, the other end is `outwardIssue` and the verb is the type's
+ * `outward` ("blocks"); on the issue it comes in to, the other end is
+ * `inwardIssue` and the verb is `inward` ("is blocked by"). So the sentence
+ * `this <relation> <other>` reads right from whichever issue was opened.
+ */
+function linked(one) {
+  const type = at(one, 'type');
+  const outward = at(one, 'outwardIssue');
+  const other = outward ?? at(one, 'inwardIssue');
+  if (other === null) {
+    return null;
+  }
+  return {
+    type: at(type, 'name'),
+    relation: outward !== null ? at(type, 'outward') : at(type, 'inward'),
+    key: at(other, 'key'),
+    summary: at(at(other, 'fields'), 'summary'),
+    status: at(at(at(other, 'fields'), 'status'), 'name'),
   };
 }
 
@@ -574,6 +600,33 @@ export default class Jira extends OrknuxPlugin {
       }),
 
       new OrknuxObject({
+        name: 'Link',
+        description: 'One issue linked to this one, read from this one\'s side.',
+        properties: [
+          { name: 'type', kind: 'string', description: 'The link type\'s name: Blocks, Dependency, Relates…' },
+          {
+            name: 'relation',
+            kind: 'string',
+            description: 'The verb from this issue\'s side, so "this <relation> <key>" reads right: blocks, is blocked by, depends on.',
+          },
+          { name: 'key', kind: 'string', description: 'The issue at the other end.' },
+          { name: 'summary', kind: 'string', description: 'Its title.' },
+          { name: 'status', kind: 'string', description: 'Where it sits in its workflow.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Linked',
+        description: 'Two issues after a link was made between them.',
+        properties: [
+          { name: 'from', kind: 'string', description: 'The issue the link goes out from.' },
+          { name: 'relation', kind: 'string', description: 'The verb, as Jira spells it: "depends on", "blocks".' },
+          { name: 'to', kind: 'string', description: 'The issue it points at.' },
+          { name: 'url', kind: 'string', description: 'The link for a person to open, on the from side.' },
+        ],
+      }),
+
+      new OrknuxObject({
         name: 'Updated',
         description: 'An issue after some of its fields were changed.',
         properties: [
@@ -636,6 +689,12 @@ export default class Jira extends OrknuxPlugin {
           { name: 'reporter', kind: 'string', description: 'Display name of whoever raised it.' },
           { name: 'labels', kind: 'array', of: 'string', description: 'Empty from a search.' },
           { name: 'resolution', kind: 'string', description: 'Why it closed, or null while it is open.' },
+          {
+            name: 'links',
+            kind: 'array',
+            of: 'Link',
+            description: 'What this issue is linked to - blocks, depends on, relates to. Empty from a search.',
+          },
           { name: 'created', kind: 'string', description: 'ISO 8601, as Jira gives it.' },
           { name: 'updated', kind: 'string', description: 'ISO 8601. What "recently touched" is read off.' },
           { name: 'url', kind: 'string', description: 'The browse link, for a person to open.' },
@@ -754,7 +813,21 @@ wrong guess costs one call.
 A user field — Assignee, Reporter — takes a person the way you would say
 them: a display name, a username or an email, and Jira's own search finds
 the account. \`"Assignee": "me"\` is whoever the token is, so "assign it to
-yourself" needs no id.`,
+yourself" needs no id.
+
+## Linking two issues
+
+\`jira_link(from, relation, to)\` makes a link, and the relation is the verb
+as a person says it — "depends on", "blocks", "relates to", "duplicates" —
+matched against the link types this Jira has. Direction matters and the
+verb carries it: \`link("OKO-4219", "depends on", "OKO-4124")\` and
+\`link("OKO-4124", "is depended on by", "OKO-4219")\` make the same link.
+A verb this Jira does not have is refused with the ones it does, so pick
+from that list rather than trying synonyms.
+
+\`jira_openIssue\` answers \`links\` — what the issue already blocks, depends
+on or relates to, each with the verb from this issue's side — so read it
+before adding one that is already there.`,
       }),
     ];
   }
@@ -769,6 +842,7 @@ yourself" needs no id.`,
       new OrknuxFunctionTool({ function: 'form' }),
       new OrknuxFunctionTool({ function: 'createIssue' }),
       new OrknuxFunctionTool({ function: 'updateIssue' }),
+      new OrknuxFunctionTool({ function: 'link' }),
     ];
   }
 
@@ -1063,6 +1137,84 @@ yourself" needs no id.`,
             key: which,
             changed: Object.keys(fields).map((id) => form.entries.find((one) => one.field.id === id).field.name),
             url: `${root(this.settings)}/browse/${which}`,
+          };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'link',
+        description:
+          'Links two issues. Pass the issue the link goes out from (PROJ-123), the relation as a ' +
+          'person says it - "depends on", "blocks", "relates to", "duplicates", "is blocked by" - ' +
+          'and the issue it points at. The relation is matched against this Jira\'s link types ' +
+          'whatever the capitals, and a verb it does not have is refused with the ones it does. ' +
+          'Direction is the verb\'s: link(A, "depends on", B) and link(B, "is depended on by", A) ' +
+          'make the same link. Answers from, relation and to as Jira spells them.',
+        params: [
+          { name: 'from', type: 'string' },
+          { name: 'relation', type: 'string' },
+          { name: 'to', type: 'string' },
+        ],
+        returnType: 'Linked',
+        run: (from, relation, to) => {
+          const source = typeof from === 'string' ? from.trim() : '';
+          const target = typeof to === 'string' ? to.trim() : '';
+          const wanted = typeof relation === 'string' ? relation.trim().toLowerCase() : '';
+          if (source.length === 0 || target.length === 0) {
+            throw new Error('a link needs two issue keys');
+          }
+          if (wanted.length === 0) {
+            throw new Error('a link needs a relation: "depends on", "blocks", "relates to"');
+          }
+          if (source.toLowerCase() === target.toLowerCase()) {
+            throw new Error(`${source} cannot be linked to itself`);
+          }
+
+          /*
+           * A link type is a name and two verbs, one per direction: Blocks is
+           * "blocks" outward and "is blocked by" inward. The verb the caller
+           * said picks both the type and which end `from` is, so the body
+           * below is built from Jira's own vocabulary rather than the
+           * caller's. Read now rather than assumed, because every Jira has
+           * its own set and the names are somebody's configuration.
+           */
+          const types = at(call(this.settings, { path: '/rest/api/2/issueLinkType' }), 'issueLinkTypes') ?? [];
+          const spelled = (one, side) => String(at(one, side) ?? '').toLowerCase();
+          let found = types.find((one) => spelled(one, 'outward') === wanted);
+          let outward = true;
+          if (found === undefined) {
+            found = types.find((one) => spelled(one, 'inward') === wanted);
+            outward = false;
+          }
+          if (found === undefined) {
+            found = types.find((one) => spelled(one, 'name') === wanted);
+            outward = true;
+          }
+          if (found === undefined) {
+            const verbs = types.flatMap((one) => [at(one, 'outward'), at(one, 'inward')]).filter((one) => typeof one === 'string');
+            throw new Error(
+              verbs.length === 0
+                ? 'this Jira has no issue link types'
+                : `this Jira has no "${relation}" link; it has ${verbs.join(', ')}`,
+            );
+          }
+
+          /* Jira's body names the ends by the type's own directions, so the caller's verb decides which is which. */
+          const [outwardKey, inwardKey] = outward ? [source, target] : [target, source];
+          call(this.settings, {
+            method: 'POST',
+            path: '/rest/api/2/issueLink',
+            body: {
+              type: { name: at(found, 'name') },
+              outwardIssue: { key: outwardKey },
+              inwardIssue: { key: inwardKey },
+            },
+          });
+          return {
+            from: source,
+            relation: outward ? at(found, 'outward') : at(found, 'inward'),
+            to: target,
+            url: `${root(this.settings)}/browse/${source}`,
           };
         },
       }),
