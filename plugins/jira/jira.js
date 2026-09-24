@@ -243,24 +243,58 @@ function formOf(settings, project, type) {
   const read = call(settings, {
     path: `${base}/${encodeURIComponent(String(at(found, 'id')))}?maxResults=200`,
   });
-  const entries = (at(read, 'fields') ?? at(read, 'values') ?? []).map((one) => {
-    const schema = at(one, 'schema');
-    const allowedValues = Array.isArray(at(one, 'allowedValues')) ? at(one, 'allowedValues') : [];
-    return {
-      schema: schema,
-      allowedValues: allowedValues,
-      field: {
-        id: at(one, 'fieldId') ?? at(one, 'key'),
-        name: at(one, 'name'),
-        required: at(one, 'required') === true,
-        kind: at(schema, 'type'),
-        of: at(schema, 'items'),
-        allowed: allowedValues.map(labelOf).filter((label) => label !== null),
-        hasDefault: at(one, 'hasDefaultValue') === true,
-      },
-    };
-  });
+  const entries = (at(read, 'fields') ?? at(read, 'values') ?? []).map((one) =>
+    entryOf(one, at(one, 'fieldId') ?? at(one, 'key')),
+  );
   return { project: project, type: at(found, 'name'), entries: entries };
+}
+
+/** One form entry from one of Jira's field metadata objects, under the id it is keyed by. */
+function entryOf(one, id) {
+  const schema = at(one, 'schema');
+  const allowedValues = Array.isArray(at(one, 'allowedValues')) ? at(one, 'allowedValues') : [];
+  return {
+    schema: schema,
+    allowedValues: allowedValues,
+    field: {
+      id: id,
+      name: at(one, 'name'),
+      required: at(one, 'required') === true,
+      kind: at(schema, 'type'),
+      of: at(schema, 'items'),
+      allowed: allowedValues.map(labelOf).filter((label) => label !== null),
+      hasDefault: at(one, 'hasDefaultValue') === true,
+    },
+  };
+}
+
+/**
+ * The edit form of one existing issue: what `updateIssue` resolves its
+ * `fields` map against. Jira's edit metadata is a map keyed by field id
+ * rather than the list the create metadata is, and it already reflects what
+ * this issue, in this status, under this token, can be changed — which is
+ * why it is read per issue rather than per project.
+ */
+function editFormOf(settings, key) {
+  const read = call(settings, { path: `/rest/api/2/issue/${encodeURIComponent(key)}/editmeta` });
+  const held = at(read, 'fields');
+  const entries =
+    held !== null && typeof held === 'object' ? Object.entries(held).map(([id, one]) => entryOf(one, id)) : [];
+  return { entries: entries };
+}
+
+/** A `fields` map resolved against a form: Jira's shape for each, under the field's id. */
+function resolved(settings, form, extra, missing) {
+  const fields = {};
+  const asked = extra !== null && typeof extra === 'object' ? Object.entries(extra) : [];
+  for (const [name, value] of asked) {
+    const entry = entryNamed(form, name);
+    if (entry === null) {
+      throw new Error(missing(name));
+    }
+    fields[entry.field.id] = valueFor(settings, entry, value);
+  }
+  return fields;
 }
 
 /** The project a call is about: what was passed, or the configured one. */
@@ -290,12 +324,53 @@ function entryNamed(form, key) {
   );
 }
 
-/** A user as Jira wants one named: by account id on Cloud, by username on Server. */
+/** A user as Jira wants one on the wire: by account id on Cloud, by username on Server. */
+function userNamed(settings, one) {
+  return isCloud(settings) ? { accountId: at(one, 'accountId') } : { name: at(one, 'name') };
+}
+
+/**
+ * A user as Jira wants one, from what a person said.
+ *
+ * "me" is whoever the token is — asked of Jira, because an agent does not
+ * know its own account id and should not have to. Anything else is looked
+ * up the way the site's own picker does it: a display name, a username or
+ * an email, matched by Jira's user search. One hit is the answer; several
+ * are refused with their names unless one of them is exactly what was
+ * said; none falls through to the value as given, for a caller who passed
+ * an id. An object goes through untouched.
+ */
 function userOf(settings, given) {
   if (given !== null && typeof given === 'object') {
     return given;
   }
-  return isCloud(settings) ? { accountId: String(given) } : { name: String(given) };
+  const said = String(given).trim();
+  if (/^(me|myself)$/i.test(said)) {
+    return userNamed(settings, call(settings, { path: '/rest/api/2/myself' }));
+  }
+
+  /* Cloud searches by `query`; Server by `username`, which matches name and email too. */
+  const by = isCloud(settings) ? 'query' : 'username';
+  const found = call(settings, { path: `/rest/api/2/user/search?${by}=${encodeURIComponent(said)}&maxResults=10` });
+  const hits = Array.isArray(found) ? found : [];
+  if (hits.length === 1) {
+    return userNamed(settings, hits[0]);
+  }
+  if (hits.length > 1) {
+    const wanted = said.toLowerCase();
+    const exact = hits.filter((one) =>
+      [at(one, 'displayName'), at(one, 'name'), at(one, 'emailAddress')].some(
+        (spelling) => typeof spelling === 'string' && spelling.toLowerCase() === wanted,
+      ),
+    );
+    if (exact.length === 1) {
+      return userNamed(settings, exact[0]);
+    }
+    throw new Error(
+      `"${said}" names ${hits.length} users: ${hits.map((one) => at(one, 'displayName')).join(', ')}`,
+    );
+  }
+  return isCloud(settings) ? { accountId: said } : { name: said };
 }
 
 /**
@@ -499,6 +574,16 @@ export default class Jira extends OrknuxPlugin {
       }),
 
       new OrknuxObject({
+        name: 'Updated',
+        description: 'An issue after some of its fields were changed.',
+        properties: [
+          { name: 'key', kind: 'string', description: 'The issue that changed.' },
+          { name: 'changed', kind: 'array', of: 'string', description: 'The fields that were set, by name.' },
+          { name: 'url', kind: 'string', description: 'The link for a person to open.' },
+        ],
+      }),
+
+      new OrknuxObject({
         name: 'Field',
         description: 'One field on the form a new issue in a project fills in.',
         properties: [
@@ -655,7 +740,21 @@ fields: { "Occurs on": "DEV", "Kind of work": "Maintenance" }
 
 A list takes a list, or one string with commas in it. A value that is not one
 of the choices is refused here, with the choices — so if the person said
-"dev", the answer is the label spelled as the form spells it.`,
+"dev", the answer is the label spelled as the form spells it.
+
+## Fixing a field on an issue that exists
+
+\`jira_updateIssue(key, fields)\` takes the same map — names for keys, labels
+for values — and sets those fields on an existing issue. "You forgot the
+team" is \`fields: { "Team": "OKO Cyklonu" }\` on the ticket, not a new
+ticket. A field it does not know is refused with the names the issue does
+have, and a label that is not a choice is refused with the choices, so one
+wrong guess costs one call.
+
+A user field — Assignee, Reporter — takes a person the way you would say
+them: a display name, a username or an email, and Jira's own search finds
+the account. \`"Assignee": "me"\` is whoever the token is, so "assign it to
+yourself" needs no id.`,
       }),
     ];
   }
@@ -669,6 +768,7 @@ of the choices is refused here, with the choices — so if the person said
       new OrknuxFunctionTool({ function: 'transition' }),
       new OrknuxFunctionTool({ function: 'form' }),
       new OrknuxFunctionTool({ function: 'createIssue' }),
+      new OrknuxFunctionTool({ function: 'updateIssue' }),
     ];
   }
 
@@ -895,20 +995,12 @@ of the choices is refused here, with the choices — so if the person said
            * The form is only read when there is something to resolve: a
            * create that says nothing extra stays one request.
            */
-          const fields = {};
-          const asked = extra !== null && typeof extra === 'object' ? Object.entries(extra) : [];
-          if (asked.length > 0) {
-            const form = formOf(this.settings, where, kind);
-            for (const [name, value] of asked) {
-              const entry = entryNamed(form, name);
-              if (entry === null) {
-                throw new Error(
-                  `the ${where} ${form.type} form has no field "${name}"; form("${where}", "${form.type}") lists what it has`,
-                );
-              }
-              fields[entry.field.id] = valueFor(this.settings, entry, value);
-            }
-          }
+          const asked = extra !== null && typeof extra === 'object' && Object.keys(extra).length > 0;
+          const fields = asked
+            ? resolved(this.settings, formOf(this.settings, where, kind), extra, (name) =>
+                `the ${where} ${kind} form has no field "${name}"; form("${where}", "${kind}") lists what it has`,
+              )
+            : {};
 
           fields.project = { key: where };
           fields.issuetype = { name: kind };
@@ -925,6 +1017,52 @@ of the choices is refused here, with the choices — so if the person said
           return {
             key: at(made, 'key'),
             url: `${root(this.settings)}/browse/${at(made, 'key')}`,
+          };
+        },
+      }),
+
+      new OrknuxFunction({
+        name: 'updateIssue',
+        description:
+          'Sets fields on an existing issue. Pass the key (PROJ-123) and a map of what to set, keyed ' +
+          'by field name and valued by label, the way createIssue\'s fields is - {"Team": "Checkout", ' +
+          '"Priority": "High", "Labels": "a, b"}; a list takes a list or a comma-separated string. ' +
+          'Answers the key, the names that were set, and a url. For moving an issue between statuses ' +
+          'use transition; for adding to the conversation use comment.',
+        params: [
+          { name: 'key', type: 'string' },
+          { name: 'fields', type: 'map' },
+        ],
+        returnType: 'Updated',
+        run: (key, extra) => {
+          const which = typeof key === 'string' ? key.trim() : '';
+          if (which.length === 0) {
+            throw new Error('no issue key to update');
+          }
+          if (extra === null || typeof extra !== 'object' || Object.keys(extra).length === 0) {
+            throw new Error('nothing to set: fields is empty');
+          }
+
+          /*
+           * Resolved against this issue's own edit form rather than the
+           * project's create form, because what can be edited depends on
+           * the issue, its status and the token — and the names the
+           * refusal offers are then the ones that would actually work.
+           */
+          const form = editFormOf(this.settings, which);
+          const fields = resolved(this.settings, form, extra, (name) => {
+            const offered = form.entries.map((one) => one.field.name).filter((one) => typeof one === 'string');
+            return `${which} has no editable field "${name}"; it has ${offered.join(', ')}`;
+          });
+          call(this.settings, {
+            method: 'PUT',
+            path: `/rest/api/2/issue/${encodeURIComponent(which)}`,
+            body: { fields: fields },
+          });
+          return {
+            key: which,
+            changed: Object.keys(fields).map((id) => form.entries.find((one) => one.field.id === id).field.name),
+            url: `${root(this.settings)}/browse/${which}`,
           };
         },
       }),

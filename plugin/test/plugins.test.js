@@ -1640,11 +1640,11 @@ test('the jira plugin declares what the server would accept', async () => {
   assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
-    ['search', 'openIssue', 'comment', 'transition', 'form', 'createIssue'],
+    ['search', 'openIssue', 'comment', 'transition', 'form', 'createIssue', 'updateIssue'],
   );
   assert.deepEqual(
     inspected.tools.map((declared) => declared.name),
-    ['search', 'openIssue', 'comment', 'transition', 'form', 'createIssue'],
+    ['search', 'openIssue', 'comment', 'transition', 'form', 'createIssue', 'updateIssue'],
   );
   /* The project's own fields ride in a map, optional and empty by default, last. */
   const create = inspected.functions.find((declared) => declared.name === 'createIssue');
@@ -1658,7 +1658,7 @@ test('the jira plugin declares what the server would accept', async () => {
    */
   assert.deepEqual(
     inspected.objects.map((shape) => shape.name),
-    ['Search', 'Comment', 'Moved', 'Raised', 'Field', 'Form', 'Issue'],
+    ['Search', 'Comment', 'Moved', 'Raised', 'Updated', 'Field', 'Form', 'Issue'],
   );
   const issue = inspected.objects.find((shape) => shape.name === 'Issue');
   assert.equal(issue.properties.length, 13);
@@ -1676,12 +1676,12 @@ test('the jira plugin declares what the server would accept', async () => {
 
   assert.deepEqual(
     inspected.functions.map((one) => one.returnType),
-    ['Search', 'Issue', 'Comment', 'Moved', 'Form', 'Raised'],
+    ['Search', 'Issue', 'Comment', 'Moved', 'Form', 'Raised', 'Updated'],
   );
   /* A proxy carries its function's own return, so the tools agree by construction. */
   assert.deepEqual(
     inspected.tools.map((one) => one.returnType),
-    ['Search', 'Issue', 'Comment', 'Moved', 'Form', 'Raised'],
+    ['Search', 'Issue', 'Comment', 'Moved', 'Form', 'Raised', 'Updated'],
   );
   /* `Search` holds the same shape `openIssue` answers, rather than a second one. */
   const search = inspected.objects.find((shape) => shape.name === 'Search');
@@ -1756,6 +1756,10 @@ test('jira createIssue resolves a project\'s own fields against its form', async
     if (what.url.includes('/issuetypes')) {
       return { status: 200, headers: {}, body: '{}', json: spelling === 'cloud' ? { issueTypes: types } : { values: types } };
     }
+    if (what.url.includes('/user/search')) {
+      /* Nobody is called by an account id, so an id given as a user falls through as one. */
+      return { status: 200, headers: {}, body: '[]', json: [] };
+    }
     return { status: 201, headers: {}, body: '{}', json: { key: 'OKO-4040' } };
   };
   try {
@@ -1806,8 +1810,9 @@ test('jira createIssue resolves a project\'s own fields against its form', async
       summary: 'Spokojnie tylko test',
       description: 'nic',
     });
-    /* The form was read once, before the create - three requests, not more. */
-    assert.equal(asked.length, 3);
+    /* The form read once, the assignee looked up once, then the create: four requests. */
+    assert.equal(asked.length, 4);
+    assert.match(asked[2].url, /\/rest\/api\/2\/user\/search\?query=5b10ac8d82e05b22cc7d4ef5&maxResults=10$/);
 
     /* A create with nothing extra reads no form: one request. */
     asked.length = 0;
@@ -1837,6 +1842,106 @@ test('jira createIssue resolves a project\'s own fields against its form', async
     server('createIssue').run('', 'Bug', 'x', '', { 'Występuje na': 'UAT', Assignee: 'mszymanski' });
     assert.deepEqual(asked.at(-1).body.fields.customfield_10123, { id: '10202' });
     assert.deepEqual(asked.at(-1).body.fields.assignee, { name: 'mszymanski' });
+    assert.match(asked[2].url, /\/user\/search\?username=mszymanski&/, 'Server searches by username');
+  } finally {
+    globalThis.orknux.http.request = door;
+  }
+});
+
+test('jira updateIssue sets fields on an issue that exists, against its own edit form', async () => {
+  const url = new URL(`../../plugins/jira/jira.js`, import.meta.url);
+  const { default: Jira } = await import(url.href);
+  const plugin = Object.create(Jira.prototype);
+  Object.defineProperty(plugin, 'settings', {
+    value: Object.freeze({ url: 'https://x.atlassian.net', email: 'a@b.c', token: 't' }),
+  });
+  const update = plugin.functions().find((one) => one.name === 'updateIssue');
+
+  /* Nothing to do with is decided before any request. */
+  assert.throws(() => update.run('', { Team: 'x' }), /no issue key to update/);
+  assert.throws(() => update.run('OKO-4220', {}), /nothing to set/);
+
+  /*
+   * The edit metadata is a map keyed by field id, unlike the create form's
+   * list, and says what this issue can have changed right now.
+   */
+  const editmeta = {
+    fields: {
+      summary: { name: 'Summary', required: true, schema: { type: 'string', system: 'summary' } },
+      customfield_10127: {
+        name: 'Team',
+        required: false,
+        schema: { type: 'option' },
+        allowedValues: [{ id: '10501', value: 'OKO Cyklonu' }, { id: '10502', value: 'OKO Tajfunu' }],
+      },
+      labels: { name: 'Labels', required: false, schema: { type: 'array', items: 'string' } },
+      assignee: { name: 'Assignee', required: false, schema: { type: 'user', system: 'assignee' } },
+    },
+  };
+  const people = [
+    { accountId: 'acc-michal', displayName: 'Michał Szymański', emailAddress: 'michal@example.com' },
+    { accountId: 'acc-michalina', displayName: 'Michalina Nowak', emailAddress: 'michalina@example.com' },
+  ];
+  const asked = [];
+  const door = globalThis.orknux.http.request;
+  globalThis.orknux.http.request = (what) => {
+    asked.push(what);
+    if (what.url.endsWith('/editmeta')) {
+      return { status: 200, headers: {}, body: '{}', json: editmeta };
+    }
+    if (what.url.endsWith('/myself')) {
+      return { status: 200, headers: {}, body: '{}', json: { accountId: 'acc-agent', displayName: 'OKO Agent' } };
+    }
+    if (what.url.includes('/user/search')) {
+      const query = decodeURIComponent(what.url.split('query=')[1].split('&')[0]).toLowerCase();
+      return { status: 200, headers: {}, body: '[]', json: people.filter((one) => one.displayName.toLowerCase().includes(query)) };
+    }
+    return { status: 204, headers: {}, body: '', json: undefined };
+  };
+  try {
+    const done = update.run('OKO-4220', { team: 'oko cyklonu', Labels: 'a, b', Summary: 'Better' });
+    assert.deepEqual(done, {
+      key: 'OKO-4220',
+      changed: ['Team', 'Labels', 'Summary'],
+      url: 'https://x.atlassian.net/browse/OKO-4220',
+    });
+    assert.equal(asked.length, 2);
+    assert.equal(asked[0].url, 'https://x.atlassian.net/rest/api/2/issue/OKO-4220/editmeta');
+    assert.equal(asked[1].url, 'https://x.atlassian.net/rest/api/2/issue/OKO-4220');
+    assert.equal(asked[1].method, 'PUT');
+    assert.deepEqual(asked[1].body, {
+      fields: { customfield_10127: { id: '10501' }, labels: ['a', 'b'], summary: 'Better' },
+    });
+
+    /* A field this issue cannot have changed is refused with the ones it can. */
+    assert.throws(
+      () => update.run('OKO-4220', { Severity: 'high' }),
+      /OKO-4220 has no editable field "Severity"; it has Summary, Team, Labels/,
+    );
+    /* And a team that is not one of the choices, with the choices. */
+    assert.throws(
+      () => update.run('OKO-4220', { Team: 'OKO' }),
+      /"OKO" is not one of Team's values: OKO Cyklonu, OKO Tajfunu/,
+    );
+
+    /* "Assign it to yourself": whoever the token is, asked of Jira, no id known up front. */
+    asked.length = 0;
+    update.run('OKO-4220', { Assignee: 'me' });
+    assert.equal(asked[1].url, 'https://x.atlassian.net/rest/api/2/myself');
+    assert.deepEqual(asked.at(-1).body.fields, { assignee: { accountId: 'acc-agent' } });
+
+    /* A person by name, found the way the site's own picker finds them. */
+    asked.length = 0;
+    update.run('OKO-4220', { Assignee: 'Michalina' });
+    assert.deepEqual(asked.at(-1).body.fields, { assignee: { accountId: 'acc-michalina' } });
+
+    /* Several matches: an exact one wins, and otherwise nobody is guessed between. */
+    update.run('OKO-4220', { Assignee: 'Michał Szymański' });
+    assert.deepEqual(asked.at(-1).body.fields, { assignee: { accountId: 'acc-michal' } });
+    assert.throws(
+      () => update.run('OKO-4220', { Assignee: 'Micha' }),
+      /"Micha" names 2 users: Michał Szymański, Michalina Nowak/,
+    );
   } finally {
     globalThis.orknux.http.request = door;
   }

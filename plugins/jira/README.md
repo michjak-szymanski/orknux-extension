@@ -17,6 +17,7 @@ behalf under `NETWORK_REQUEST` — the plugin never holds the token.
 | `transition(key, to)` | Moves an issue — what dragging its card to another column does. |
 | `form(project, type)` | What a new issue of that type in that project has to say: every field by name, which are required, and the values each choice takes. |
 | `createIssue(project, type, summary, description, fields = {})` | Raises a new one. `fields` is whatever else the project asks for, keyed by name as `form` lists it. |
+| `updateIssue(key, fields)` | Sets fields on an existing issue — the same map, resolved against that issue's own edit form. |
 
 `transition` takes a status or transition **by name**, matched whatever the
 capitals, because an id is a number out of somebody's workflow configuration
@@ -56,6 +57,19 @@ something to resolve.
 
 When Jira refuses a create, every field it names is in the sentence, not only
 the first — a project that insists on two says so once.
+
+`updateIssue` takes the same map for an issue that already exists — "you
+forgot the team" is `updateIssue('OKO-4220', { 'Team': 'Checkout' })`, not a
+new ticket. It resolves against that issue's *edit* metadata rather than the
+project's create form, because what can be changed depends on the issue, its
+status and the token; a field it does not know is refused with the names the
+issue does have, so one wrong guess costs one call.
+
+A user field takes a person the way people say them. `"Assignee": "me"` is
+whoever the token is, asked of Jira, because an agent does not know its own
+account id and should not have to. A display name, a username or an email is
+looked up the way the site's own picker does it, and several matches are
+refused with their names rather than guessed between.
 
 ## The shapes it exports
 
