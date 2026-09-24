@@ -36,6 +36,23 @@
  * its endpoint by the same `email` setting, and `total` comes back null on
  * Cloud rather than invented.
  *
+ * ## The fields a project adds
+ *
+ * A project can make fields of its own mandatory on a new issue — "Occurs on:
+ * PROD, UAT or DEV", "Kind of work: one of six" — and Jira refuses a create
+ * that leaves one out. Those fields are `customfield_10123` on the wire, with
+ * a shape per kind: a choice is `{ id }`, a user is `{ accountId }` or
+ * `{ name }` by deployment, a list is a list of those. Nobody calling from a
+ * workflow, and no model calling from an agent, should have to know any of
+ * that.
+ *
+ * So `form` reads the create metadata for a project and issue type — every
+ * field, by name, with the values a choice takes — and `createIssue` takes a
+ * `fields` map keyed by those names, resolves each against the same
+ * metadata, and builds Jira's shape itself. "Occurs on": "DEV" becomes
+ * `customfield_10123: { id: "10201" }`, and a value that is not one of the
+ * choices is refused here, with the choices, rather than by Jira with an id.
+ *
  * ## Setting one up
  *
  * 1. Load this plugin and accept TEXT_ENCODING and NETWORK_REQUEST.
@@ -158,13 +175,187 @@ function call(settings, asked) {
      */
     const messages = at(answered.json, 'errorMessages');
     const fields = at(answered.json, 'errors');
-    const said = (Array.isArray(messages) ? messages[0] : null)
-      ?? (fields !== null ? Object.values(fields)[0] : null);
+    /*
+     * All of them, not the first: a project that insists on two fields says
+     * so in one answer, and reporting one of them is a second round trip
+     * to learn the other.
+     */
+    const said = [
+      ...(Array.isArray(messages) ? messages : []),
+      ...(fields !== null && typeof fields === 'object'
+        ? Object.entries(fields).map(([field, why]) => `${field}: ${why}`)
+        : []),
+    ].filter((one) => typeof one === 'string' && one.length > 0);
     throw new Error(
-      `Jira answered ${answered.status}${typeof said === 'string' ? ': ' + said : ''} for ${asked.path.split('?')[0]}`,
+      `Jira answered ${answered.status}${said.length > 0 ? ': ' + said.join('; ') : ''} for ${asked.path.split('?')[0]}`,
     );
   }
   return answered.json;
+}
+
+/** What one of a field's allowed values is called, whichever of Jira's spellings it carries. */
+function labelOf(allowed) {
+  const said = at(allowed, 'value') ?? at(allowed, 'name') ?? at(allowed, 'key') ?? at(allowed, 'id');
+  return said === null ? null : String(said);
+}
+
+/** The allowed value a caller meant, by its label or its id, whatever the capitals. */
+function allowedNamed(allowedValues, wanted) {
+  const asked = String(wanted).trim().toLowerCase();
+  return (
+    allowedValues.find((one) => (labelOf(one) ?? '').toLowerCase() === asked) ??
+    allowedValues.find((one) => String(at(one, 'id') ?? '').toLowerCase() === asked) ??
+    null
+  );
+}
+
+/**
+ * The create form for one issue type in one project, read from Jira's create
+ * metadata: what the plugin's `form` answers, and what `createIssue` resolves
+ * a `fields` map against.
+ *
+ * Two calls, because that is how the endpoint is shaped: the issue types a
+ * project offers, then the fields one of them takes. The type is matched by
+ * name whatever the capitals, or by its id for a caller that has one. Cloud
+ * answers `issueTypes` and `fields`; Data Center answers `values` for both,
+ * so both spellings are read.
+ *
+ * Each entry keeps Jira's own `schema` and `allowedValues` beside the
+ * declared `Field`, because resolving "DEV" to `{ id: "10201" }` needs the
+ * ids the shape deliberately leaves out.
+ */
+function formOf(settings, project, type) {
+  const base = `/rest/api/2/issue/createmeta/${encodeURIComponent(project)}/issuetypes`;
+  const listed = call(settings, { path: `${base}?maxResults=200` });
+  const types = at(listed, 'issueTypes') ?? at(listed, 'values') ?? [];
+  const wanted = String(type).trim().toLowerCase();
+  const found =
+    types.find((one) => String(at(one, 'name') ?? '').toLowerCase() === wanted) ??
+    types.find((one) => String(at(one, 'id') ?? '') === wanted) ??
+    null;
+  if (found === null) {
+    const offered = types.map((one) => at(one, 'name')).filter((name) => typeof name === 'string');
+    throw new Error(
+      `${project} has no issue type "${type}"` + (offered.length > 0 ? `; it has ${offered.join(', ')}` : ''),
+    );
+  }
+
+  const read = call(settings, {
+    path: `${base}/${encodeURIComponent(String(at(found, 'id')))}?maxResults=200`,
+  });
+  const entries = (at(read, 'fields') ?? at(read, 'values') ?? []).map((one) => {
+    const schema = at(one, 'schema');
+    const allowedValues = Array.isArray(at(one, 'allowedValues')) ? at(one, 'allowedValues') : [];
+    return {
+      schema: schema,
+      allowedValues: allowedValues,
+      field: {
+        id: at(one, 'fieldId') ?? at(one, 'key'),
+        name: at(one, 'name'),
+        required: at(one, 'required') === true,
+        kind: at(schema, 'type'),
+        of: at(schema, 'items'),
+        allowed: allowedValues.map(labelOf).filter((label) => label !== null),
+        hasDefault: at(one, 'hasDefaultValue') === true,
+      },
+    };
+  });
+  return { project: project, type: at(found, 'name'), entries: entries };
+}
+
+/** The project a call is about: what was passed, or the configured one. */
+function projectOr(settings, project) {
+  if (typeof project === 'string' && project.trim().length > 0) {
+    return project.trim();
+  }
+  const fallback = settings.project;
+  if (typeof fallback === 'string' && fallback.trim().length > 0) {
+    return fallback.trim();
+  }
+  throw new Error('no project was passed and no default project is configured');
+}
+
+/** The issue type a call is about: what was passed, or a Task. */
+function typeOr(type) {
+  return typeof type === 'string' && type.trim().length > 0 ? type.trim() : 'Task';
+}
+
+/** The form entry a `fields` key names: a field id as Jira spells it, or a name whatever the capitals. */
+function entryNamed(form, key) {
+  const asked = String(key).trim().toLowerCase();
+  return (
+    form.entries.find((one) => String(one.field.id ?? '').toLowerCase() === asked) ??
+    form.entries.find((one) => String(one.field.name ?? '').toLowerCase() === asked) ??
+    null
+  );
+}
+
+/** A user as Jira wants one named: by account id on Cloud, by username on Server. */
+function userOf(settings, given) {
+  if (given !== null && typeof given === 'object') {
+    return given;
+  }
+  return isCloud(settings) ? { accountId: String(given) } : { name: String(given) };
+}
+
+/**
+ * One field's value as Jira takes it, built from what a caller said.
+ *
+ * The rule is the field's own schema. A choice — an option, a priority, a
+ * component, anything the form lists values for — is matched by label and
+ * sent as `{ id }`, and a label that matches nothing is refused with the
+ * labels that would have. A list takes a list, or one string with commas in
+ * it, and resolves each item the same way. A number is checked to be one.
+ * A user is named the way this deployment names users. Everything else —
+ * text, dates — goes as it was said.
+ *
+ * An object goes through untouched whatever the field, so a caller who
+ * knows Jira's shape for something this does not cover can still say it.
+ */
+function valueFor(settings, entry, given) {
+  const { schema, allowedValues, field } = entry;
+  if (given !== null && typeof given === 'object' && !Array.isArray(given)) {
+    return given;
+  }
+  const choice = (one) => {
+    if (one !== null && typeof one === 'object') {
+      return one;
+    }
+    const matched = allowedNamed(allowedValues, one);
+    if (matched === null) {
+      throw new Error(`"${one}" is not one of ${field.name}'s values: ${field.allowed.join(', ')}`);
+    }
+    return { id: String(at(matched, 'id')) };
+  };
+
+  const kind = at(schema, 'type');
+  if (kind === 'array') {
+    const items = Array.isArray(given)
+      ? given
+      : String(given).split(',').map((one) => one.trim()).filter((one) => one.length > 0);
+    const of = at(schema, 'items');
+    if (of === 'user') {
+      return items.map((one) => userOf(settings, one));
+    }
+    if (allowedValues.length > 0) {
+      return items.map(choice);
+    }
+    return of === 'string' ? items.map(String) : items;
+  }
+  if (kind === 'number') {
+    const number = Number(given);
+    if (Number.isNaN(number)) {
+      throw new Error(`${field.name} takes a number, and "${given}" is not one`);
+    }
+    return number;
+  }
+  if (kind === 'user') {
+    return userOf(settings, given);
+  }
+  if (allowedValues.length > 0) {
+    return choice(given);
+  }
+  return given;
 }
 
 /** One issue as the declared `Issue` shape — see objects(). */
@@ -308,6 +499,45 @@ export default class Jira extends OrknuxPlugin {
       }),
 
       new OrknuxObject({
+        name: 'Field',
+        description: 'One field on the form a new issue in a project fills in.',
+        properties: [
+          { name: 'id', kind: 'string', description: 'What Jira calls it on the wire: summary, or customfield_10123.' },
+          { name: 'name', kind: 'string', description: 'What people call it, and what createIssue\'s fields map takes.' },
+          { name: 'required', kind: 'boolean', description: 'Whether a create without it is refused.' },
+          {
+            name: 'kind',
+            kind: 'string',
+            description: 'Jira\'s type: string, number, option, array, user, date, datetime, priority…',
+          },
+          { name: 'of', kind: 'string', description: 'What an array holds - option, string, user, component. Null otherwise.' },
+          {
+            name: 'allowed',
+            kind: 'array',
+            of: 'string',
+            description: 'The values a choice takes, by label. Empty where the field is free text.',
+          },
+          { name: 'hasDefault', kind: 'boolean', description: 'Whether Jira fills it in when nobody does.' },
+        ],
+      }),
+
+      new OrknuxObject({
+        name: 'Form',
+        description: 'What a new issue of one type in one project has to say, and may say.',
+        properties: [
+          { name: 'project', kind: 'string', description: 'The project key asked about.' },
+          { name: 'type', kind: 'string', description: 'The issue type, as Jira spells it.' },
+          {
+            name: 'required',
+            kind: 'array',
+            of: 'string',
+            description: 'The names of the fields a create must fill in - the short answer.',
+          },
+          { name: 'fields', kind: 'array', of: 'Field', description: 'Every field on the form, required or not.' },
+        ],
+      }),
+
+      new OrknuxObject({
         name: 'Issue',
         description: 'One Jira issue, as this plugin answers it.',
         properties: [
@@ -407,7 +637,25 @@ discussion and somebody has to close it by hand.
 
 Write the description as plain text. Jira renders its own wiki markup, not
 markdown, so asterisks and backticks arrive as asterisks and backticks. Put
-what happened, what was expected, and how to see it — in that order.`,
+what happened, what was expected, and how to see it — in that order.
+
+## When a project insists on more
+
+A project can make fields of its own mandatory — "Occurs on: PROD, UAT or
+DEV", "Kind of work: one of six" — and a create that leaves one out is
+refused, naming the field. Do not give up there, and do not guess at values.
+
+\`jira_form(project, type)\` answers the whole form: every field by name, which
+ones are required, and the values each choice takes. Then pass them to
+\`jira_createIssue\` in \`fields\`, keyed by name, valued by label:
+
+\`\`\`
+fields: { "Occurs on": "DEV", "Kind of work": "Maintenance" }
+\`\`\`
+
+A list takes a list, or one string with commas in it. A value that is not one
+of the choices is refused here, with the choices — so if the person said
+"dev", the answer is the label spelled as the form spells it.`,
       }),
     ];
   }
@@ -419,6 +667,7 @@ what happened, what was expected, and how to see it — in that order.`,
       new OrknuxFunctionTool({ function: 'openIssue' }),
       new OrknuxFunctionTool({ function: 'comment' }),
       new OrknuxFunctionTool({ function: 'transition' }),
+      new OrknuxFunctionTool({ function: 'form' }),
       new OrknuxFunctionTool({ function: 'createIssue' }),
     ];
   }
@@ -591,40 +840,79 @@ what happened, what was expected, and how to see it — in that order.`,
       }),
 
       new OrknuxFunction({
+        name: 'form',
+        description:
+          'What a new issue in a project has to say: every field on its create form by name, which ' +
+          'are required, and the values each choice takes. Pass the project key (PROJ) - or an empty ' +
+          'project for the configured one - and the issue type by name ("Task", "Bug", "Story"). Read ' +
+          'it when a create was refused for a missing field, or before creating in a project you do ' +
+          'not know; createIssue takes the answers in its fields map, keyed by these names.',
+        params: [
+          { name: 'project', type: 'string' },
+          { name: 'type', type: 'string' },
+        ],
+        returnType: 'Form',
+        run: (project, type) => {
+          const read = formOf(this.settings, projectOr(this.settings, project), typeOr(type));
+          const fields = read.entries.map((one) => one.field);
+          return {
+            project: read.project,
+            type: read.type,
+            required: fields.filter((one) => one.required).map((one) => one.name),
+            fields: fields,
+          };
+        },
+      }),
+
+      new OrknuxFunction({
         name: 'createIssue',
         description:
           'Raises a new issue. Pass the project key (PROJ) - or an empty project for the configured ' +
           'one - the issue type by name ("Task", "Bug", "Story"), a one-line summary, and the ' +
-          'description as plain text. Answers the new issue\'s key and a url. Search first: raising ' +
-          'a duplicate of something already open is worse than not raising it.',
+          'description as plain text. fields carries anything else the project asks for, keyed by ' +
+          'field name as form lists it and valued by label - {"Occurs on": "DEV", "Priority": "High"}; ' +
+          'a list takes a list or a comma-separated string. Answers the new issue\'s key and a url. ' +
+          'Search first: raising a duplicate of something already open is worse than not raising it.',
         params: [
           { name: 'project', type: 'string' },
           { name: 'type', type: 'string' },
           { name: 'summary', type: 'string' },
           { name: 'description', type: 'string' },
+          { name: 'fields', type: 'map', required: false, default: {} },
         ],
         returnType: 'Raised',
-        run: (project, type, summary, description) => {
+        run: (project, type, summary, description, extra) => {
           const said = typeof summary === 'string' ? summary.trim() : '';
           if (said.length === 0) {
             throw new Error('a new issue needs a summary');
           }
+          const where = projectOr(this.settings, project);
+          const kind = typeOr(type);
 
-          const where = typeof project === 'string' && project.trim().length > 0
-            ? project.trim()
-            : typeof this.settings.project === 'string' && this.settings.project.trim().length > 0
-              ? this.settings.project.trim()
-              : null;
-          if (where === null) {
-            throw new Error('no project was passed and no default project is configured');
+          /*
+           * The project's own fields first, resolved against its form, so
+           * that "Occurs on": "DEV" leaves here as customfield_10123: { id }.
+           * The form is only read when there is something to resolve: a
+           * create that says nothing extra stays one request.
+           */
+          const fields = {};
+          const asked = extra !== null && typeof extra === 'object' ? Object.entries(extra) : [];
+          if (asked.length > 0) {
+            const form = formOf(this.settings, where, kind);
+            for (const [name, value] of asked) {
+              const entry = entryNamed(form, name);
+              if (entry === null) {
+                throw new Error(
+                  `the ${where} ${form.type} form has no field "${name}"; form("${where}", "${form.type}") lists what it has`,
+                );
+              }
+              fields[entry.field.id] = valueFor(this.settings, entry, value);
+            }
           }
-          const kind = typeof type === 'string' && type.trim().length > 0 ? type.trim() : 'Task';
 
-          const fields = {
-            project: { key: where },
-            issuetype: { name: kind },
-            summary: said,
-          };
+          fields.project = { key: where };
+          fields.issuetype = { name: kind };
+          fields.summary = said;
           if (typeof description === 'string' && description.trim().length > 0) {
             fields.description = description;
           }

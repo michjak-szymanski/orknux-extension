@@ -15,7 +15,8 @@ behalf under `NETWORK_REQUEST` — the plugin never holds the token.
 | `openIssue(key)` | One issue whole, description included, as text. Answers the `Issue` shape below rather than a bare map. |
 | `comment(key, text)` | A comment, as plain text. |
 | `transition(key, to)` | Moves an issue — what dragging its card to another column does. |
-| `createIssue(project, type, summary, description)` | Raises a new one. |
+| `form(project, type)` | What a new issue of that type in that project has to say: every field by name, which are required, and the values each choice takes. |
+| `createIssue(project, type, summary, description, fields = {})` | Raises a new one. `fields` is whatever else the project asks for, keyed by name as `form` lists it. |
 
 `transition` takes a status or transition **by name**, matched whatever the
 capitals, because an id is a number out of somebody's workflow configuration
@@ -23,7 +24,40 @@ that nobody knows. Which moves are possible depends on where the issue is right
 now, so the list is read at the moment of asking and a name that is not
 available is refused with the ones that are.
 
-## The shape it exports
+## The fields a project adds
+
+A project can make fields of its own mandatory on a new issue — *Occurs on:
+PROD, UAT or DEV*, *Kind of work: one of six* — and Jira refuses a create that
+leaves one out. On the wire those are `customfield_10123`, with a shape per
+kind: a choice is `{ id }`, a user is `{ accountId }` on Cloud and `{ name }`
+on Server, a list is a list of those. Nobody calling from a workflow, and no
+model calling from an agent, should have to know any of that.
+
+So `form` reads the create metadata for a project and issue type and answers
+the whole form: each field's name, whether it is required, its kind, and the
+labels a choice takes. `createIssue` then takes a `fields` map keyed by those
+names and valued by those labels, resolves each against the same metadata,
+and builds Jira's shape itself:
+
+```
+createIssue('OKO', 'Bug', 'Checkout fails on DEV', 'Steps…', {
+  'Occurs on': 'DEV',
+  'Kind of work': 'Maintenance',
+  'Labels': 'checkout, payments',     // a list, as a list or with commas
+})
+```
+
+A label that is not one of the choices is refused here, with the choices,
+rather than by Jira with an id. A field id (`customfield_10123`) works as a key
+too, and an object value goes through untouched, so a caller who knows Jira's
+shape for something this does not cover can still say it. A create with an
+empty `fields` stays one request: the form is only read when there is
+something to resolve.
+
+When Jira refuses a create, every field it names is in the sentence, not only
+the first — a project that insists on two says so once.
+
+## The shapes it exports
 
 `objects()` declares **`Issue`**, which arrives in a workspace as `jira_Issue`.
 `openIssue` answers it instead of a `map`, so a workflow built against it knows
@@ -48,6 +82,11 @@ file to find out.
 `labels` and `resolution` as null and empty rather than leaving them out, so
 one shape describes both calls and a caller reading `labels` gets a list either
 way.
+
+`form` answers **`Form`** — `project`, `type`, the `required` names as the
+short answer, and `fields`, a list of **`Field`**: `id`, `name`, `required`,
+`kind`, `of` for what an array holds, `allowed` for the labels a choice takes,
+and `hasDefault`.
 
 ## Setting one up
 

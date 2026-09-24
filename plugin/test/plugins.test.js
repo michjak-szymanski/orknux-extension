@@ -1640,12 +1640,15 @@ test('the jira plugin declares what the server would accept', async () => {
   assert.deepEqual(inspected.capabilities, ['NETWORK_REQUEST']);
   assert.deepEqual(
     inspected.functions.map((declared) => declared.name),
-    ['search', 'openIssue', 'comment', 'transition', 'createIssue'],
+    ['search', 'openIssue', 'comment', 'transition', 'form', 'createIssue'],
   );
   assert.deepEqual(
     inspected.tools.map((declared) => declared.name),
-    ['search', 'openIssue', 'comment', 'transition', 'createIssue'],
+    ['search', 'openIssue', 'comment', 'transition', 'form', 'createIssue'],
   );
+  /* The project's own fields ride in a map, optional and empty by default, last. */
+  const create = inspected.functions.find((declared) => declared.name === 'createIssue');
+  assert.deepEqual(create.params.at(-1), { name: 'fields', type: 'map', required: false, default: {} });
 
   /*
    * The first shipped plugin to export a shape, which is what objects() was
@@ -1655,7 +1658,7 @@ test('the jira plugin declares what the server would accept', async () => {
    */
   assert.deepEqual(
     inspected.objects.map((shape) => shape.name),
-    ['Search', 'Comment', 'Moved', 'Raised', 'Issue'],
+    ['Search', 'Comment', 'Moved', 'Raised', 'Field', 'Form', 'Issue'],
   );
   const issue = inspected.objects.find((shape) => shape.name === 'Issue');
   assert.equal(issue.properties.length, 13);
@@ -1673,18 +1676,199 @@ test('the jira plugin declares what the server would accept', async () => {
 
   assert.deepEqual(
     inspected.functions.map((one) => one.returnType),
-    ['Search', 'Issue', 'Comment', 'Moved', 'Raised'],
+    ['Search', 'Issue', 'Comment', 'Moved', 'Form', 'Raised'],
   );
   /* A proxy carries its function's own return, so the tools agree by construction. */
   assert.deepEqual(
     inspected.tools.map((one) => one.returnType),
-    ['Search', 'Issue', 'Comment', 'Moved', 'Raised'],
+    ['Search', 'Issue', 'Comment', 'Moved', 'Form', 'Raised'],
   );
   /* `Search` holds the same shape `openIssue` answers, rather than a second one. */
   const search = inspected.objects.find((shape) => shape.name === 'Search');
   const issues = search.properties.find((property) => property.name === 'issues');
   assert.equal(issues.kind, 'array');
   assert.equal(issues.of, 'Issue');
+});
+
+test('jira createIssue resolves a project\'s own fields against its form', async () => {
+  const url = new URL(`../../plugins/jira/jira.js`, import.meta.url);
+  const { default: Jira } = await import(url.href);
+
+  const configured = (settings) => {
+    const plugin = Object.create(Jira.prototype);
+    Object.defineProperty(plugin, 'settings', { value: Object.freeze(settings) });
+    const functions = plugin.functions();
+    return (name) => functions.find((one) => one.name === name);
+  };
+  const cloud = configured({ url: 'https://x.atlassian.net', email: 'a@b.c', token: 't', project: 'OKO' });
+  const server = configured({ url: 'https://jira.example.com', token: 't', project: 'OKO' });
+
+  /*
+   * The form a project like the one this was written for actually has: two
+   * choices it insists on, a multi-choice, labels, a user and a number. The
+   * ids are what Jira wants on the wire and what nobody calling should
+   * have to know.
+   */
+  const fields = [
+    { fieldId: 'summary', name: 'Summary', required: true, schema: { type: 'string', system: 'summary' } },
+    {
+      fieldId: 'customfield_10123',
+      name: 'Występuje na',
+      required: true,
+      schema: { type: 'option', custom: 'com.atlassian.jira.plugin.system.customfieldtypes:select' },
+      allowedValues: [{ id: '10201', value: 'PROD' }, { id: '10202', value: 'UAT' }, { id: '10203', value: 'DEV' }],
+    },
+    {
+      fieldId: 'customfield_10124',
+      name: 'Rodzaj prac',
+      required: true,
+      schema: { type: 'option' },
+      allowedValues: [{ id: '10301', value: 'Drobny rozwój' }, { id: '10302', value: 'Utrzymanie' }],
+    },
+    {
+      fieldId: 'customfield_10125',
+      name: 'Zespoły',
+      required: false,
+      schema: { type: 'array', items: 'option' },
+      allowedValues: [{ id: '10401', value: 'Checkout' }, { id: '10402', value: 'Payments' }],
+    },
+    { fieldId: 'labels', name: 'Labels', required: false, schema: { type: 'array', items: 'string' } },
+    { fieldId: 'assignee', name: 'Assignee', required: false, schema: { type: 'user' } },
+    { fieldId: 'customfield_10126', name: 'Story Points', required: false, schema: { type: 'number' } },
+    {
+      fieldId: 'priority',
+      name: 'Priority',
+      required: false,
+      schema: { type: 'priority' },
+      allowedValues: [{ id: '1', name: 'High' }, { id: '3', name: 'Medium' }],
+    },
+  ];
+  const types = [{ id: '10001', name: 'Task' }, { id: '10004', name: 'Bug' }];
+
+  const asked = [];
+  const door = globalThis.orknux.http.request;
+  /* Cloud spells the pages issueTypes and fields; Data Center spells both values. */
+  const answering = (spelling) => (what) => {
+    asked.push(what);
+    if (what.url.includes('/issuetypes/10004')) {
+      return { status: 200, headers: {}, body: '{}', json: spelling === 'cloud' ? { fields: fields } : { values: fields } };
+    }
+    if (what.url.includes('/issuetypes')) {
+      return { status: 200, headers: {}, body: '{}', json: spelling === 'cloud' ? { issueTypes: types } : { values: types } };
+    }
+    return { status: 201, headers: {}, body: '{}', json: { key: 'OKO-4040' } };
+  };
+  try {
+    globalThis.orknux.http.request = answering('cloud');
+
+    /* The form, read by name whatever the capitals, answered by name. */
+    const form = cloud('form').run('', 'bug');
+    assert.equal(form.project, 'OKO');
+    assert.equal(form.type, 'Bug');
+    assert.deepEqual(form.required, ['Summary', 'Występuje na', 'Rodzaj prac']);
+    const where = form.fields.find((one) => one.name === 'Występuje na');
+    assert.deepEqual(where, {
+      id: 'customfield_10123',
+      name: 'Występuje na',
+      required: true,
+      kind: 'option',
+      of: null,
+      allowed: ['PROD', 'UAT', 'DEV'],
+      hasDefault: false,
+    });
+    assert.equal(asked[0].url, 'https://x.atlassian.net/rest/api/2/issue/createmeta/OKO/issuetypes?maxResults=200');
+    assert.equal(asked[1].url, 'https://x.atlassian.net/rest/api/2/issue/createmeta/OKO/issuetypes/10004?maxResults=200');
+
+    /* And a create that says the values the way a person says them. */
+    asked.length = 0;
+    const raised = cloud('createIssue').run('', 'Bug', 'Spokojnie tylko test', 'nic', {
+      'występuje na': 'dev',
+      'Rodzaj prac': 'Utrzymanie',
+      'Zespoły': 'Checkout, payments',
+      Labels: ['a', 'b'],
+      Assignee: '5b10ac8d82e05b22cc7d4ef5',
+      customfield_10126: '3',
+      Priority: 'High',
+    });
+    assert.deepEqual(raised, { key: 'OKO-4040', url: 'https://x.atlassian.net/browse/OKO-4040' });
+    const sent = asked.at(-1);
+    assert.equal(sent.url, 'https://x.atlassian.net/rest/api/2/issue');
+    assert.deepEqual(sent.body.fields, {
+      customfield_10123: { id: '10203' },
+      customfield_10124: { id: '10302' },
+      customfield_10125: [{ id: '10401' }, { id: '10402' }],
+      labels: ['a', 'b'],
+      assignee: { accountId: '5b10ac8d82e05b22cc7d4ef5' },
+      customfield_10126: 3,
+      priority: { id: '1' },
+      project: { key: 'OKO' },
+      issuetype: { name: 'Bug' },
+      summary: 'Spokojnie tylko test',
+      description: 'nic',
+    });
+    /* The form was read once, before the create - three requests, not more. */
+    assert.equal(asked.length, 3);
+
+    /* A create with nothing extra reads no form: one request. */
+    asked.length = 0;
+    cloud('createIssue').run('', 'Bug', 'Plain', '', {});
+    assert.equal(asked.length, 1);
+
+    /* A value that is not one of the choices is refused here, with the choices. */
+    assert.throws(
+      () => cloud('createIssue').run('', 'Bug', 'x', '', { 'Występuje na': 'STAGING' }),
+      /"STAGING" is not one of Występuje na's values: PROD, UAT, DEV/,
+    );
+    /* A field the form does not have is refused by name, pointing at form(). */
+    assert.throws(
+      () => cloud('createIssue').run('', 'Bug', 'x', '', { Severity: 'high' }),
+      /the OKO Bug form has no field "Severity"; form\("OKO", "Bug"\) lists what it has/,
+    );
+    /* A type the project does not have is refused with the ones it has. */
+    assert.throws(() => cloud('form').run('', 'Epic'), /OKO has no issue type "Epic"; it has Task, Bug/);
+    /* And an object goes through as said, for a shape this does not cover. */
+    asked.length = 0;
+    cloud('createIssue').run('', 'Bug', 'x', '', { 'Występuje na': { value: 'DEV' } });
+    assert.deepEqual(asked.at(-1).body.fields.customfield_10123, { value: 'DEV' });
+
+    /* Data Center: the other spelling of the pages, and a user named by username. */
+    globalThis.orknux.http.request = answering('server');
+    asked.length = 0;
+    server('createIssue').run('', 'Bug', 'x', '', { 'Występuje na': 'UAT', Assignee: 'mszymanski' });
+    assert.deepEqual(asked.at(-1).body.fields.customfield_10123, { id: '10202' });
+    assert.deepEqual(asked.at(-1).body.fields.assignee, { name: 'mszymanski' });
+  } finally {
+    globalThis.orknux.http.request = door;
+  }
+});
+
+test('a jira refusal names every field, not the first', async () => {
+  const url = new URL(`../../plugins/jira/jira.js`, import.meta.url);
+  const { default: Jira } = await import(url.href);
+  const plugin = Object.create(Jira.prototype);
+  Object.defineProperty(plugin, 'settings', {
+    value: Object.freeze({ url: 'https://x.atlassian.net', email: 'a@b.c', token: 't', project: 'OKO' }),
+  });
+  const create = plugin.functions().find((one) => one.name === 'createIssue');
+
+  const door = globalThis.orknux.http.request;
+  globalThis.orknux.http.request = () => ({
+    status: 400,
+    headers: {},
+    body: '{}',
+    json: {
+      errorMessages: [],
+      errors: { customfield_10123: 'Występuje na is required.', customfield_10124: 'Rodzaj prac is required.' },
+    },
+  });
+  try {
+    assert.throws(
+      () => create.run('', 'Bug', 'x', '', {}),
+      /Jira answered 400: customfield_10123: Występuje na is required\.; customfield_10124: Rodzaj prac is required\. for \/rest\/api\/2\/issue/,
+    );
+  } finally {
+    globalThis.orknux.http.request = door;
+  }
 });
 
 test('a jira call says what is missing, and picks its search endpoint by deployment', async () => {
