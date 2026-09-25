@@ -104,7 +104,11 @@ nothing drew it.
 
 ## Themes
 
-`theme` names a palette, left out for the light default:
+`theme` names a palette. `light` — what leaving it out means — and `dark` are
+the house pair: the same cool neutrals, ink and accent blue the charts and
+nomnoml plugins draw in, and a text face named as a stack a page can load, so
+a diagram and a chart posted together read as one family. The library's own
+palettes are there by name for anybody who prefers one:
 
     zinc-light, zinc-dark, tokyo-night, tokyo-night-storm, tokyo-night-light,
     catppuccin-mocha, catppuccin-latte, nord, nord-light, dracula,

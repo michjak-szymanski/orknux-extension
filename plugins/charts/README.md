@@ -6,10 +6,12 @@ nothing is fetched: a chart is arithmetic on a list of numbers written out as
 SVG, and the server's rasteriser turns that into the picture Slack can show.
 
 ```
-charts_render('{"type":"column","title":"Revenue by quarter","unit":"$",
+charts_render('{"type":"column","eyebrow":"Finance · 2026","title":"Revenue by quarter",
+                "subtitle":"In thousands, before tax","unit":"$",
                 "labels":["Q1","Q2","Q3","Q4"],
                 "series":[{"name":"Product","values":[412,468,455,521]},
-                          {"name":"Services","values":[120,131,149,158]}]}')
+                          {"name":"Services","values":[120,131,149,158]}],
+                "source":"Source: the finance workbook"}')
   → { png: 'iVBORw0KGgo…', svg: '', bytes: 31204, width: 1200, height: 720,
       key: 'charts.2k9x1m' }
 ```
@@ -51,7 +53,32 @@ JSON, as the first argument:
 | `series` | One entry per colour, each with a `name` and one value per label. `null` is a gap. A single series may be written as `"values": [...]` at the top level instead. |
 | `unit` | Written on every number — a currency sign before it, `%` or a word after it |
 | `stacked` | Stacks the series of a bar, column or area chart |
-| `title`, `subtitle` | Set above the plot; the subtitle in secondary ink |
+| `title`, `subtitle` | The title in the display face; the subtitle under it in soft ink |
+| `eyebrow` | The small line in capitals above the title, saying what the chart is about — a team, a period, a system |
+| `source` | The footer line saying where the numbers came from |
+| `summary` | The row of figures above the plot, drawn unless this is `false` |
+
+## The card a chart is
+
+A chart here is a report card, not a plot. A picture posted to a channel has
+to make its point without the paragraph that would have gone round it, so the
+card carries that paragraph:
+
+- an **eyebrow** in small mono capitals, then the **title** in a display face
+  and the **subtitle** in soft ink;
+- a **row of figures** — for two to four series, each one's swatch, name and
+  total (or latest value, with how far it moved, for a line); for one series,
+  the three numbers a reader would otherwise work out: total, average, and
+  the latest or the highest category. Past four series the row is a plain
+  legend again;
+- the **plot**, ticks in the mono face so a number reads as a number;
+- a **source** line in the footer.
+
+Three faces are named — a display grotesque for the title and figures, a text
+sans for labels, a mono for numbers — each as a stack ending in a generic
+family. An SVG put in a page that loads those faces is set in them; the
+server's rasteriser sets whatever it has installed, which the stacks make sure
+is a sans.
 
 ## Which chart
 

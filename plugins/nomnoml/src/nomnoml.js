@@ -52,10 +52,23 @@ import * as nomnoml from 'nomnoml';
  * palettes name two: a package drawn inside a package should not vanish into
  * the thing containing it.
  */
+const HOUSE =
+  "#font: 'Source Sans 3', 'Segoe UI', Helvetica, Arial, sans-serif\n" +
+  '#fontSize: 12\n#lineWidth: 1.5\n#edges: rounded\n#padding: 10\n#spacing: 44\n#arrowSize: 0.8\n';
+
 const THEMES = {
-  /* nomnoml's own, and what a `theme` left out means. */
-  light: '',
-  dark: '#background: #1e232b\n#fill: #272c35; #323845\n#stroke: #e8eaed\n',
+  /*
+   * The house pair, and what a `theme` left out means: the same neutrals
+   * the charts and mermaid plugins draw in - a cool off-white fill inside an
+   * ink outline that is not quite black, rounded edges, a little more air -
+   * so a diagram and a chart posted together read as one family. `fill`
+   * names two, because a package drawn inside a package should not vanish
+   * into the thing containing it.
+   */
+  light: `${HOUSE}#background: #ffffff\n#fill: #eef2f4;#ffffff\n#stroke: #131a20\n`,
+  dark: `${HOUSE}#background: #141a1f\n#fill: #1c262d;#26323b\n#stroke: #e6ecf0\n`,
+  /* nomnoml's own drawing, untouched, for anybody who prefers it. */
+  plain: '',
   mono: '#background: #ffffff\n#fill: #ffffff\n#stroke: #111111\n',
   blueprint: '#background: #0f2d4a\n#fill: #14395e; #1b4877\n#stroke: #cfe3f7\n',
 };
@@ -371,7 +384,7 @@ compartment is drawn inside that box:
 
 ## Arguments
 
-\`theme\` is \`light\` (the default), \`dark\`, \`mono\` or \`blueprint\`. \`direction\` is \`down\`
+\`theme\` is \`light\` (the default), \`dark\`, \`plain\`, \`mono\` or \`blueprint\`. \`direction\` is \`down\`
 (the default) or \`right\` - use \`right\` when the diagram is a chain rather than a
 tree. Your own \`#\` directives in the source beat both.
 
@@ -520,7 +533,8 @@ editor, which is worth giving somebody who will want to tweak it.`,
           '[<actor>User], [<usecase>Sign in], [<state>queued], [<package>name|...], ' +
           '[<note>an aside], [<database>rows], [<frame>...], [<choice>which?] - and a diagram ' +
           'nests by being written inside a box\'s second compartment. theme is light (the ' +
-          'default), dark, mono or blueprint; direction is down (the default) or right; your own ' +
+          'default) or dark - the house pair the charts and mermaid plugins share - plain for ' +
+          'nomnoml\'s own drawing, mono or blueprint; direction is down (the default) or right; your own ' +
           '# directives in the source override both. For flowcharts and sequence diagrams use ' +
           'mermaid_render instead - this draws neither. format is png (the default) for a ' +
           'picture people can see, or svg for the markup; width sets the picture width in ' +
@@ -549,16 +563,15 @@ editor, which is worth giving somebody who will want to tweak it.`,
 
           let directives = '';
 
-          if (typeof theme === 'string' && theme.length > 0) {
-            const named = theme.trim().toLowerCase();
-            const palette = THEMES[named];
-            if (palette === undefined) {
-              throw new Error(
-                `no theme called ${theme}: the themes are ${Object.keys(THEMES).join(', ')}`,
-              );
-            }
-            directives += palette;
+          /* Left out, the theme is the house light - not nomnoml's own, which is `plain`. */
+          const named = typeof theme === 'string' && theme.trim().length > 0 ? theme.trim().toLowerCase() : 'light';
+          const palette = THEMES[named];
+          if (palette === undefined) {
+            throw new Error(
+              `no theme called ${theme}: the themes are ${Object.keys(THEMES).join(', ')}`,
+            );
           }
+          directives += palette;
 
           if (typeof direction === 'string' && direction.length > 0) {
             const named = direction.trim().toLowerCase();

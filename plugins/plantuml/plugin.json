@@ -10,7 +10,7 @@
     "rendering"
   ],
   "summary": "Draw the diagrams mermaid is worst at, in the sandbox: no server, no Java, nothing fetched.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "icon": "icon.svg",
   "descriptionPath": "README.md"
 }

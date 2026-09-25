@@ -96,8 +96,9 @@ The shape of a box is a prefix: `<actor>`, `<usecase>`, `<state>`, `<package>`,
 
 | `theme` | |
 |---|---|
-| `light` | nomnoml's own, and what leaving it out means |
-| `dark` | For a dark channel or a dark page |
+| `light` | The house look, and what leaving it out means: a cool off-white fill inside an ink outline, rounded edges, a little more air — the same neutrals the charts and mermaid plugins draw in, so a diagram and a chart posted together read as one family |
+| `dark` | The same, for a dark channel or a dark page |
+| `plain` | nomnoml's own drawing, untouched |
 | `mono` | Black on white — for printing, and for a document that supplies its own colour |
 | `blueprint` | Pale lines on deep blue |
 

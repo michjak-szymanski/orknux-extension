@@ -11,7 +11,7 @@ leave the machine.
 
 | Function | |
 |---|---|
-| `render(source, format, width)` | The diagram as `png` or `svg`, the size it came out, and a key the bytes are kept under. |
+| `render(source, format, width, theme)` | The diagram as `png` or `svg`, the size it came out, and a key the bytes are kept under. `theme` is `light` or `dark` — the house pair the charts, mermaid and nomnoml plugins share, put in as a `<style>` block after the `@start` line — or left out for PlantUML's own look, which a source carrying its own skinparams should ask for. |
 | `check(source)` | Whether PlantUML can read it, and the line where it cannot. Reaches nothing. |
 | `links(source)` | Urls that draw it on a PlantUML server, carrying the source inside them. Builds strings; sends nothing. |
 

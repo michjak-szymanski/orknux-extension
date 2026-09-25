@@ -9,7 +9,7 @@
     "offline"
   ],
   "summary": "Render Mermaid diagrams as a picture, offline, inside the sandbox.",
-  "version": "0.9.7",
+  "version": "0.10.0",
   "icon": "icon.svg",
   "descriptionPath": "README.md",
   "path": "mermaid.js"

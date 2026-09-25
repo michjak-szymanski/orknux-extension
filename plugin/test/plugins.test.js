@@ -2831,6 +2831,19 @@ test('the plantuml plugin draws in the sandbox, with no server and no Graphviz',
   assert.match(drawn.svg, /font-family="Helvetica,Arial,&quot;Liberation Sans&quot;,sans-serif"/);
   assert.doesNotMatch(drawn.svg, /font-family="sans-serif"/);
 
+  /*
+   * A theme is a style block put after the @start line, so it paints the
+   * drawing; left out, PlantUML draws its own, and a source without a
+   * @start line is handed over untouched for PlantUML to refuse itself.
+   */
+  const housed = call('render').run('@startuml\nactor Ada\nAda -> Bob : hi\n@enduml', 'svg', 0, 'light');
+  assert.match(housed.svg, /eef2f4/i, 'the house fill is painted');
+  assert.doesNotMatch(drawn.svg, /eef2f4/i, 'and not without asking');
+  assert.throws(
+    () => call('render').run('@startuml\nactor Ada\n@enduml', 'svg', 0, 'sepia'),
+    /no theme called sepia: it is light or dark/,
+  );
+
   /* Laid out by Smetana: two boxes, their labels, and the association between them. */
   assert.ok(laidOut.svg.includes('Cart') && laidOut.svg.includes('Item'));
   assert.ok(laidOut.svg.includes('0..*'), 'the cardinality is not on the association');
@@ -2979,6 +2992,14 @@ test('the mermaid plugin declares what the server would accept, and renders offl
 
   const themed = one('render').run('sequenceDiagram\n  A->>B: hi', 'nord', 'svg', 0);
   assert.ok(themed.svg.includes('#2e3440'), 'the theme colors the drawing');
+
+  /* Left out, the theme is the house light: the ink the charts plugin sets its text in, and the text face named as a stack. */
+  assert.ok(drawn.svg.includes('#131a20'), 'the default is the house light palette');
+  assert.ok(drawn.svg.includes("'Source Sans 3'"), 'set in the house text face');
+  assert.ok(
+    one('render').run('sequenceDiagram\n  A->>B: hi', 'dark', 'svg', 0).svg.includes('#141a1f'),
+    'dark is the house dark palette',
+  );
 
   assert.throws(
     () => one('render').run('graph TD\n  A-->B', 'nope', 'svg', 0),
@@ -4072,7 +4093,22 @@ test('the charts plugin declares what the server would accept, and draws offline
   assert.equal(drawn.width, 800);
   assert.equal(drawn.height, 480);
   assert.ok(drawn.svg.includes('Revenue by quarter'), 'the title is set');
-  assert.ok(drawn.svg.includes('>Product<') && drawn.svg.includes('>Services<'), 'two series get a legend');
+  /* Two series: a figure each - swatch, name and total - standing in for the legend. */
+  assert.ok(drawn.svg.includes('Product · total') && drawn.svg.includes('Services · total'), 'two series get a figure each');
+  assert.ok(drawn.svg.includes('>$1,856<'), 'and the figure is the total, with the unit on it');
+
+  /* The card's furniture: an eyebrow in small capitals above, the source line below, and a display face on the title. */
+  const furnished = render(
+    '{"type":"line","eyebrow":"Platform · 14 days","title":"p95","labels":["a","b","c"],"values":[100,120,150],"source":"Source: Prometheus"}',
+    '', 'svg', 0,
+  ).svg;
+  assert.ok(furnished.includes('>PLATFORM · 14 DAYS<'), 'the eyebrow is set in capitals');
+  assert.ok(furnished.includes('>Source: Prometheus<'), 'the source line is in the footer');
+  assert.ok(furnished.includes("font-family=\"'Familjen Grotesk'"), 'the title is set in the display face');
+  /* One series over time: total, average and latest, with how far it moved. */
+  assert.ok(furnished.includes('>Total<') && furnished.includes('>Average<') && furnished.includes('>Latest<'), 'three figures');
+  assert.ok(furnished.includes('>+50%<'), 'the latest carries its change from the first');
+  assert.ok(!render('{"type":"line","labels":["a","b"],"values":[1,2],"summary":false}', '', 'svg', 0).svg.includes('>Total<'), 'summary: false leaves the row out');
   assert.ok(drawn.svg.includes('$1,000') || drawn.svg.includes('$500'), 'ticks carry the unit and a thousands separator');
   assert.ok(!/https?:\/\/(?!www\.w3\.org)/.test(drawn.svg), 'no remote reference');
   /* The markup is what the rasteriser will be handed, so it has to say its size and use no CSS. */
@@ -4094,7 +4130,7 @@ test('the charts plugin declares what the server would accept, and draws offline
   assert.ok(render('{"type":"pie","labels":["a","b"],"values":[3,1]}', '', 'svg', 0).svg.includes('75%'), 'a pie labels its shares');
 
   /* The dark theme paints the dark surface. */
-  assert.ok(render(spec, 'dark', 'svg', 0).svg.includes('#1a1a19'), 'the theme colours the drawing');
+  assert.ok(render(spec, 'dark', 'svg', 0).svg.includes('#141a1f'), 'the theme colours the drawing');
 
   /* Text that is markup is escaped, not executed. */
   const escaped = render('{"type":"column","title":"<b>&","labels":["<x>"],"values":[1]}', '', 'svg', 0).svg;
@@ -4209,7 +4245,7 @@ test('the nomnoml plugin declares what the server would accept, and renders offl
 
   /* A theme is directives put in front of the source, so it colours the result. */
   assert.ok(
-    render('[a] -> [b]', 'dark', '', 'svg', 0).svg.includes('#1e232b'),
+    render('[a] -> [b]', 'dark', '', 'svg', 0).svg.includes('#141a1f'),
     'the theme colours the drawing',
   );
 
@@ -4297,7 +4333,7 @@ test('the nomnoml plugin declares what the server would accept, and renders offl
       assert.equal(picture.svg, '', 'and the markup does not come with it');
       assert.equal(picture.bytes, 3, 'the byte count is the picture(s)');
       assert.equal(held.get(picture.key), 'UE5H', 'the key names the picture, not the markup');
-      assert.ok(drawnFrom.includes('#1e232b'), 'the themed markup is what was drawn');
+      assert.ok(drawnFrom.includes('#141a1f'), 'the themed markup is what was drawn');
       assert.equal(widthAsked, 640, 'the width is passed through');
       assert.equal(handedOver(drawnFrom, 640).width, 640, 'and reaches the markup');
 
@@ -4311,8 +4347,12 @@ test('the nomnoml plugin declares what the server would accept, and renders offl
        * boxes are 82 by 160, so a width floor would have drawn them 1200
        * across and 2341 down - taller than the budget for no gain, because
        * the side that has to be legible is already past it.
+       *
+       * Drawn `plain`, because 82 by 160 is nomnoml's own geometry and the
+       * house theme adds air; the arithmetic being pinned here is the
+       * scale's, not the theme's.
        */
-      const tiny = render('[a] -> [b]', '', '', 'png', 0);
+      const tiny = render('[a] -> [b]', 'plain', '', 'png', 0);
       assert.equal(widthAsked, 615, 'the long side reaches the floor, and the width follows');
       handedOver(drawnFrom, 615);
       assert.equal(Math.max(tiny.width, tiny.height), 1200, 'which is what the floor is measured on');

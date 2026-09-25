@@ -10,10 +10,10 @@
  * hundred lines of SVG, and a library that does the same thing measures its
  * text through a DOM, which this sandbox has not got. So the layout is this
  * file's own: scales, ticks, bars with a rounded data-end, lines with a ring
- * around each marker, and a legend. Text is measured by a rule of thumb -
- * about 0.55 em per character in a sans face - which is what every renderer
- * without a font on hand does, and is a label a hair off its slot rather than
- * a chart that will not draw.
+ * around each marker, a row of figures above the plot and a legend. Text is
+ * measured by a rule of thumb - about 0.55 em per character in a sans face -
+ * which is what every renderer without a font on hand does, and is a label a
+ * hair off its slot rather than a chart that will not draw.
  *
  * ## What it asks the server for
  *
@@ -22,6 +22,16 @@
  * capability here. Nothing is fetched: markup this plugin just wrote goes out,
  * bytes computed from it come back. `format: svg` answers the markup without
  * the server being asked anything at all.
+ *
+ * ## The card a chart is
+ *
+ * A chart here is a report card, not a plot: an eyebrow in small capitals
+ * saying what it is about, a title in a display face, a subtitle, then a row
+ * of the figures the plot is really about - each series' total or latest
+ * value, with how far it moved - and the plot under them, with a source line
+ * in the footer. A picture posted to a channel has to make its point without
+ * the paragraph that would have gone round it, and the figures row is that
+ * paragraph.
  *
  * ## The rules the drawing keeps
  *
@@ -38,13 +48,22 @@
  *   cross. A two-pixel gap of surface between touching bars and between the
  *   segments of a stack, rather than a stroke drawn around them.
  * - Text wears ink, never the series colour. Identity comes from the swatch
- *   beside it.
+ *   beside it. Figures are set in the display face and ticks in the mono one,
+ *   so a number reads as a number.
  * - A legend whenever there are two series or more; none for one, because
  *   the title already says what is plotted. Values are labelled selectively -
  *   the end of a line, the cap of a single series' bars - never on every
  *   point.
  * - The grid is a hairline one step off the surface, and the baseline is the
  *   only line that is darker.
+ *
+ * ## Faces
+ *
+ * The markup names a display face, a text face and a mono face, each with a
+ * fallback stack ending in a generic family. An SVG put in a page that loads
+ * those faces is set in them; the server's rasteriser sets whatever it has
+ * installed, and the stacks are written so that what it has is a sans, not a
+ * serif. Widths are estimated, not measured, either way.
  *
  * Licensed under the Apache License, Version 2.0.
  * SPDX-License-Identifier: Apache-2.0
@@ -53,24 +72,49 @@
 /** The size a chart lays itself out at; a png is this, scaled. */
 const SIZE = { width: 800, height: 480 };
 
-/** What a chart is drawn in, per theme: surface, inks, chrome and the series hues in their fixed order. */
+/** The air between the card's edge and anything in it. */
+const PAD = 28;
+
+/** The three faces, as stacks a page can load and a rasteriser can fall back through. */
+const FACES = {
+  display: "'Familjen Grotesk', 'Bricolage Grotesque', 'Segoe UI', Helvetica, Arial, sans-serif",
+  text: "'Source Sans 3', 'Segoe UI', Helvetica, Arial, sans-serif",
+  mono: "'IBM Plex Mono', 'JetBrains Mono', Consolas, 'Liberation Mono', monospace",
+};
+
+/**
+ * What a chart is drawn in, per theme.
+ *
+ * The neutrals lean cool rather than sitting at a pure grey, so the chrome
+ * reads as chosen; the series hues are the same eight in both themes, stepped
+ * for each surface and validated as a set - worst adjacent pair under
+ * colour-blindness 9.1 light and 8.4 dark, on a scale where 8 is the target.
+ * `good` and `bad` are for a delta and nothing else, and are kept apart from
+ * the series so a status never impersonates one.
+ */
 const THEMES = {
   light: {
-    surface: '#fcfcfb',
-    ink: '#0b0b0b',
-    secondary: '#52514e',
-    muted: '#898781',
-    grid: '#e1e0d9',
-    axis: '#c3c2b7',
+    surface: '#ffffff',
+    sunk: '#eef2f4',
+    ink: '#131a20',
+    soft: '#4a5865',
+    faint: '#71808c',
+    rule: '#dde3e7',
+    ruleSoft: '#e9eef1',
+    good: '#1f7a3a',
+    bad: '#b42318',
     series: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'],
   },
   dark: {
-    surface: '#1a1a19',
-    ink: '#ffffff',
-    secondary: '#c3c2b7',
-    muted: '#898781',
-    grid: '#2c2c2a',
-    axis: '#383835',
+    surface: '#141a1f',
+    sunk: '#0f1418',
+    ink: '#e6ecf0',
+    soft: '#a6b4be',
+    faint: '#7a8994',
+    rule: '#26323b',
+    ruleSoft: '#1c262d',
+    good: '#6fd68e',
+    bad: '#f08a80',
     series: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'],
   },
 };
@@ -81,8 +125,8 @@ const KINDS = ['bar', 'column', 'line', 'area', 'pie', 'donut'];
 /** The most series a chart carries; past this the hues stop being tellable apart. */
 const MOST_SERIES = 8;
 
-/** The face named in the markup. A rasteriser substitutes; the metrics below assume a sans. */
-const FONT = 'Helvetica, Arial, sans-serif';
+/** The most series the figures row holds; past this it is a legend again. */
+const MOST_FIGURES = 4;
 
 /** Mark specs: fixed, and the reason the charts look like one family. */
 const MARK = { barThickness: 24, gap: 2, line: 2, marker: 4, ring: 2, cornerRadius: 4 };
@@ -115,10 +159,23 @@ function escaped(text) {
  *
  * A rule of thumb rather than a measurement, because there is no font here to
  * measure with. 0.55 em a character is a sans face's average once digits,
- * capitals and the narrow letters are mixed the way labels mix them.
+ * capitals and the narrow letters are mixed the way labels mix them; a mono
+ * face is 0.6 by definition.
  */
-function widthOf(text, size) {
-  return String(text).length * size * 0.55;
+function widthOf(text, size, mono = false) {
+  return String(text).length * size * (mono ? 0.6 : 0.55);
+}
+
+/** One piece of text, set. */
+function text(x, y, said, { size, face = FACES.text, fill, weight = 400, anchor = 'start', spacing = 0 }) {
+  return (
+    `<text x="${Number(x).toFixed(1)}" y="${Number(y).toFixed(1)}"` +
+    (anchor === 'start' ? '' : ` text-anchor="${anchor}"`) +
+    ` font-family="${face}" font-size="${size}"` +
+    (weight === 400 ? '' : ` font-weight="${weight}"`) +
+    (spacing === 0 ? '' : ` letter-spacing="${spacing}"`) +
+    ` fill="${fill}">${escaped(said)}</text>`
+  );
 }
 
 /** A number written for a person: thousands separated, at most two decimals, nothing trailing. */
@@ -137,9 +194,21 @@ function formatted(value) {
   return (value < 0 ? '-' : '') + grouped + (fraction === undefined ? '' : `.${fraction}`);
 }
 
+/** A figure, compact past ten thousand: 12.9K, 4.2M, 1.1B. */
+function compact(value) {
+  const magnitude = Math.abs(value);
+  if (magnitude < 10000) {
+    return formatted(value);
+  }
+  const [unit, by] = magnitude >= 1e9 ? ['B', 1e9] : magnitude >= 1e6 ? ['M', 1e6] : ['K', 1e3];
+  const scaled = magnitude / by;
+  const written = (scaled >= 100 ? scaled.toFixed(0) : scaled.toFixed(1)).replace(/\.0$/, '');
+  return `${value < 0 ? '-' : ''}${written}${unit}`;
+}
+
 /** A value with the chart's unit on it - a currency sign before, anything else after. */
-function labelled(value, unit) {
-  const written = formatted(value);
+function labelled(value, unit, short = false) {
+  const written = short ? compact(value) : formatted(value);
   if (unit === '') {
     return written;
   }
@@ -238,65 +307,169 @@ function specOf(text) {
     return { name, values };
   });
 
+  const word = (field) => (typeof spec[field] === 'string' ? spec[field].trim() : '');
   return {
     kind,
-    title: typeof spec.title === 'string' ? spec.title.trim() : '',
-    subtitle: typeof spec.subtitle === 'string' ? spec.subtitle.trim() : '',
-    unit: typeof spec.unit === 'string' ? spec.unit.trim() : '',
+    title: word('title'),
+    subtitle: word('subtitle'),
+    eyebrow: word('eyebrow'),
+    source: word('source'),
+    unit: word('unit'),
     labels,
     series: read,
     stacked,
+    summary: spec.summary !== false,
+  };
+}
+
+/** A series' figure: its total, its latest value, and how far it moved from its first. */
+function figureOf(kind, one) {
+  const present = one.values.filter((value) => value !== null);
+  if (present.length === 0) {
+    return null;
+  }
+  const total = present.reduce((sum, value) => sum + value, 0);
+  const first = present[0];
+  const last = present[present.length - 1];
+  const change = present.length > 1 && first !== 0 ? ((last - first) / Math.abs(first)) * 100 : null;
+  const overTime = kind === 'line' || kind === 'area';
+  return {
+    value: overTime ? last : total,
+    caption: overTime ? 'latest' : 'total',
+    change: overTime ? change : null,
+    total,
+    average: total / present.length,
   };
 }
 
 /**
- * The frame every chart shares: the surface, the title and subtitle, the
- * legend where there are two series or more, and the box that is left for
- * the plot. Answered with the markup so far and the plot's edges.
+ * The frame every chart shares: the surface with its hairline edge, the
+ * eyebrow, title and subtitle, the figures row or the legend, and the source
+ * line in the footer. Answered with the markup so far and the box left for
+ * the plot.
  */
 function framed(spec, theme) {
   const parts = [];
   parts.push(`<rect x="0" y="0" width="${SIZE.width}" height="${SIZE.height}" fill="${theme.surface}"/>`);
+  parts.push(
+    `<rect x="0.5" y="0.5" width="${SIZE.width - 1}" height="${SIZE.height - 1}" fill="none" stroke="${theme.rule}" stroke-width="1"/>`,
+  );
 
-  let top = 24;
+  let y = PAD;
+  if (spec.eyebrow !== '') {
+    parts.push(text(PAD, y + 9, spec.eyebrow.toUpperCase(), { size: 11, face: FACES.mono, fill: theme.faint, spacing: 1.3 }));
+    y += 20;
+  }
   if (spec.title !== '') {
-    parts.push(
-      `<text x="24" y="${top + 8}" font-family="${FONT}" font-size="18" font-weight="700" fill="${theme.ink}">${escaped(spec.title)}</text>`,
-    );
-    top += 24;
+    parts.push(text(PAD, y + 17, spec.title, { size: 20, face: FACES.display, fill: theme.ink, weight: 700 }));
+    y += 26;
     if (spec.subtitle !== '') {
-      parts.push(
-        `<text x="24" y="${top + 4}" font-family="${FONT}" font-size="13" fill="${theme.secondary}">${escaped(spec.subtitle)}</text>`,
-      );
-      top += 20;
+      parts.push(text(PAD, y + 11, spec.subtitle, { size: 13, fill: theme.soft }));
+      y += 20;
     }
   }
 
-  /*
-   * A legend for two series or more, laid across the top in rows: a swatch
-   * and the name in secondary ink. One series gets none - the title names it.
-   */
-  if (spec.series.length > 1) {
-    let x = 24;
-    let y = top + 12;
+  const round = spec.kind === 'pie' || spec.kind === 'donut';
+  const figures = spec.summary && !round ? spec.series.map((one) => figureOf(spec.kind, one)) : [];
+  const many = spec.series.length > MOST_FIGURES;
+
+  if (figures.length > 0 && !many && figures.some((figure) => figure !== null)) {
+    /*
+     * The figures row: what the plot adds up to, before the plot. One figure
+     * per series - its swatch, its name and its total or latest value, with
+     * how far a line moved - or, for a single series, the three numbers a
+     * reader would otherwise work out: total, average, and the latest or the
+     * highest.
+     */
+    const tiles = [];
+    if (spec.series.length === 1) {
+      const figure = figures[0];
+      const one = spec.series[0];
+      tiles.push({ name: 'Total', value: labelled(figure.total, spec.unit, true) });
+      tiles.push({ name: 'Average', value: labelled(figure.average, spec.unit, true) });
+      if (figure.change !== null || spec.kind === 'line' || spec.kind === 'area') {
+        tiles.push({ name: 'Latest', value: labelled(figure.value, spec.unit, true), change: figure.change });
+      } else {
+        let highest = -1;
+        one.values.forEach((value, at) => {
+          if (value !== null && (highest === -1 || value > one.values[highest])) highest = at;
+        });
+        tiles.push({
+          name: `Highest · ${spec.labels[highest]}`,
+          value: labelled(one.values[highest], spec.unit, true),
+        });
+      }
+    } else {
+      spec.series.forEach((one, at) => {
+        const figure = figures[at];
+        if (figure === null) return;
+        tiles.push({
+          swatch: theme.series[at],
+          name: `${one.name} · ${figure.caption}`,
+          value: labelled(figure.value, spec.unit, true),
+          change: figure.change,
+        });
+      });
+    }
+
+    y += 12;
+    let x = PAD;
+    for (const tile of tiles) {
+      const valueWidth = widthOf(tile.value, 20);
+      const changeText = tile.change === null || tile.change === undefined ? '' : `${tile.change >= 0 ? '+' : '-'}${formatted(Math.abs(tile.change))}%`;
+      const changeWidth = changeText === '' ? 0 : widthOf(changeText, 12, true) + 8;
+      const nameWidth = (tile.swatch === undefined ? 0 : 16) + widthOf(tile.name, 12);
+      const wide = Math.max(valueWidth + changeWidth, nameWidth, 96);
+      if (x + wide > SIZE.width - PAD && x > PAD) {
+        break;
+      }
+      parts.push(text(x, y + 20, tile.value, { size: 20, face: FACES.display, fill: theme.ink, weight: 600 }));
+      if (changeText !== '') {
+        parts.push(
+          text(x + valueWidth + 8, y + 19, changeText, {
+            size: 12,
+            face: FACES.mono,
+            fill: tile.change >= 0 ? theme.good : theme.bad,
+            weight: 500,
+          }),
+        );
+      }
+      if (tile.swatch !== undefined) {
+        parts.push(`<rect x="${x}" y="${y + 28}" width="10" height="10" rx="2" fill="${tile.swatch}"/>`);
+      }
+      parts.push(text(x + (tile.swatch === undefined ? 0 : 16), y + 37, tile.name, { size: 12, fill: theme.faint }));
+      x += wide + 32;
+    }
+    y += 48;
+    parts.push(`<line x1="${PAD}" y1="${y}" x2="${SIZE.width - PAD}" y2="${y}" stroke="${theme.ruleSoft}" stroke-width="1"/>`);
+    y += 10;
+  } else if (spec.series.length > 1) {
+    /* A legend, in rows: a swatch and the name in soft ink. */
+    let x = PAD;
+    y += 14;
     for (const [at, one] of spec.series.entries()) {
       const wide = 16 + widthOf(one.name, 12) + 20;
-      if (x + wide > SIZE.width - 24 && x > 24) {
-        x = 24;
+      if (x + wide > SIZE.width - PAD && x > PAD) {
+        x = PAD;
         y += 20;
       }
-      parts.push(
-        `<rect x="${x}" y="${y - 9}" width="10" height="10" rx="2" fill="${theme.series[at]}"/>` +
-          `<text x="${x + 16}" y="${y}" font-family="${FONT}" font-size="12" fill="${theme.secondary}">${escaped(one.name)}</text>`,
-      );
+      parts.push(`<rect x="${x}" y="${y - 9}" width="10" height="10" rx="2" fill="${theme.series[at]}"/>`);
+      parts.push(text(x + 16, y, one.name, { size: 12, fill: theme.soft }));
       x += wide;
     }
-    top = y + 16;
+    y += 12;
   } else {
-    top += 8;
+    y += 8;
   }
 
-  return { parts, plot: { top, bottom: SIZE.height - 40, left: 24, right: SIZE.width - 24 } };
+  /* The footer: where the numbers came from, in the mono face, faint. */
+  let bottom = SIZE.height - PAD;
+  if (spec.source !== '') {
+    parts.push(text(PAD, SIZE.height - PAD + 8, spec.source, { size: 11, face: FACES.mono, fill: theme.faint }));
+    bottom -= 14;
+  }
+
+  return { parts, plot: { top: y + 8, bottom: bottom - 12, left: PAD, right: SIZE.width - PAD } };
 }
 
 /**
@@ -377,8 +550,10 @@ function drawnOnAxes(spec, theme) {
   const count = spec.labels.length;
 
   /* Room on the left for whichever labels sit there: tick values, or the categories of a bar chart. */
-  const leftLabels = horizontal ? spec.labels : ticks.map((tick) => labelled(tick, spec.unit));
-  plot.left = 24 + Math.min(220, Math.max(...leftLabels.map((label) => widthOf(label, 12)))) + 10;
+  const leftLabels = horizontal
+    ? spec.labels.map((label) => widthOf(label, 12))
+    : ticks.map((tick) => widthOf(labelled(tick, spec.unit), 11, true));
+  plot.left = PAD + Math.min(220, Math.max(...leftLabels)) + 10;
 
   /* Room on the right for a line's end labels, which sit past the last point. */
   if (spec.kind === 'line' || spec.kind === 'area') {
@@ -386,7 +561,7 @@ function drawnOnAxes(spec, theme) {
       const last = [...one.values].reverse().find((value) => value !== null);
       return last === undefined ? '' : labelled(last, spec.unit);
     });
-    plot.right = SIZE.width - 24 - Math.min(120, Math.max(...ends.map((label) => widthOf(label, 12))) + 10);
+    plot.right = SIZE.width - PAD - Math.min(120, Math.max(...ends.map((label) => widthOf(label, 12, true))) + 12);
   }
 
   const first = ticks[0];
@@ -401,20 +576,17 @@ function drawnOnAxes(spec, theme) {
   const slot = (horizontal ? height : width) / count;
   const centre = (index) => (horizontal ? plot.top : plot.left) + slot * (index + 0.5);
 
-  /* The grid: a hairline per tick, the tick's value in muted ink, and a darker baseline at zero. */
+  /* The grid: a hairline per tick, the tick's value in the mono face, and a darker baseline at zero. */
   for (const tick of ticks) {
     const place = at(tick);
-    const stroke = tick === 0 ? theme.axis : theme.grid;
+    const stroke = tick === 0 ? theme.rule : theme.ruleSoft;
+    const said = labelled(tick, spec.unit);
     if (horizontal) {
       parts.push(`<line x1="${place.toFixed(1)}" y1="${plot.top}" x2="${place.toFixed(1)}" y2="${plot.bottom}" stroke="${stroke}" stroke-width="1"/>`);
-      parts.push(
-        `<text x="${place.toFixed(1)}" y="${plot.bottom + 18}" text-anchor="middle" font-family="${FONT}" font-size="12" fill="${theme.muted}">${escaped(labelled(tick, spec.unit))}</text>`,
-      );
+      parts.push(text(place, plot.bottom + 18, said, { size: 11, face: FACES.mono, fill: theme.faint, anchor: 'middle' }));
     } else {
       parts.push(`<line x1="${plot.left}" y1="${place.toFixed(1)}" x2="${plot.right}" y2="${place.toFixed(1)}" stroke="${stroke}" stroke-width="1"/>`);
-      parts.push(
-        `<text x="${plot.left - 8}" y="${(place + 4).toFixed(1)}" text-anchor="end" font-family="${FONT}" font-size="12" fill="${theme.muted}">${escaped(labelled(tick, spec.unit))}</text>`,
-      );
+      parts.push(text(plot.left - 8, place + 4, said, { size: 11, face: FACES.mono, fill: theme.faint, anchor: 'end' }));
     }
   }
 
@@ -426,13 +598,9 @@ function drawnOnAxes(spec, theme) {
       return;
     }
     if (horizontal) {
-      parts.push(
-        `<text x="${plot.left - 8}" y="${(centre(index) + 4).toFixed(1)}" text-anchor="end" font-family="${FONT}" font-size="12" fill="${theme.secondary}">${escaped(label)}</text>`,
-      );
+      parts.push(text(plot.left - 8, centre(index) + 4, label, { size: 12, fill: theme.soft, anchor: 'end' }));
     } else {
-      parts.push(
-        `<text x="${centre(index).toFixed(1)}" y="${plot.bottom + 18}" text-anchor="middle" font-family="${FONT}" font-size="12" fill="${theme.secondary}">${escaped(label)}</text>`,
-      );
+      parts.push(text(centre(index), plot.bottom + 18, label, { size: 12, fill: theme.soft, anchor: 'middle' }));
     }
   });
 
@@ -485,16 +653,19 @@ function drawnAsBars(spec, theme, parts, stacks, axes) {
 
       /* One series, a dozen bars or fewer: the value at the tip, in ink. */
       if (single) {
-        const said = escaped(labelled(point.to, spec.unit));
+        const said = labelled(point.to, spec.unit);
         if (axes.horizontal) {
-          const x = grows ? to + 6 : to - 6;
           parts.push(
-            `<text x="${x.toFixed(1)}" y="${(across + thickness / 2 + 4).toFixed(1)}" text-anchor="${grows ? 'start' : 'end'}" font-family="${FONT}" font-size="12" fill="${theme.ink}">${said}</text>`,
+            text(grows ? to + 6 : to - 6, across + thickness / 2 + 4, said, {
+              size: 12,
+              face: FACES.mono,
+              fill: theme.ink,
+              anchor: grows ? 'start' : 'end',
+            }),
           );
         } else {
-          const y = grows ? to - 6 : to + 14;
           parts.push(
-            `<text x="${(across + thickness / 2).toFixed(1)}" y="${y.toFixed(1)}" text-anchor="middle" font-family="${FONT}" font-size="12" fill="${theme.ink}">${said}</text>`,
+            text(across + thickness / 2, grows ? to - 7 : to + 14, said, { size: 12, face: FACES.mono, fill: theme.ink, anchor: 'middle' }),
           );
         }
       }
@@ -561,9 +732,7 @@ function drawnAsLines(spec, theme, parts, stacks, axes) {
   const collide = sorted.some((end, at) => at > 0 && end.y - sorted[at - 1].y < 14);
   if (!collide) {
     for (const end of ends) {
-      parts.push(
-        `<text x="${(end.x + MARK.marker + MARK.ring + 4).toFixed(1)}" y="${(end.y + 4).toFixed(1)}" font-family="${FONT}" font-size="12" fill="${theme.ink}">${escaped(end.text)}</text>`,
-      );
+      parts.push(text(end.x + MARK.marker + MARK.ring + 5, end.y + 4, end.text, { size: 12, face: FACES.mono, fill: theme.ink }));
     }
   }
 }
@@ -583,8 +752,8 @@ function drawnAsPie(spec, theme) {
 
   const cx = (plot.left + plot.right) / 2;
   const cy = (plot.top + plot.bottom) / 2;
-  const radius = Math.min((plot.bottom - plot.top) / 2 - 24, (plot.right - plot.left) / 2 - 140);
-  const hole = spec.kind === 'donut' ? radius * 0.6 : 0;
+  const radius = Math.min((plot.bottom - plot.top) / 2 - 16, (plot.right - plot.left) / 2 - 150);
+  const hole = spec.kind === 'donut' ? radius * 0.62 : 0;
 
   let angle = -Math.PI / 2;
   const labels = [];
@@ -617,7 +786,8 @@ function drawnAsPie(spec, theme) {
     const mid = (from + to) / 2;
     labels.push({
       angle: mid,
-      text: `${spec.labels[at]}  ${formatted((value / total) * 100)}%`,
+      name: spec.labels[at],
+      share: `${formatted((value / total) * 100)}%`,
       right: Math.cos(mid) >= 0,
     });
   });
@@ -632,28 +802,27 @@ function drawnAsPie(spec, theme) {
     let floor = -Infinity;
     for (const label of own) {
       let y = cy + (radius + 22) * Math.sin(label.angle);
-      if (y < floor + 16) y = floor + 16;
+      if (y < floor + 18) y = floor + 18;
       floor = y;
       const anchorX = cx + (radius + 6) * Math.cos(label.angle);
       const anchorY = cy + (radius + 6) * Math.sin(label.angle);
-      const x = side ? cx + radius + 22 : cx - radius - 22;
+      const x = side ? cx + radius + 24 : cx - radius - 24;
       parts.push(
-        `<polyline points="${anchorX.toFixed(1)},${anchorY.toFixed(1)} ${(side ? x - 6 : x + 6).toFixed(1)},${y.toFixed(1)}" fill="none" stroke="${theme.axis}" stroke-width="1"/>`,
+        `<polyline points="${anchorX.toFixed(1)},${anchorY.toFixed(1)} ${(side ? x - 8 : x + 8).toFixed(1)},${y.toFixed(1)}" fill="none" stroke="${theme.rule}" stroke-width="1"/>`,
       );
+      const anchor = side ? 'start' : 'end';
+      const nameWidth = widthOf(label.name, 12);
+      parts.push(text(x, y + 4, label.name, { size: 12, fill: theme.soft, anchor }));
       parts.push(
-        `<text x="${x.toFixed(1)}" y="${(y + 4).toFixed(1)}" text-anchor="${side ? 'start' : 'end'}" font-family="${FONT}" font-size="12" fill="${theme.secondary}">${escaped(label.text)}</text>`,
+        text(side ? x + nameWidth + 8 : x - nameWidth - 8, y + 4, label.share, { size: 12, face: FACES.mono, fill: theme.ink, anchor }),
       );
     }
   }
 
   /* The donut's hole holds the total: the one number the whole chart adds up to. */
   if (hole > 0) {
-    parts.push(
-      `<text x="${cx.toFixed(1)}" y="${(cy + 6).toFixed(1)}" text-anchor="middle" font-family="${FONT}" font-size="22" font-weight="700" fill="${theme.ink}">${escaped(labelled(total, spec.unit))}</text>`,
-    );
-    parts.push(
-      `<text x="${cx.toFixed(1)}" y="${(cy + 24).toFixed(1)}" text-anchor="middle" font-family="${FONT}" font-size="12" fill="${theme.muted}">total</text>`,
-    );
+    parts.push(text(cx, cy + 8, labelled(total, spec.unit, true), { size: 26, face: FACES.display, fill: theme.ink, weight: 700, anchor: 'middle' }));
+    parts.push(text(cx, cy + 26, 'total', { size: 11, face: FACES.mono, fill: theme.faint, anchor: 'middle', spacing: 1 }));
   }
 
   return parts;
@@ -752,14 +921,16 @@ JSON, as the first argument:
 
     {
       "type": "column",
+      "eyebrow": "Finance · Q1-Q4 2026",
       "title": "Revenue by quarter",
-      "subtitle": "2026, in thousands",
+      "subtitle": "In thousands, before tax",
       "unit": "$",
       "labels": ["Q1", "Q2", "Q3", "Q4"],
       "series": [
         { "name": "Product", "values": [412, 468, 455, 521] },
         { "name": "Services", "values": [120, 131, 149, 158] }
-      ]
+      ],
+      "source": "Source: the finance workbook, 25 September 2026"
     }
 
 - \`labels\` are the categories along the axis, or the slices of a pie.
@@ -768,7 +939,14 @@ JSON, as the first argument:
   \`"values": [...]\` at the top level instead. A \`null\` is a gap.
 - \`unit\` is written on every number: a currency sign before it, \`%\` or a
   word after it.
+- \`eyebrow\` is the small line above the title saying what the chart is
+  about - a team, a period, a system. \`source\` is the footer line saying
+  where the numbers came from. Both are worth filling in: a picture posted to
+  a channel has to make its point without the paragraph around it.
 - \`stacked\` stacks the series of a bar, column or area chart.
+- The row of figures above the plot - each series' total or latest value and
+  how far it moved, or total, average and latest for one series - is drawn
+  by default. \`"summary": false\` leaves it out.
 
 **Eight series at most**, and the eighth is already hard to tell from the
 third. Fold the small ones into "Other" before you get there.
@@ -859,19 +1037,22 @@ artifact for them to go and find.`,
       new OrknuxFunction({
         name: 'render',
         description:
-          'Draws a chart right here - no service, no browser - from a JSON spec: {"type", "title", ' +
-          '"subtitle", "unit", "labels", "series": [{"name", "values"}], "stacked"}. type is bar, ' +
-          'column, line, area, pie or donut; labels are the categories along the axis or the slices ' +
-          'of a pie; each series has one value per label, null for a gap, and a single series may ' +
-          'be written as "values" alone. unit goes on every number - a currency sign before, % or ' +
-          'a word after. Up to eight series, in a fixed order of hues that stay apart under ' +
-          'colour-blindness; one axis, a legend for two series or more, values labelled at the end ' +
-          'of a line and on the bars of a single series. theme is light (the default) or dark. ' +
-          'format is png (the default) for a picture people can see, or svg for the markup; width ' +
-          'is the picture width in pixels, 1200 when left out. Answers png as base64 or svg as ' +
-          'text, the byte count, the width and height it came out at, and a short key the answer ' +
-          'is kept under for this session - pass that key to slack_uploadBinary rather than ' +
-          'copying the answer out.',
+          'Draws a chart right here - no service, no browser - from a JSON spec: {"type", "eyebrow", ' +
+          '"title", "subtitle", "unit", "labels", "series": [{"name", "values"}], "stacked", ' +
+          '"source", "summary"}. type is bar, column, line, area, pie or donut; labels are the ' +
+          'categories along the axis or the slices of a pie; each series has one value per label, ' +
+          'null for a gap, and a single series may be written as "values" alone. unit goes on ' +
+          'every number - a currency sign before, % or a word after. eyebrow is the small line ' +
+          'above the title saying what the chart is about; source is the footer line saying where ' +
+          'the numbers came from. A row of figures above the plot - each series\' total or latest ' +
+          'value and how far it moved - is drawn unless summary is false. Up to eight series, in a ' +
+          'fixed order of hues that stay apart under colour-blindness; one axis; values labelled at ' +
+          'the end of a line and on the bars of a single series. theme is light (the default) or ' +
+          'dark. format is png (the default) for a picture people can see, or svg for the markup; ' +
+          'width is the picture width in pixels, 1200 when left out. Answers png as base64 or svg ' +
+          'as text, the byte count, the width and height it came out at, and a short key the ' +
+          'answer is kept under for this session - pass that key to slack_uploadBinary rather ' +
+          'than copying the answer out.',
         params: [
           { name: 'spec', type: 'string' },
           { name: 'theme', type: 'string', required: false, default: 'light' },

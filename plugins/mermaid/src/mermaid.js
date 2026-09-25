@@ -54,6 +54,45 @@ function base64url(bytes) {
 /** The themes the live editor knows; anything else falls back rather than breaking a link. */
 const LINK_THEMES = ['default', 'dark', 'forest', 'neutral'];
 
+/**
+ * The palettes, the house pair first.
+ *
+ * `light` and `dark` are the same tokens the charts plugin draws in - cool
+ * neutrals, ink that is not quite black, the series blue as the accent - so
+ * a diagram and a chart posted to the same channel read as one family. The
+ * face is the text face the charts plugin sets its labels in; one name only,
+ * because the library quotes what it is given and puts `system-ui,
+ * sans-serif` after it, so a stack here would be a stack inside quotes. The
+ * rest are the library's, by their names, for anybody who wants Nord.
+ *
+ * `light` is what a theme left out means.
+ */
+const FACE = 'Source Sans 3';
+
+const PALETTES = {
+  light: {
+    bg: '#ffffff',
+    fg: '#131a20',
+    line: '#4a5865',
+    accent: '#2a78d6',
+    muted: '#71808c',
+    surface: '#eef2f4',
+    border: '#4a5865',
+    font: FACE,
+  },
+  dark: {
+    bg: '#141a1f',
+    fg: '#e6ecf0',
+    line: '#a6b4be',
+    accent: '#3987e5',
+    muted: '#7a8994',
+    surface: '#1c262d',
+    border: '#a6b4be',
+    font: FACE,
+  },
+  ...THEMES,
+};
+
 /** The rendered SVG with the one outward reference — the Inter @import — taken out. */
 function offline(svg) {
   return drawableAnywhere(svg.replace(/^\s*@import url\([^)]*\);\s*$/m, ''));
@@ -601,10 +640,12 @@ number you asked for: a diagram that laid itself out 800 units wide, asked for
 small" this paragraph used to cause. Name one only when something downstream
 needs an exact width.
 
-\`theme\` is a palette by name: \`zinc-light\`, \`zinc-dark\`, \`tokyo-night\`,
-\`catppuccin-mocha\`, \`catppuccin-latte\`, \`nord\`, \`dracula\`, \`github-dark\`,
-\`solarized-light\`, \`one-dark\` and others - left out for the light default. A
-name it does not know is refused with the list.
+\`theme\` is a palette by name. \`light\` (the default) and \`dark\` are the house
+pair - the same neutrals and accent the charts plugin draws in, so a diagram
+and a chart in one message read as one family. The library's own are there
+by name too: \`zinc-light\`, \`zinc-dark\`, \`tokyo-night\`, \`catppuccin-mocha\`,
+\`catppuccin-latte\`, \`nord\`, \`dracula\`, \`github-dark\`, \`solarized-light\`,
+\`one-dark\` and others. A name it does not know is refused with the list.
 
 ## Getting it to somebody
 
@@ -748,8 +789,9 @@ drawn here - change the tool, not the diagram.`,
           'Renders mermaid source to SVG right here - no external service, no browser. Takes ' +
           'flowchart/graph, sequenceDiagram, stateDiagram-v2, classDiagram and erDiagram; another ' +
           'kind (pie, gantt, mindmap, ...) is refused by name - use links for those. theme names a ' +
-          'palette (zinc-light, zinc-dark, tokyo-night, catppuccin-mocha, catppuccin-latte, nord, ' +
-          '...), left out for the light default. format is png (the default) for a picture people ' +
+          'palette: light (the default) and dark are the house pair the charts plugin shares, and ' +
+          'the library\'s own - zinc-light, zinc-dark, tokyo-night, catppuccin-mocha, nord, ... - ' +
+          'are there by name. format is png (the default) for a picture people ' +
           'can see, or svg for the markup; width sets the picture width in pixels, left out to ' +
           'be sized for reading - twice what the diagram laid itself out at, brought up where ' +
           'that is still small, and capped on area rather than on either side. Answers png as ' +
@@ -772,12 +814,12 @@ drawn here - change the tool, not the diagram.`,
             throw new Error('there is no diagram source to render');
           }
 
-          let palette;
+          let palette = PALETTES.light;
           if (typeof theme === 'string' && theme.length > 0) {
-            palette = THEMES[theme];
+            palette = PALETTES[theme];
             if (palette === undefined) {
               throw new Error(
-                `no theme called ${theme}: the themes are ${Object.keys(THEMES).join(', ')}`,
+                `no theme called ${theme}: the themes are ${Object.keys(PALETTES).join(', ')}`,
               );
             }
           }

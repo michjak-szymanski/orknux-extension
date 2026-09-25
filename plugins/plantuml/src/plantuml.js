@@ -84,6 +84,62 @@ const FAILED = /\[From \w+ \(line (\d+)\)\s*\]/;
  */
 const FACE = 'Helvetica,Arial,&quot;Liberation Sans&quot;,sans-serif';
 
+/**
+ * The house pair, as the style block PlantUML reads.
+ *
+ * The same neutrals the charts, mermaid and nomnoml plugins draw in - a cool
+ * off-white fill inside an ink outline that is not quite black, the series
+ * blue for arrows - so a diagram and a chart posted together read as one
+ * family. `root` sets every element at once; the rest are the few PlantUML
+ * paints from a different place. Written as a `<style>` block rather than
+ * skinparams because one block covers every diagram kind, and put after the
+ * `@start` line because that is the only place PlantUML reads it.
+ *
+ * A theme left out draws PlantUML's own, which is what every diagram drawn
+ * before this looked like and what a source carrying its own skinparams
+ * expects to be left alone.
+ */
+const THEMES = {
+  light: {
+    bg: '#ffffff', fg: '#131a20', line: '#4a5865', fill: '#eef2f4', arrow: '#2a78d6', muted: '#71808c',
+  },
+  dark: {
+    bg: '#141a1f', fg: '#e6ecf0', line: '#a6b4be', fill: '#1c262d', arrow: '#3987e5', muted: '#7a8994',
+  },
+};
+
+function styleOf(theme) {
+  return [
+    '<style>',
+    `root { BackgroundColor ${theme.bg}; FontColor ${theme.fg}; LineColor ${theme.line}; LineThickness 1.2; }`,
+    `document { BackgroundColor ${theme.bg}; }`,
+    `arrow { LineColor ${theme.arrow}; FontColor ${theme.fg}; }`,
+    `element { BackgroundColor ${theme.fill}; LineColor ${theme.line}; RoundCorner 6; }`,
+    `note { BackgroundColor ${theme.fill}; LineColor ${theme.muted}; FontColor ${theme.fg}; }`,
+    `title { FontColor ${theme.fg}; FontSize 15; FontStyle bold; }`,
+    `sequenceDiagram { lifeLine { LineColor ${theme.muted}; LineStyle 4-4; } }`,
+    '</style>',
+  ].join('\n');
+}
+
+/**
+ * The source with the house style put where PlantUML reads it: after the
+ * `@start` line. A source with no such line is handed over as it is, because
+ * PlantUML is about to refuse it anyway and the refusal should be about the
+ * source, not about a block this plugin added.
+ */
+function styled(source, theme) {
+  const named = typeof theme === 'string' ? theme.trim().toLowerCase() : '';
+  if (named === '') {
+    return source;
+  }
+  const palette = THEMES[named];
+  if (palette === undefined) {
+    throw new Error(`no theme called ${theme}: it is ${Object.keys(THEMES).join(' or ')}, or left out for PlantUML's own`);
+  }
+  return source.replace(/^(\s*@start\w+[^\n]*\n)/, `$1${styleOf(palette)}\n`);
+}
+
 /** How wide a picture is drawn when nobody says — twice its own size, so it can be read. */
 const READABLE = 2;
 
@@ -524,7 +580,7 @@ whichever server the workspace configured. Drawing does not.`,
           'because then it is the only copy there is.',
         params: drawing.params,
         returnType: drawing.returnType,
-        run: (source, format, width) => keyedOnly(drawing.run(source, format, width)),
+        run: (source, format, width, theme) => keyedOnly(drawing.run(source, format, width, theme)),
       }),
       new OrknuxFunctionTool({ function: 'check' }),
       new OrknuxFunctionTool({ function: 'links' }),
@@ -545,21 +601,25 @@ whichever server the workspace configured. Drawing does not.`,
           'base64 or the markup as text, the size it came out, and a short key the answer is kept ' +
           'under for this session - pass that key on rather than copying the bytes. A diagram ' +
           'PlantUML cannot read is refused with the message and the line it stopped on, so fix ' +
-          'that line rather than drawing the same source again.',
+          'that line rather than drawing the same source again. theme is light or dark - the house ' +
+          'pair the charts, mermaid and nomnoml plugins share, so a diagram and a chart posted ' +
+          'together read as one family - or left out for PlantUML\'s own look, which a source ' +
+          'carrying its own skinparams should ask for.',
         params: [
           { name: 'source', type: 'string' },
           { name: 'format', type: 'string', required: false, default: 'png' },
           { name: 'width', type: 'number', required: false, default: 0 },
+          { name: 'theme', type: 'string', required: false, default: '' },
         ],
         returnType: 'Drawing',
-        run: (source, format, width) => {
+        run: (source, format, width, theme) => {
           const asked = typeof format === 'string' && format.length > 0 ? format.toLowerCase() : 'png';
           if (!FORMATS.includes(asked)) {
             throw new Error(`no format called ${format}: it is ${FORMATS.join(' or ')}`);
           }
 
           const text = typeof source === 'string' ? source : '';
-          const svg = faced(drawn(text));
+          const svg = faced(drawn(styled(text, theme)));
 
           /* PlantUML draws its refusals. This turns one back into a refusal. */
           const problem = problemWith(svg, text.trim());
