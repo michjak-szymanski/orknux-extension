@@ -6,8 +6,8 @@
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2020-brightgreen)](package.json)
 [![Licence](https://img.shields.io/badge/licence-Apache--2.0-blue)](LICENSE)
 
-Sixteen production plugins — Slack, GitHub, Jira, Confluence, Jenkins,
-Prometheus, Mermaid, PlantUML, nomnoml, PDF, web search, HTTP and more — with
+Seventeen production plugins — Slack, GitHub, Jira, Confluence, Jenkins,
+Prometheus, Mermaid, PlantUML, nomnoml, Charts, PDF, web search, HTTP and more — with
 the library and CLI to write your own.
 
 Extending [orknux-server](https://github.com/michjak-szymanski/orknux-server):
@@ -105,6 +105,13 @@ state machines — rendered in the sandbox at eighty kilobytes, asking for no
 capability and no permission at all.
 
     https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/nomnoml/nomnoml.js
+
+**[charts](plugins/charts/charts.js)** draws the shape of a number — bar, column,
+line, area, pie and donut — from a JSON spec, in the sandbox, with nothing
+bundled and nothing fetched: eight hues in an order that stays apart under
+colour-blindness, one axis, thin marks, a legend when there are two series.
+
+    https://raw.githubusercontent.com/michjak-szymanski/orknux-extension/main/plugins/charts/charts.js
 
 **[pdf](plugins/pdf/pdf.js)** lays HTML out as a PDF on A4, mermaid diagrams
 drawn into the page as vectors. Writer, fonts and renderer are all bundled in.

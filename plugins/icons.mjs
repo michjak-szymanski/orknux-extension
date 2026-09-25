@@ -130,6 +130,11 @@ const DRAWN = [
     ],
   },
   {
+    plugin: 'charts',
+    title: 'Three columns on a baseline',
+    paths: ['M3 20.5h18', 'M6 16.5v-6', 'M12 16.5V5.5', 'M18 16.5v-9'],
+  },
+  {
     plugin: 'todo',
     title: 'A list with its first items checked off',
     paths: ['m3.5 7.5 2 2 3.5-4', 'm3.5 17 2 2 3.5-4', 'M13 7.5h7.5', 'M13 17h7.5'],

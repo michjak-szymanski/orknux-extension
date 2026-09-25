@@ -737,6 +737,12 @@ test('the makers of bytes answer their agents a key, not the bytes', async () =>
     const cases = [
       { plugin: 'mermaid', call: 'render', args: ['graph TD\n  A-->B', '', 'svg', 0], payload: 'svg' },
       { plugin: 'nomnoml', call: 'render', args: ['[a] -> [b]', '', '', 'svg', 0], payload: 'svg' },
+      {
+        plugin: 'charts',
+        call: 'render',
+        args: ['{"type":"column","labels":["a","b"],"values":[1,2]}', '', 'svg', 0],
+        payload: 'svg',
+      },
       /*
        * Not compared across two runs: jsPDF stamps a creation date into the
        * file, so the same html twice is not the same bytes and not the same
@@ -3938,6 +3944,7 @@ test('the sweeps below are sweeping something', () => {
    * whole-repository invariants to nothing at all.
    */
   assert.deepEqual(everyPlugin, [
+    'charts',
     'confluence',
     'date',
     'github',
@@ -4028,6 +4035,137 @@ test('a default is of the type its parameter declared', async () => {
         );
       }
     }
+  }
+});
+
+test('the charts plugin declares what the server would accept, and draws offline', async () => {
+  const inspected = await inspect(shipped('charts'));
+
+  assert.equal(inspected.id, 'charts');
+  assert.deepEqual(validate(inspected), []);
+  assert.deepEqual(inspected.parameters, []);
+  /* No permission, and one capability: the one thing this sandbox cannot do is rasterise. */
+  assert.deepEqual(inspected.permissions, []);
+  assert.deepEqual(inspected.capabilities, ['RENDER_PNG']);
+  assert.deepEqual(inspected.functions.map((declared) => declared.name), ['render']);
+  assert.deepEqual(inspected.tools.map((declared) => declared.name), ['render']);
+
+  const url = new URL(`../../plugins/charts/charts.js`, import.meta.url);
+  const { default: Charts } = await import(url.href);
+  const render = new Charts().functions().find((declared) => declared.name === 'render').run;
+
+  const spec = JSON.stringify({
+    type: 'column',
+    title: 'Revenue by quarter',
+    unit: '$',
+    labels: ['Q1', 'Q2', 'Q3', 'Q4'],
+    series: [
+      { name: 'Product', values: [412, 468, 455, 521] },
+      { name: 'Services', values: [120, 131, 149, 158] },
+    ],
+  });
+
+  /* Drawn right here, in a Node with no DOM - the sandbox's own situation. */
+  const drawn = render(spec, '', 'svg', 0);
+  assert.ok(drawn.svg.startsWith('<svg'), 'renders svg');
+  assert.equal(drawn.bytes, drawn.svg.length);
+  assert.equal(drawn.width, 800);
+  assert.equal(drawn.height, 480);
+  assert.ok(drawn.svg.includes('Revenue by quarter'), 'the title is set');
+  assert.ok(drawn.svg.includes('>Product<') && drawn.svg.includes('>Services<'), 'two series get a legend');
+  assert.ok(drawn.svg.includes('$1,000') || drawn.svg.includes('$500'), 'ticks carry the unit and a thousands separator');
+  assert.ok(!/https?:\/\/(?!www\.w3\.org)/.test(drawn.svg), 'no remote reference');
+  /* The markup is what the rasteriser will be handed, so it has to say its size and use no CSS. */
+  handedOver(drawn.svg, 800);
+
+  /* One series: no legend, and the value on each bar. */
+  const single = render('{"type":"bar","labels":["a","b"],"values":[1500,2500]}', '', 'svg', 0).svg;
+  assert.ok(single.includes('>1,500<') && single.includes('>2,500<'), 'a single series labels its bars');
+  assert.ok(!single.includes('rx="2"'), 'and gets no legend swatch');
+
+  /* Every kind draws, in both themes. */
+  for (const type of ['bar', 'column', 'line', 'area', 'pie', 'donut']) {
+    for (const theme of ['light', 'dark']) {
+      const one = render(JSON.stringify({ type, labels: ['a', 'b', 'c'], values: [3, 2, 1] }), theme, 'svg', 0);
+      assert.ok(one.svg.includes('<svg'), `${type} draws in ${theme}`);
+    }
+  }
+  assert.ok(render('{"type":"donut","labels":["a","b"],"values":[3,1]}', '', 'svg', 0).svg.includes('>total<'), 'a donut holds its total');
+  assert.ok(render('{"type":"pie","labels":["a","b"],"values":[3,1]}', '', 'svg', 0).svg.includes('75%'), 'a pie labels its shares');
+
+  /* The dark theme paints the dark surface. */
+  assert.ok(render(spec, 'dark', 'svg', 0).svg.includes('#1a1a19'), 'the theme colours the drawing');
+
+  /* Text that is markup is escaped, not executed. */
+  const escaped = render('{"type":"column","title":"<b>&","labels":["<x>"],"values":[1]}', '', 'svg', 0).svg;
+  assert.ok(escaped.includes('&lt;b&gt;&amp;') && !escaped.includes('<b>'), 'a title is text');
+
+  /* Refused with a sentence naming what was expected. */
+  assert.throws(() => render('{"type":"radar","labels":["a"],"values":[1]}', '', 'svg', 0), /no chart type called radar: it is bar, column, line, area, pie or donut/);
+  assert.throws(() => render('{"type":"column","labels":["a","b"],"values":[1]}', '', 'svg', 0), /has 1 values for 2 labels/);
+  assert.throws(() => render('{"type":"pie","labels":["a"],"series":[{"values":[1]},{"values":[2]}]}', '', 'svg', 0), /a pie shows one series/);
+  assert.throws(() => render('{"type":"pie","labels":["a","b"],"values":[1,-1]}', '', 'svg', 0), /cannot show a negative value/);
+  assert.throws(
+    () => render(JSON.stringify({ type: 'line', labels: ['a'], series: Array.from({ length: 9 }, () => ({ values: [1] })) }), '', 'svg', 0),
+    /9 series is more than the 8/,
+  );
+  assert.throws(() => render('{"type":"column","labels":["a"],"values":["x"]}', '', 'svg', 0), /not a number at position 1/);
+  assert.throws(() => render('not json', '', 'svg', 0), /the spec is not JSON/);
+  assert.throws(() => render(spec, 'sepia', 'svg', 0), /no theme called sepia: it is light or dark/);
+  assert.throws(() => render(spec, '', 'jpeg', 0), /no format called jpeg/);
+  assert.throws(() => render('   ', '', 'svg', 0), /no spec to draw/);
+
+  /* A picture is the default, and out here there is no renderer to draw one. */
+  assert.throws(() => render(spec), /could not draw the chart: there is no renderer here/);
+
+  /* Outside a session the fallback store keeps nothing, and the key says so. */
+  assert.equal(drawn.key, '', 'no session, no key');
+
+  /* Given one, the key names exactly the bytes that were answered, and the same spec lands on the same key. */
+  const held = new Map();
+  const store = globalThis.orknux.session.store;
+  globalThis.orknux.session.store = {
+    put: (key, value) => {
+      held.set(key, value);
+      return { ok: true };
+    },
+    get: (key) => (held.has(key) ? held.get(key) : null),
+  };
+  try {
+    const kept = render(spec, '', 'svg', 0);
+    assert.ok(kept.key.startsWith('charts.'), 'the key is named for its plugin');
+    assert.equal(held.get(kept.key), kept.svg, 'what is kept is what was answered');
+    assert.equal(render(spec, '', 'svg', 0).key, kept.key, 'the same spec lands on the same key');
+
+    /* The tool answers the key and not the drawing; the function answers both. */
+    const tool = new Charts().tools().find((declared) => declared.name === 'render');
+    const said = tool.run(spec, '', 'svg', 0);
+    assert.equal(said.svg, '', 'the tool strips the markup');
+    assert.equal(said.key, kept.key, 'and names the same bytes');
+  } finally {
+    globalThis.orknux.session.store = store;
+  }
+
+  /* A png is the server's drawing, asked for at 1200 across with the height in proportion. */
+  const render_ = globalThis.orknux.render;
+  let handed = null;
+  globalThis.orknux.render = {
+    pngFromSvg: (svg, width) => {
+      handed = { svg, width };
+      return { base64: 'UE5H', bytes: 3, width, height: Math.round((width * 480) / 800) };
+    },
+  };
+  try {
+    const png = render(spec, '', 'png', 0);
+    assert.equal(handed.width, 1200);
+    assert.equal(png.width, 1200);
+    assert.equal(png.height, 720);
+    assert.equal(png.png, 'UE5H');
+    assert.equal(png.svg, '');
+    handedOver(handed.svg, 1200);
+    assert.equal(render(spec, '', 'png', 600).width, 600, 'a caller who names a width gets it');
+  } finally {
+    globalThis.orknux.render = render_;
   }
 });
 
