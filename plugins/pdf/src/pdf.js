@@ -132,26 +132,109 @@ const STYLES = {
   item: { size: 11, bold: false, before: 0, after: 2 },
 };
 
-/** The entities worth knowing by name; the numeric kind is decoded by value. */
+/**
+ * The entities worth knowing by name; the numeric kind is decoded by value.
+ *
+ * Every letter the bundled face can set has its name here, because a model
+ * writing HTML spells a letter it is unsure of as an entity - `&oacute;`,
+ * `&#322;` - rather than typing it. An entity nobody decodes is set as its
+ * own eight characters, and a document that reads `Za&oacute;` where it
+ * should read `Zaó` is a document in the wrong language.
+ *
+ * Case matters, and is kept: `&Oacute;` and `&oacute;` are two letters.
+ */
 const ENTITIES = {
   amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
   ndash: '–', mdash: '—', hellip: '…', bull: '•',
+  lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', rarr: '→',
   middot: '·', copy: '©', reg: '®', trade: '™',
   deg: '°', laquo: '«', raquo: '»', sect: '§', euro: '€',
+  para: '\u00b6', shy: '\u00ad', iexcl: '¡', iquest: '¿', pound: '£', yen: '¥',
+  cent: '¢', plusmn: '±', frac12: '½', frac14: '¼', frac34: '¾',
+  sup2: '²', sup3: '³', micro: 'µ', times: '×', divide: '÷',
 };
+
+/*
+ * The Latin-1 letters, U+00C0 to U+00FF, in the order the block holds them -
+ * which is the order HTML names them in, `times` and `divide` included above
+ * as the two that are not letters.
+ */
+(
+  'Agrave Aacute Acirc Atilde Auml Aring AElig Ccedil Egrave Eacute Ecirc Euml Igrave Iacute Icirc Iuml ' +
+  'ETH Ntilde Ograve Oacute Ocirc Otilde Ouml times Oslash Ugrave Uacute Ucirc Uuml Yacute THORN szlig ' +
+  'agrave aacute acirc atilde auml aring aelig ccedil egrave eacute ecirc euml igrave iacute icirc iuml ' +
+  'eth ntilde ograve oacute ocirc otilde ouml divide oslash ugrave uacute ucirc uuml yacute thorn yuml'
+)
+  .split(' ')
+  .forEach((name, at) => {
+    ENTITIES[name] = String.fromCodePoint(0xc0 + at);
+  });
+
+/*
+ * And the Latin Extended-A letters the README promises a language for -
+ * Polish, Czech, Slovak, Hungarian, Romanian, Turkish, the Baltics - by their
+ * HTML names, with the code point beside each because that is what a reader
+ * checking one wants to see.
+ */
+for (const [name, point] of [
+  ['Aogon', 0x104], ['aogon', 0x105], ['Cacute', 0x106], ['cacute', 0x107],
+  ['Eogon', 0x118], ['eogon', 0x119], ['Lstrok', 0x141], ['lstrok', 0x142],
+  ['Nacute', 0x143], ['nacute', 0x144], ['Sacute', 0x15a], ['sacute', 0x15b],
+  ['Zacute', 0x179], ['zacute', 0x17a], ['Zdot', 0x17b], ['zdot', 0x17c],
+  ['Ccaron', 0x10c], ['ccaron', 0x10d], ['Dcaron', 0x10e], ['dcaron', 0x10f],
+  ['Ecaron', 0x11a], ['ecaron', 0x11b], ['Ncaron', 0x147], ['ncaron', 0x148],
+  ['Rcaron', 0x158], ['rcaron', 0x159], ['Scaron', 0x160], ['scaron', 0x161],
+  ['Tcaron', 0x164], ['tcaron', 0x165], ['Uring', 0x16e], ['uring', 0x16f],
+  ['Zcaron', 0x17d], ['zcaron', 0x17e], ['Lacute', 0x139], ['lacute', 0x13a],
+  ['Racute', 0x154], ['racute', 0x155], ['Odblac', 0x150], ['odblac', 0x151],
+  ['Udblac', 0x170], ['udblac', 0x171], ['Abreve', 0x102], ['abreve', 0x103],
+  ['Scedil', 0x15e], ['scedil', 0x15f], ['Tcedil', 0x162], ['tcedil', 0x163],
+  ['Gbreve', 0x11e], ['gbreve', 0x11f], ['Idot', 0x130], ['inodot', 0x131],
+  ['Amacr', 0x100], ['amacr', 0x101], ['Emacr', 0x112], ['emacr', 0x113],
+  ['Imacr', 0x12a], ['imacr', 0x12b], ['Omacr', 0x14c], ['omacr', 0x14d],
+  ['Umacr', 0x16a], ['umacr', 0x16b], ['Iogon', 0x12e], ['iogon', 0x12f],
+  ['Uogon', 0x172], ['uogon', 0x173], ['Gcedil', 0x122], ['gcedil', 0x123],
+  ['Kcedil', 0x136], ['kcedil', 0x137], ['Lcedil', 0x13b], ['lcedil', 0x13c],
+  ['Ncedil', 0x145], ['ncedil', 0x146], ['OElig', 0x152], ['oelig', 0x153],
+  ['Yuml', 0x178],
+]) {
+  ENTITIES[name] = String.fromCodePoint(point);
+}
 
 /** HTML text with its entities decoded. */
 function decoded(text) {
-  return text.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (whole, name) => {
+  return text.replace(/&(#x?[0-9a-f]+|[a-z][a-z0-9]*);/gi, (whole, name) => {
     if (name[0] === '#') {
       const code = name[1] === 'x' || name[1] === 'X'
         ? parseInt(name.slice(2), 16)
         : parseInt(name.slice(1), 10);
       return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
     }
-    const known = ENTITIES[name.toLowerCase()];
+    /*
+     * As written first, because case is a letter: &Oacute; is not &oacute;.
+     * Then folded, for the names that have no capital of their own and were
+     * accepted in any case before this - &AMP; and &NBSP; still decode.
+     */
+    const known = ENTITIES[name] ?? ENTITIES[name.toLowerCase()];
     return known === undefined ? whole : known;
   });
+}
+
+/**
+ * Every character that will reach the page, decoded - what the alphabet
+ * is decided from.
+ *
+ * Decided from the blocks rather than from the html, because the html is not
+ * what gets set. `&#261;` is seven ASCII characters in the source and one
+ * Polish letter on the page, and a document written entirely that way -
+ * which is how a model writes a letter it is unsure of - tested as ASCII,
+ * was set in Helvetica, and came out as `Za|&oacute;B g[l jazD`. Diagram
+ * sources count too: their labels are drawn in the same face.
+ */
+function textOf(blocks) {
+  return blocks
+    .map((block) => (block.kind === 'diagram' ? block.source : block.runs.map((run) => run.text).join('')))
+    .join('\n');
 }
 
 /**
@@ -1322,16 +1405,17 @@ reads; the diagram is what they look at afterwards.`,
            * kilobytes instead of two hundred and seventy-seven, and no font
            * parsed at all.
            *
-           * Tested on the html rather than on what was laid out, because every
-           * character that reaches the page came from it - a diagram's labels
-           * included, since those are written in the source too.
+           * Tested on what was laid out rather than on the html, because the
+           * html is not what gets set: an entity is ASCII in the source and a
+           * letter on the page. See textOf.
            */
-          const unsettable = noteUnsettable(html);
+          const text = textOf(blocks);
+          const unsettable = noteUnsettable(text);
           if (unsettable !== '') {
             problems.push(unsettable);
           }
 
-          if (/[^\u0000-\u007f]/.test(html)) {
+          if (/[^\u0000-\u007f]/.test(text)) {
             doc.orknuxFace = 'DejaVu';
             doc.addFileToVFS('DejaVuSans.ttf', DEJAVU);
             doc.addFont('DejaVuSans.ttf', 'DejaVu', 'normal');

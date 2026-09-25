@@ -90,7 +90,7 @@ subset of HTML read into blocks, wrapped and paged onto A4.
 | Emphasis | `b` and `strong`. **`i`/`em` render regular** — a third and fourth font face would put the bundle over the size a plugin may be. |
 | Tables | Cells run together as text |
 | Diagrams | `<pre class="mermaid">` or `<mermaid>` — see below |
-| Entities | Named and numeric, decoded |
+| Entities | Named and numeric, decoded — every Latin letter by its name, `&oacute;` and `&lstrok;` included |
 
 Scripts, styles and comments are dropped whole. Every other tag is ignored and
 its text kept, so unknown markup degrades to its content rather than to an
@@ -135,6 +135,13 @@ producing an empty box.
 Two DejaVu faces travel inside the bundle as base64, so **ą, ř and ő are set
 as the letters they are** instead of being folded to a, r and o. Polish,
 Czech, Hungarian, the lot.
+
+Written as entities or as letters, whichever the author did: `&#322;` and
+`&lstrok;` are the same ł on the page, and a document spelled entirely in
+entities is set in DejaVu all the same. The face is chosen from what reaches
+the page, not from what the source looks like — a source that is pure ASCII
+because every letter in it is an entity used to be set in Helvetica, and came
+out as `Za|&oacute;B g[l jazD`.
 
 This is why the answer is binary. Getting real typography meant embedding real
 fonts, which meant the document leaves as base64 rather than as text — which

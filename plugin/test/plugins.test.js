@@ -3339,6 +3339,24 @@ test('the pdf plugin writes a pdf out of html, diagrams and all, without a DOM',
     'a document past ascii embeds the face that can set it',
   );
 
+  /*
+   * And the same letters written as entities - which is how a model writes a
+   * letter it is unsure of - get the same face. The source is pure ASCII;
+   * the page is not, and the page is what the alphabet is decided from. A
+   * document written this way was set in Helvetica and came out as
+   * `Za|&oacute;B g[l jazD`.
+   */
+  const entities = declared.run('<h1>Za&#380;&oacute;&#322;&cacute; g&eogon;&sacute;l&aogon;</h1>', '');
+  assert.ok(
+    Buffer.from(entities.base64, 'base64').toString('latin1').includes('DejaVu'),
+    'a document past ascii only once decoded embeds the face all the same',
+  );
+  assert.deepEqual(entities.problems, [], 'and nothing about it is unsettable');
+
+  /* Named entities keep their case: two letters, not one. */
+  const cased = declared.run('<p>&Oacute; and &oacute;</p>', '');
+  assert.ok(cased.bytes > 0);
+
   /* A mermaid block becomes vector drawing in the page, still offline. */
   const diagrammed = declared.run(
     '<h2>Flow</h2><pre class="mermaid">graph TD\n  A[start] --> B{ok?}\n  B -->|yes| C[done]</pre><p>After.</p>',
