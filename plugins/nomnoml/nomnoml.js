@@ -304,10 +304,10 @@ var In=Object.create;var at=Object.defineProperty;var Tn=Object.getOwnPropertyDe
 #spacing: 44
 #arrowSize: 0.8
 `,Zt={light:`${Qt}#background: #ffffff
-#fill: #eef2f4; #ffffff
+#fill: #eef2f4;#ffffff
 #stroke: #131a20
 `,dark:`${Qt}#background: #141a1f
-#fill: #1c262d; #26323b
+#fill: #1c262d;#26323b
 #stroke: #e6ecf0
 `,plain:"",mono:`#background: #ffffff
 #fill: #ffffff
