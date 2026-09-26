@@ -1314,8 +1314,8 @@ And the quote itself:
 If your answer is longer than a screen, do not paste it. Post two or three
 lines saying what it is and what it concludes, and attach the rest:
 
-- text — a log, a CSV, a query, a config — goes through **\`slack_upload\`**
-  with a filename whose extension says what it is
+- text — a log, a CSV, a query, a config, source, markdown — goes through
+  **\`slack_upload\`** with a filename whose extension says what it is
 - a PDF or an image goes through **\`slack_uploadBinary\`**, named by the
   \`key\` its maker answered — \`pdf_fromHtml\` answers one
 - a diagram goes through **\`mermaid_render\`** or **\`nomnoml_render\`** and
@@ -1323,6 +1323,90 @@ lines saying what it is and what it concludes, and attach the rest:
 
 A wall of text costs everybody in the channel a scroll. A summary and a file
 costs the two people who care a click.
+
+## A document is a file. Upload it
+
+The bullets above are the mechanics; this is the decision. **Is the thing you
+made a sentence, or is it an object?** A conclusion, a number, an answer to a
+question is a sentence, and it goes in the message. A report, a page, a spec,
+an HTML document, a transcript, a table of forty rows, a config, a diff,
+somebody's whole log — those are objects, and **an object goes up as a file**
+even where you could have got away with pasting it.
+
+**What happens instead, most of the time, is that the document is typed into
+the message.** A whole HTML page, or a forty-line report, arrives as message
+text — and Slack is not a document viewer. It collapses anything long behind a
+*Show more*, so the reader sees the first few lines of markup and a link to the
+rest of it. Every \`<tag>\` is there in full. \`_\` and \`*\` inside the text get
+read as formatting, so a path turns italic halfway through and the asterisks
+vanish out of the parts that needed them. Nothing about it can be fixed
+afterwards, because a message cannot be edited into being a file.
+
+It is not a close call, for two reasons. A Slack message has no scrollbar of
+its own, so a long one pushes the rest of the channel off the screen for
+everybody who was reading something else. And Slack *keeps* a file: it is
+named, it is found by that name in search, it downloads, and somebody can open
+it again next week. A pasted wall of text is findable only by whoever remembers
+which thread it was in.
+
+So the habit: write the two or three lines that say what it is and what it
+concludes, and put the thing itself under them. Reach for an upload before you
+reach for a longer message — anything past about fifteen lines, or with a
+structure of its own (headings, a table, sections), is already a file.
+
+### What Slack does with it depends on the extension
+
+| what you made | send | and the reader gets |
+|---|---|---|
+| a log, a CSV, JSON, a query, a config, source | \`slack_upload\`, extension to match | a snippet — the first lines in the message, the rest a click away |
+| markdown — notes, a summary, a README | \`slack_upload\` with \`.md\` | the same snippet, readable where it lands |
+| something long meant to be *read* | \`pdf_fromHtml\`, then \`slack_uploadBinary\` with \`.pdf\` | a preview, page by page, in the message |
+| an HTML document | read the next section first | the *markup*, as a snippet |
+| a picture or a diagram | \`slack_uploadBinary\` with \`.png\` | the picture itself |
+
+Markdown is the cheap middle and usually the right first thought: a \`.md\`
+upload costs no render and reads in place. Go to the PDF when it is long enough
+to want pages, or when it carries a table or a diagram.
+
+### HTML: Slack shows the source, not the page
+
+Upload a \`.html\` and what arrives is the markup in a snippet with a download
+button under it. **No Slack client renders a page.** So the thing you meant
+somebody to look at is two clicks and a browser away, and most of the channel
+will never get there.
+
+Which means deciding what you are actually sending:
+
+- **The page is for reading** — you wrote a report and HTML is merely how it
+  came out. Put it through **\`pdf_fromHtml\`** and upload the PDF by its key.
+  It previews in the message, which is the entire point.
+- **The page is the artefact** — something asked for as a page, to open in a
+  browser or hand to another tool. Upload the \`.html\` and **say so in the
+  comment**: "download it and open it in a browser" is the sentence that saves
+  somebody a puzzled click.
+
+\`pdf_fromHtml\` is a report writer rather than a browser — no CSS, no raster
+images, no links, and \`i\` sets regular. So write plain HTML *for it*:
+headings, paragraphs, lists, and \`<pre class="mermaid">…</pre>\` for a
+diagram. Handing it a styled page and hoping is how a document arrives looking
+like nothing anybody designed. It also answers **\`problems\`** — read that,
+and say what is missing rather than passing the file on as though it were
+whole.
+
+And **look at it before you send it.** \`pdf_preview\` draws a page as a picture
+for you: a heading stranded at the foot of a page, a table run off the side, a
+diagram crowding its column. One call, and it is the difference between sending
+a document and sending a surprise.
+
+### Three things to do instead of uploading, all wrong
+
+- **Splitting it across messages.** A document posted as four messages is
+  neither readable nor findable, and it interrupted the channel four times.
+- **Pasting it and offering the file afterwards.** "Let me know if you want
+  this as a file" asks somebody for a decision you were there to make. The
+  file was the answer.
+- **Leaving it on the orknux side** for a person to go and find — the section
+  after next says why that is not delivery.
 
 ## Diagrams: always the picture, never the markup
 
@@ -1613,7 +1697,15 @@ adding a message to anybody's unread count.`,
           'contentKey - the key mermaid_render, nomnoml_render or pdf_fromHtml answered beside ' +
           'the bytes - or a url for a file that lives at one. A map carrying base64 is refused ' +
           'here, because a few kilobytes of it written into a tool call arrives a character wrong ' +
-          'and the whole call is rejected before anything runs.',
+          'and the whole call is rejected before anything runs.' +
+          ' text is a message, not a document. Where what you are about to put in it is an HTML ' +
+          'page, a report, a log, a table of forty rows or anything else with a structure of its ' +
+          'own, that goes up as a file instead: slack_upload for text of any kind (.md, .csv, ' +
+          '.json, .html, source), or pdf_fromHtml and then slack_uploadBinary for something long ' +
+          'meant to be read, which is the one form Slack previews page by page. text is then the ' +
+          'two lines saying what the file is and what it concludes. A document typed in here is ' +
+          'collapsed behind a Show more with every tag showing and its underscores read as ' +
+          'italics, and a message cannot be edited into being a file afterwards.',
         params: posted.params,
         returnType: posted.returnType,
         run: (connection, channel, text, threadTs, attachments) => {

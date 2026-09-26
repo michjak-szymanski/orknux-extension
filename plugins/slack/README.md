@@ -425,5 +425,6 @@ revoked.
 a message people read from one they scroll past: run markdown through
 `markdown_toSlack` first, never hand-write a mention, reply in the thread,
 quote the message being answered when it is not the one directly above,
-attach rather than paste a wall of text. Granted like any other skill catalog;
+upload a document rather than typing it into a message — an HTML page above
+all, which Slack shows as markup — attach rather than paste a wall of text. Granted like any other skill catalog;
 nothing is automatic.
