@@ -197,6 +197,7 @@ export default class Deploys extends OrknuxPlugin {
     return [
       new OrknuxSkill({
         name: 'Rolling back a deploy',
+        id: 'rolling-back',
         description: 'What to do when a release is bad.',
         content: '# Rolling back\n\n- Stop the rollout first.\n- Then page the on-call.',
       }),
@@ -210,6 +211,17 @@ it, so `Rolling back a deploy` is a better name than `rolling_back`. The
 description is what an agent chooses from before loading anything, so it earns
 its place — "What to do when a release is bad" tells a model when to reach for
 the page, and "Deploy skill" does not.
+
+The `id` is the identifier the name is not: letters, underscores and hyphens,
+unique among your skills, and the one string anything else writes down. A
+workflow node naming skills to load holds it, `skill_load` is asked for it, and
+a person writes the workspace's command marker and this id in a message to have
+an agent load the skill — `!rolling-back`, or `::rolling-back`, depending on
+what that workspace's marker is. Leave it out and the server derives one from
+the name, which is fine for a skill nothing points at and a trap for one that
+is: rename `Rolling back a deploy` and the derived id changes with it, so every
+graph and every command naming the old one stops meaning anything. Say your own
+and the name is then free to change.
 
 A skill is stored with a `---` frontmatter block naming and describing it, the
 way a skill written in the interface is. You may write the block yourself; if

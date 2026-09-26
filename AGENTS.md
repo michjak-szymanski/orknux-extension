@@ -302,6 +302,12 @@ closed — "What to do when a release is bad" earns the click and "Deploy skill"
 does not — and leave the frontmatter out, because the server writes it from the
 name and description and stating the same two facts twice is how they drift.
 
+Give a skill an `id` where anything points at it. The id is what a workflow node
+naming skills to load holds, what `skill_load` is asked for, and what a person
+writes after the workspace's command marker in a message. Say nothing and the
+server derives one from the name, which changes the moment the name does and
+quietly breaks every graph and every command that named the old one.
+
 **Packing is driven by the manifest, never by walking the folder.**
 `plugins/pack.mjs` puts the plugin, its `plugin.json`, the README that manifest
 names, the icon and the libraries `libraries()` declares at a zip's top level —

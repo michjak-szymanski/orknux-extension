@@ -1000,6 +1000,13 @@ declare class OrknuxSkill {
   constructor(declaration: {
     /** Prose, not an identifier: nothing calls a skill, an agent reads it. */
     name: string;
+    /**
+     * What a graph and a command name it by: letters, underscores and hyphens,
+     * unique among this plugin's skills. Left out, the server derives it from
+     * the name — which stops matching the moment the name changes, so a skill
+     * anything points at should say its own.
+     */
+    id?: string | null;
     /** One line on what it is for — this is what an agent chooses from. */
     description?: string | null;
     /** The markdown itself. */
@@ -1007,6 +1014,7 @@ declare class OrknuxSkill {
   });
 
   readonly name: string;
+  readonly id: string | null;
   readonly description: string | null;
   readonly content: string;
 }

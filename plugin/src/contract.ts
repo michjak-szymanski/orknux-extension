@@ -180,11 +180,15 @@ class OrknuxSkillFallback {
     const self = this as unknown as Record<string, unknown>;
 
     self['name'] = source['name'];
+    self['id'] = source['id'] === undefined ? null : source['id'];
     self['description'] = source['description'] === undefined ? null : source['description'];
     self['content'] = source['content'];
 
     if (typeof self['name'] !== 'string' || self['name'].length === 0) {
       throw new Error('an OrknuxSkill needs a name');
+    }
+    if (self['id'] !== null && typeof self['id'] !== 'string') {
+      throw new Error(`${self['name']} has an id that is not text`);
     }
     if (typeof self['content'] !== 'string' || self['content'].trim().length === 0) {
       throw new Error(`${self['name']} needs content: the markdown an agent reads`);

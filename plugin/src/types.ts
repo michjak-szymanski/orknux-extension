@@ -354,6 +354,21 @@ export interface OrknuxSkillDeclaration {
   name: string;
 
   /**
+   * What a graph and a person name it by, where you want to choose.
+   *
+   * A skill's id is the one string anything else writes down: a workflow node
+   * naming skills to load holds it, `skill_load` is asked for it, and a person
+   * writes the command marker and this id in a message to have an agent load
+   * the skill. Letters, underscores and hyphens, at most
+   * `MAX_SKILL_ID_LENGTH` of them, and unique among this plugin's skills.
+   *
+   * Left out, the server derives it from the `name`, which is right until the
+   * name changes and every graph and every command pointing at the old id
+   * stops meaning anything. So a skill anything points at should say its own.
+   */
+  id?: string | null;
+
+  /**
    * One line on what it is for. This is what an agent chooses from before
    * loading anything, so it earns its place: "What to do when a release is
    * bad" tells a model when to reach for the page; "Deploy skill" does not.
@@ -375,6 +390,8 @@ export interface OrknuxSkillDeclaration {
 /** What a skill is once the sandbox has checked it. */
 export interface OrknuxSkillInstance {
   readonly name: string;
+  /** What it said, or null where the server derives it from the name. */
+  readonly id: string | null;
   readonly description: string | null;
   readonly content: string;
 }

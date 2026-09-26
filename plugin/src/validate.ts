@@ -17,6 +17,7 @@ import {
   MAX_PROPERTIES,
   MAX_SKILLS,
   MAX_SKILL_CHARS,
+  MAX_SKILL_ID_LENGTH,
   MAX_SKILL_NAME_LENGTH,
   MAX_TOOLS,
   MAX_TYPES,
@@ -26,6 +27,7 @@ import {
   PERMISSIONS,
   PLUGIN_ID,
   PROPERTY_KINDS,
+  SKILL_ID_RULE,
   SUPPORTED_API_VERSIONS,
   TYPE_BASES,
   VALUE_TYPES,
@@ -137,6 +139,8 @@ export interface Declaration {
 /** One instruction set a plugin brings, as it reaches the loader. */
 export interface DeclaredSkill {
   name: string;
+  /** What a graph and a command name it by; derived from the name where absent. */
+  id?: string | null;
   description?: string | null;
   content: string;
 }
@@ -396,6 +400,13 @@ export function validateSkills(declared: DeclaredSkill[]): Problem[] {
   }
 
   const seen = new Set<string>();
+  /*
+   * And the ids, which are the strings anything else writes down: a graph
+   * naming skills to load, a message carrying the command marker and an id,
+   * `skill_load` being asked for one. The server refuses a bad one rather than
+   * correcting it, so it is worth saying here, where the author is reading.
+   */
+  const ids = new Set<string>();
   for (const skill of declared) {
     const name = typeof skill?.name === 'string' ? skill.name.trim() : '';
     if (name.length === 0) {
@@ -410,6 +421,20 @@ export function validateSkills(declared: DeclaredSkill[]): Problem[] {
       refuse(`skills() declares ${name} more than once`);
     }
     seen.add(name.toLowerCase());
+
+    const id = typeof skill.id === 'string' ? skill.id.trim() : '';
+    if (id.length > 0) {
+      if (!SKILL_ID_RULE.test(id) || id.length > MAX_SKILL_ID_LENGTH) {
+        refuse(
+          `"${id.slice(0, 40)}" cannot be the id of ${name}: letters, underscores and hyphens only, ` +
+            `up to ${MAX_SKILL_ID_LENGTH} of them`,
+        );
+      } else if (ids.has(id.toLowerCase())) {
+        refuse(`skills() declares two skills with the id ${id}`);
+      } else {
+        ids.add(id.toLowerCase());
+      }
+    }
 
     const content = typeof skill.content === 'string' ? skill.content : '';
     if (content.trim().length === 0) {

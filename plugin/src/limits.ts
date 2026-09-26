@@ -135,6 +135,16 @@ export const MAX_SKILL_CHARS = 64 * 1024;
 export const MAX_SKILL_NAME_LENGTH = 120;
 
 /**
+ * What a skill's id may be, where a plugin names one rather than letting the
+ * server derive it: letters, underscores and hyphens, and this many of them.
+ * `SkillKeys.RULE` and `SkillKeys.KEY_LENGTH` on the server.
+ */
+export const MAX_SKILL_ID_LENGTH = 120;
+
+/** The letters an id is made of, and nothing else. */
+export const SKILL_ID_RULE = /^[A-Za-z_-]+$/;
+
+/**
  * More shapes than a plugin has any business exporting.
  *
  * Lower than the function bound: every one of these is a name that lands in
