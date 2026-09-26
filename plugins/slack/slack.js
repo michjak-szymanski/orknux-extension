@@ -1227,6 +1227,7 @@ works is having written it right:
 | a link | \`<https://x.com|text>\` | \`[text](https://x.com)\` |
 | a bullet | \`•\` then two spaces, or \`-\` | \`*\` |
 | a heading | a bold line on its own | \`#\` |
+| a quote | \`> quoted\` | \`>>> quoted\` |
 
 A list of repositories, written properly:
 
@@ -1269,6 +1270,44 @@ posted to the channel instead of the thread is a new conversation in front of
 everybody, and the person who asked has to work out which answer is theirs.
 
 Post to the channel itself only when starting something genuinely new.
+
+## Quote what you are answering, if it is not the message above you
+
+A thread is read in the order things arrived, not in the order they were
+asked. When your reply lands directly under the message it answers, the
+context is one line up and a quote is noise. When two or three other messages
+have come in since — or you are answering the parent from thirty replies down,
+or one of several things somebody asked at once — nothing on the screen says
+which of them you mean, and the reader has to work it out.
+
+So lead with the line you are answering, as a blockquote, and then answer it:
+
+    > can we ship charts before Friday?
+
+    Yes — the renderer is done, the packaging is a day.
+
+\`>\` at the start of a line is a blockquote, and it is one of the few things
+mrkdwn and markdown agree about. **Never \`>>>\`**: that quotes everything
+after it to the end of the message, so your own answer arrives inside the
+quote. One \`>\` per quoted line.
+
+How to tell whether you need one: \`slack_readThread\` answers oldest first. If
+the message you are answering is the last one in that list, skip the quote. If
+anything comes after it, quote it.
+
+And the quote itself:
+
+- **One line, and the clause that matters.** Cut to the question and end with
+  \`…\` where you cut. A quote longer than the answer under it has restated
+  the thread at the people who were in it.
+- **Their words, not your paraphrase.** The whole point is that somebody
+  recognises the sentence as theirs, so fix nothing in it.
+- **Name them where it is not obvious who it was** — \`> *Anna:* …\`, with the
+  name resolved by \`slack_whoIs\`, never a raw \`<@U…>\`. \`slack_mention\` is
+  for when you mean to ping somebody, and quoting them is not that.
+- **Never quote yourself**, and never quote the message immediately above you.
+- **It is not a substitute for \`threadTs\`.** A quote says which message; the
+  thread is still where the reply belongs.
 
 ## Length, and the alternative to it
 
