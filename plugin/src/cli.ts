@@ -202,6 +202,28 @@ async function report(file: string): Promise<number> {
     }
   }
 
+  /*
+   * The fourth surface: the blocks an Action node can be pointed at. Shown
+   * with the label first, because that is what the picker shows, and the
+   * inputs and outputs by name, because that is how a node wires them.
+   */
+  if (inspected.actions.length > 0) {
+    process.stdout.write('\n  It offers workflows these actions:\n');
+    for (const action of inspected.actions) {
+      const takes = action.parameters
+        .map((one) => `${one.name}${one.required === false ? '?' : ''}: ${one.type.toLowerCase()}`)
+        .join(', ');
+      const answers =
+        action.outputs.length === 0
+          ? 'result'
+          : action.outputs.map((one) => `${one.name}: ${one.type.toLowerCase()}`).join(', ');
+      process.stdout.write(`    ${action.label}  (${action.name}: ${takes}) -> ${answers}\n`);
+      if (action.description !== null && action.description !== undefined) {
+        process.stdout.write(`        ${action.description}\n`);
+      }
+    }
+  }
+
   if (inspected.objects.length > 0) {
     process.stdout.write('\n  It exports these shapes:\n');
     for (const shape of inspected.objects) {

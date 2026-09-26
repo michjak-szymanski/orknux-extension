@@ -36,12 +36,15 @@ export { definePlugin, fn, functionTool, param, tool } from './define.js';
 export type { OrknuxPluginSpec } from './define.js';
 
 export {
+  ACTION_VALUE_TYPES,
   API_VERSION,
   CAPABILITIES,
   CONNECTION,
   CONNECTION_TYPES,
   IDENTIFIER,
   LIBRARY_PATH,
+  MAX_ACTIONS,
+  MAX_ACTION_PARAMETERS,
   MAX_FUNCTIONS,
   MAX_LIBRARIES,
   MAX_LIBRARY_PATH_LENGTH,
@@ -68,6 +71,11 @@ export {
 } from './limits.js';
 
 export type {
+  OrknuxActionContext,
+  OrknuxActionDeclaration,
+  OrknuxActionOutput,
+  OrknuxActionParameter,
+  OrknuxActionValueType,
   OrknuxArgs,
   OrknuxBinaryResponse,
   OrknuxCapability,
@@ -119,6 +127,7 @@ export type {
 export {
   qualifiedName,
   validate,
+  validateActions,
   validateApiVersion,
   validateCapabilities,
   validateFunctions,
@@ -132,6 +141,8 @@ export {
   validateTypes,
 } from './validate.js';
 export type {
+  DeclaredAction,
+  DeclaredActionParam,
   DeclaredFunction,
   DeclaredObject,
   DeclaredParam,

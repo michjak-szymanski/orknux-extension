@@ -5,6 +5,7 @@ import {
   MAX_OPTIONS,
   qualifiedName,
   validate,
+  validateActions,
   validateCapabilities,
   validateFunctions,
   validateParameters,
@@ -413,4 +414,70 @@ test('a parameter declaring neither is still fine, which is every one shipped', 
     validateFunctions([{ name: 'search', params: [{ name: 'limit', type: 'number' }], returnType: 'map' }]),
     [],
   );
+});
+
+/*
+ * The fourth surface. An action's inputs are wired from what a run carries, so
+ * they may be arrays and objects where a plugin's own parameters may not - and
+ * the rules are the upload's, from `PluginDeclarations.validatedActions`.
+ */
+test('an action the server would take has nothing wrong with it', () => {
+  assert.deepEqual(
+    validateActions([
+      {
+        name: 'respond',
+        label: 'Reply in the thread',
+        parameters: [
+          { name: 'commands', type: 'array' },
+          { name: 'channel', type: 'string' },
+          { name: 'threadTs', type: 'string', required: false },
+          { name: 'extra', type: 'object' },
+        ],
+        outputs: [{ name: 'ts', type: 'string' }],
+      },
+    ]),
+    [],
+  );
+});
+
+test('an action needs a usable name and a label', () => {
+  const problems = validateActions([
+    { name: 'reply now', label: 'Reply', parameters: [], outputs: [] },
+    { name: 'respond', label: '  ', parameters: [], outputs: [] },
+  ]);
+  assert.deepEqual(
+    problems.map((one) => one.message),
+    ['"reply now" is not a usable action name', 'the action respond has no label'],
+  );
+});
+
+test("an action's parameters and outputs are held to the action type list, named by side", () => {
+  const problems = validateActions([
+    {
+      name: 'respond',
+      label: 'Reply',
+      parameters: [
+        { name: 'channel', type: 'string' },
+        { name: 'channel', type: 'string' },
+        { name: 'slack', type: 'connection' },
+      ],
+      outputs: [{ name: 'ts', type: 'none' }],
+    },
+  ]);
+  assert.deepEqual(
+    problems.map((one) => one.message),
+    [
+      'the action respond declares the parameter channel twice',
+      'the action respond\'s slack is a "connection", and a parameter is one of string, number, boolean, array, object, map',
+      'the action respond\'s ts is a "none", and an output is one of string, number, boolean, array, object, map',
+    ],
+  );
+});
+
+test('the same action twice is refused', () => {
+  const problems = validateActions([
+    { name: 'respond', label: 'Reply', parameters: [], outputs: [] },
+    { name: 'respond', label: 'Reply again', parameters: [], outputs: [] },
+  ]);
+  assert.deepEqual(problems.map((one) => one.message), ['it declares the action respond more than once']);
 });

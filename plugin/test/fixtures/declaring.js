@@ -108,4 +108,20 @@ export default class Declaring extends OrknuxPlugin {
   libraries() {
     return ['lib/nothing.js'];
   }
+
+  actions() {
+    return [
+      {
+        name: 'described',
+        label: 'An action with everything filled in',
+        description: 'An action with a description, an optional parameter and declared outputs.',
+        parameters: [
+          { name: 'commands', type: 'array', description: 'A list, which arrives as one.' },
+          { name: 'note', type: 'string', required: false },
+        ],
+        outputs: [{ name: 'count', type: 'number', description: 'How many arrived.' }],
+        run: (input) => ({ count: input.commands.length }),
+      },
+    ];
+  }
 }

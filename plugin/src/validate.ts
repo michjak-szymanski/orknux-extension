@@ -1,9 +1,12 @@
 import {
+  ACTION_VALUE_TYPES,
   CAPABILITIES,
   CONNECTION,
   CONNECTION_TYPES,
   IDENTIFIER,
   LIBRARY_PATH,
+  MAX_ACTIONS,
+  MAX_ACTION_PARAMETERS,
   MAX_FUNCTIONS,
   MAX_LIBRARIES,
   MAX_LIBRARY_PATH_LENGTH,
@@ -127,6 +130,8 @@ export interface Declaration {
   /** The shapes it exports; optional for the same reason. */
   objects?: DeclaredObject[];
   types?: DeclaredType[];
+  /** The workflow actions it offers; optional for the same reason. */
+  actions?: DeclaredAction[];
 }
 
 /** One instruction set a plugin brings, as it reaches the loader. */
@@ -162,6 +167,29 @@ export interface DeclaredType {
   validates?: boolean;
 }
 
+/** One input a workflow action takes, or one output it hands on, as the plugin wrote it. */
+export interface DeclaredActionParam {
+  name: string;
+  type: string;
+  /** Absent means required; only an input ever says otherwise. */
+  required?: boolean;
+  description?: string | null;
+}
+
+/**
+ * One workflow action, as the plugin wrote it.
+ *
+ * Whether `run` was a function is the inspection's refusal, as it is for a
+ * function's - a declaration without one never reaches here.
+ */
+export interface DeclaredAction {
+  name: string;
+  label: string;
+  description?: string | null;
+  parameters: DeclaredActionParam[];
+  outputs: DeclaredActionParam[];
+}
+
 /** Something that would stop this plugin being accepted. */
 export interface Problem {
   /** Which of the plugin's answers it came from, for grouping in a report. */
@@ -176,7 +204,8 @@ export interface Problem {
     | 'libraries'
     | 'skills'
     | 'objects'
-    | 'types';
+    | 'types'
+    | 'actions';
   message: string;
 }
 
@@ -221,7 +250,77 @@ export function validate(declared: Declaration): Problem[] {
     ...validateSkills(declared.skills ?? []),
     ...validateObjects(declared.objects ?? []),
     ...validateTypes(declared.types ?? []),
+    ...validateActions(declared.actions ?? []),
   ];
+}
+
+/**
+ * The workflow actions, held to what the loader holds them to.
+ *
+ * The wording is the upload's, from `PluginDeclarations.validatedActions`: a
+ * usable name declared once, a label, and parameters and outputs that are
+ * usable names declared once with a type off the action list - which is wider
+ * than a plugin parameter's, because an action's inputs are wired from what a
+ * run carries, and spells a free-form map `object`.
+ */
+export function validateActions(declared: DeclaredAction[]): Problem[] {
+  const problems: Problem[] = [];
+  const refuse = (message: string): void => {
+    problems.push({ part: 'actions', message });
+  };
+
+  if (declared.length > MAX_ACTIONS) {
+    refuse(`actions() declared more than ${MAX_ACTIONS} actions`);
+    return problems;
+  }
+
+  const names = new Set<string>();
+  for (const action of declared) {
+    const name = typeof action?.name === 'string' ? action.name.trim() : '';
+    if (!IDENTIFIER.test(name)) {
+      refuse(`"${name}" is not a usable action name`);
+      continue;
+    }
+    if (names.has(name)) refuse(`it declares the action ${name} more than once`);
+    names.add(name);
+
+    const label = typeof action.label === 'string' ? action.label.trim() : '';
+    if (label.length === 0) refuse(`the action ${name} has no label`);
+
+    for (const [side, held] of [
+      ['parameter', action.parameters ?? []],
+      ['output', action.outputs ?? []],
+    ] as const) {
+      if (held.length > MAX_ACTION_PARAMETERS) {
+        refuse(`the action ${name} declares more than ${MAX_ACTION_PARAMETERS} ${side}s`);
+        continue;
+      }
+      const seen = new Set<string>();
+      for (const param of held) {
+        const field = typeof param?.name === 'string' ? param.name.trim() : '';
+        if (!IDENTIFIER.test(field)) {
+          refuse(`the action ${name} has ${aOrAn(side)} called "${field}", which is not a usable name`);
+          continue;
+        }
+        if (seen.has(field)) refuse(`the action ${name} declares the ${side} ${field} twice`);
+        seen.add(field);
+
+        const written = typeof param.type === 'string' ? param.type.trim().toLowerCase() : '';
+        // `map` is taken too, as the server takes it; `object` is the word offered.
+        if (written !== 'map' && !(ACTION_VALUE_TYPES as readonly string[]).includes(written)) {
+          refuse(
+            `the action ${name}'s ${field} is a "${String(param.type)}", and ${aOrAn(side)} is one of ` +
+              `${[...ACTION_VALUE_TYPES, 'map'].join(', ')}`,
+          );
+        }
+      }
+    }
+  }
+  return problems;
+}
+
+function aOrAn(word: string): string {
+  return /^[aeiou]/.test(word) ? `an ${word}` : `a ${word}`;
 }
 
 /**

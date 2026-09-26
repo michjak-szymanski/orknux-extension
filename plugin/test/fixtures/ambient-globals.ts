@@ -94,4 +94,28 @@ export default class Probe extends OrknuxPlugin {
       }),
     ];
   }
+
+  // The fourth surface: an action handed its wired inputs as one object, and
+  // the plugin's settings on the context rather than on `this`.
+  actions(): OrknuxAction[] {
+    return [
+      {
+        name: 'respond',
+        label: 'Reply in the thread',
+        parameters: [
+          { name: 'commands', type: 'array' },
+          { name: 'channel', type: 'string' },
+          { name: 'threadTs', type: 'string', required: false },
+          { name: 'text', type: 'string' },
+        ],
+        outputs: [{ name: 'ts', type: 'string' }],
+        run: (input: Record<string, unknown>, context: OrknuxActionContext): { ts: string | null } => {
+          const handle = context.settings.slack;
+          if (typeof handle !== 'object') return { ts: null };
+          const posted = orknux.slack.post(handle as SlackConnection, String(input.channel), String(input.text));
+          return { ts: posted.error === undefined ? posted.ts : null };
+        },
+      },
+    ];
+  }
 }

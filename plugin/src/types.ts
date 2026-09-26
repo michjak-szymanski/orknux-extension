@@ -1,4 +1,5 @@
 import type {
+  ACTION_VALUE_TYPES,
   CAPABILITIES,
   CONNECTION,
   CONNECTION_TYPES,
@@ -489,6 +490,98 @@ export interface OrknuxTypeInstance {
   readonly validate?: OrknuxTypeDeclaration['validate'];
 }
 
+/**
+ * What an action's input or output may be. `object` is a free-form map; see
+ * `ACTION_VALUE_TYPES` for why a plugin cannot name a workspace's shape here.
+ */
+export type OrknuxActionValueType = (typeof ACTION_VALUE_TYPES)[number];
+
+/**
+ * One input a workflow action takes.
+ *
+ * Wired by name on the node rather than passed positionally, which is the
+ * whole difference between an action and a function: the editor seeds each
+ * one to read the field of its own name from what the run carries, so a
+ * trigger's `commands` reaches a `commands` parameter without anybody wiring
+ * it, and arrives as the array it is.
+ */
+export interface OrknuxActionParameter {
+  /** An identifier: letters, digits and underscores. */
+  name: string;
+  type: OrknuxActionValueType;
+  /**
+   * Whether a node has to wire it. Defaults to true. An optional one nobody
+   * wired is absent from `input` rather than null, so `input.note ===
+   * undefined` is the question to ask.
+   */
+  required?: boolean;
+  /** Shown beside the port. */
+  description?: string;
+}
+
+/**
+ * One output a workflow action hands on.
+ *
+ * A name the next node reads: when `run` answers an object, its fields go
+ * beside what reached the step under exactly these names, so a later node
+ * reading `ts` finds `ts`. Declare none and the whole answer goes under
+ * `result` instead, as a function's does.
+ */
+export interface OrknuxActionOutput {
+  name: string;
+  type: OrknuxActionValueType;
+  description?: string;
+}
+
+/**
+ * What an action's `run` is told about where it is running.
+ *
+ * `settings` is the same frozen object `this.settings` is, put here as well
+ * so a `run` written as an arrow function - which has no `this` of its own -
+ * still reaches the connection the workspace pointed the plugin at.
+ */
+export interface OrknuxActionContext {
+  readonly settings: OrknuxSettings;
+  readonly workspaceId: number;
+  /** The Action's name in the workspace's catalogue. */
+  readonly action: string;
+  /** When the step started, ISO-8601. */
+  readonly now: string;
+  readonly timestamp: number;
+}
+
+/**
+ * A workflow action, as it is written: a block a workflow's Action node can be
+ * pointed at, listed in the editor under `label` beside "Send Message" and
+ * "HTTP Request".
+ *
+ * A fourth surface with a fourth reader. A function is called with positional
+ * arguments by whoever wrote the call; an action is a node on a canvas whose
+ * inputs somebody wired by name. So `run` is handed one object keyed by
+ * parameter name - an `array` parameter arrives as an array, a parameter
+ * nobody wired is absent - and a context carrying the plugin's settings. Throw
+ * to fail the step; the message is what the run shows.
+ *
+ * A plain object rather than a constructor, like `connectionTypes()`: there is
+ * no inference to buy, and the server judges the shape when the plugin is
+ * loaded.
+ */
+export interface OrknuxActionDeclaration {
+  /** An identifier, stable: an Action row stores it beside the plugin's key. */
+  name: string;
+  /** What the node picker shows - 'Reply in the thread' rather than 'respond'. */
+  label: string;
+  description?: string;
+  parameters?: readonly OrknuxActionParameter[];
+  outputs?: readonly OrknuxActionOutput[];
+  /** What it does. `input` is keyed by parameter name; arrays stay arrays. */
+  run: (
+    this: OrknuxRunContext | void,
+    input: Readonly<Record<string, unknown>>,
+    context: OrknuxActionContext,
+  ) => unknown;
+}
+
 /** What a plugin answers when the server asks it what it is. */
 export interface OrknuxPluginInstance {
   /** What this plugin calls itself, and the prefix on everything it declares. */
@@ -539,6 +632,9 @@ export interface OrknuxPluginInstance {
 
   /** The value types it defines, for a workspace\'s variables to be. */
   types(): OrknuxTypeInstance[];
+
+  /** The workflow actions it offers, for an Action node to be pointed at. */
+  actions(): OrknuxActionDeclaration[];
 
   /** What the workspace answered its parameters with, for the length of a call. */
   readonly settings: OrknuxSettings;

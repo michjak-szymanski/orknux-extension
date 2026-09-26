@@ -1536,6 +1536,57 @@ adding a message to anybody's unread count.`,
     ];
   }
 
+  /*
+   * The fourth surface: blocks a workflow's Action node is pointed at, handed
+   * their wired inputs as one object rather than positionally. Which is what
+   * `commands` needs - the Slack trigger carries the slash commands it heard
+   * as a list, and a function argument could only ever have been handed its
+   * string. One action, kept small on purpose; the point is the contract.
+   */
+  actions() {
+    return [
+      {
+        name: 'respond',
+        label: 'Respond in Slack',
+        description:
+          'Posts text to a channel, in the thread when a threadTs is wired and as a new message ' +
+          'otherwise. Takes the commands the trigger heard, as the list they are.',
+        parameters: [
+          { name: 'commands', type: 'array', description: 'The slash commands the trigger heard.' },
+          { name: 'channel', type: 'string', description: 'Where to post: a channel id or a #name.' },
+          { name: 'threadTs', type: 'string', required: false, description: 'The thread to answer in; leave it out to post to the channel.' },
+          { name: 'text', type: 'string', description: 'What to say, as markdown.' },
+        ],
+        outputs: [
+          { name: 'ts', type: 'string', description: "The new message's timestamp." },
+          { name: 'channel', type: 'string', description: 'The channel it landed in.' },
+        ],
+        run: (input, context) => {
+          const text = typeof input.text === 'string' ? input.text : '';
+          if (text.trim().length === 0) throw new Error('there is nothing to say: text is empty');
+          const channel = typeof input.channel === 'string' ? input.channel : '';
+          if (channel.length === 0) throw new Error('there is nowhere to post: channel is empty');
+          const threadTs = typeof input.threadTs === 'string' && input.threadTs.length > 0 ? input.threadTs : undefined;
+
+          // The configured Slack: an action has no `connection` argument the
+          // way a function does, so the workspace's own is the one it posts
+          // through - which is what a workspace with one Slack wants.
+          const configured = context.settings.slack;
+          const use = configured && typeof configured === 'object' ? configured.id : configured;
+          if (use === undefined || use === null || String(use).length === 0) {
+            throw new Error("the plugin's slack parameter is not set, and responding needs a Slack to post through");
+          }
+
+          const posted = orknux.slack.post(use, channel, mrkdwn(text), threadTs);
+          if (posted.error !== undefined) {
+            throw new Error(`could not post the message: ${posted.error}`);
+          }
+          return { ts: posted.ts, channel: posted.channel };
+        },
+      },
+    ];
+  }
+
   tools() {
     const read = this.functions().find((one) => one.name === 'readAttachment');
     const posted = this.functions().find((one) => one.name === 'post');

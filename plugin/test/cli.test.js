@@ -42,6 +42,17 @@ test('the report names the libraries that travel with a plugin', () => {
   assert.match(report, /github_searchPulls/);
 });
 
+test('the report names the workflow actions a plugin offers, label first', () => {
+  const report = checked(shipped('slack'));
+
+  assert.match(report, /It offers workflows these actions:/);
+  /* The label is what the picker shows; the inputs and outputs are how a node wires it. */
+  assert.match(
+    report,
+    /Respond in Slack {2}\(respond: commands: array, channel: string, threadTs\?: string, text: string\) -> ts: string, channel: string/,
+  );
+});
+
 test('the report names the skills a plugin brings, and what each is for', () => {
   const report = checked(shipped('todo'));
 

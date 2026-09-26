@@ -249,6 +249,23 @@ a workspace with two Slacks has to say, and a variable that says keeps working
 when the plugin's configured connection changes underneath it. Left unsaid, the
 configured one is used.
 
+## One workflow action
+
+`respond` is the plugin's first *action* - a block the editor's Action node is
+pointed at, beside "Send Message" and "HTTP Request", rather than a function a
+node calls positionally. Its inputs are wired by name and arrive as one object,
+so the `commands` the Slack trigger heard reach it as the list they are.
+
+| Input | |
+|---|---|
+| `commands` (array) | The slash commands the trigger heard. |
+| `channel` | Where to post: a channel id or a `#name`. |
+| `threadTs` (optional) | The thread to answer in; leave it unwired to post to the channel. |
+| `text` | What to say, as markdown. |
+
+It posts through the configured `slack` parameter and answers `ts` and
+`channel`, which the next node reads under those names.
+
 ## Parameters
 
 | Name | |

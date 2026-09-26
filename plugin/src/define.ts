@@ -7,6 +7,7 @@ import {
 } from './contract.js';
 import { API_VERSION, PLUGIN_ID } from './limits.js';
 import type {
+  OrknuxActionDeclaration,
   OrknuxCapability,
   OrknuxFunctionDeclaration,
   OrknuxFunctionInstance,
@@ -160,6 +161,13 @@ export interface OrknuxPluginSpec {
 
   /** The value types it defines, for a workspace's variables to be. */
   types?: readonly OrknuxTypeInstance[];
+
+  /**
+   * The workflow actions it offers: blocks an Action node can be pointed at,
+   * each handed its wired inputs as one object. Leave it out for a plugin
+   * that offers only functions, which is every one written before this.
+   */
+  actions?: readonly OrknuxActionDeclaration[];
 }
 
 /**
@@ -197,6 +205,7 @@ export function definePlugin(spec: OrknuxPluginSpec): OrknuxPluginConstructor {
   const taught = spec.skills === undefined ? [] : [...spec.skills];
   const exported = spec.objects === undefined ? [] : [...spec.objects];
   const defined = spec.types === undefined ? [] : [...spec.types];
+  const offeredToWorkflows = spec.actions === undefined ? [] : [...spec.actions];
 
   /*
    * Checked here rather than left to the upload: a plugin that declares one name
@@ -236,6 +245,22 @@ export function definePlugin(spec: OrknuxPluginSpec): OrknuxPluginConstructor {
       throw new Error(`${id} declares the parameter ${parameter.name} more than once`);
     }
     named.add(parameter.name);
+  }
+
+  /*
+   * Actions are plain objects with no constructor to refuse a missing run at
+   * the line that wrote it, so the two things the load would refuse first are
+   * refused here, in the load's own sentences.
+   */
+  const acted = new Set<string>();
+  for (const action of offeredToWorkflows) {
+    if (typeof action.run !== 'function') {
+      throw new Error(`the action ${String(action.name)} has no run function; it is what the action does`);
+    }
+    if (acted.has(action.name)) {
+      throw new Error(`it declares the action ${action.name} more than once`);
+    }
+    acted.add(action.name);
   }
 
   return class extends OrknuxPlugin {
@@ -282,6 +307,10 @@ export function definePlugin(spec: OrknuxPluginSpec): OrknuxPluginConstructor {
 
     override types(): OrknuxTypeInstance[] {
       return defined.slice();
+    }
+
+    override actions(): OrknuxActionDeclaration[] {
+      return offeredToWorkflows.slice();
     }
   };
 }

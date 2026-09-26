@@ -83,6 +83,20 @@ test('every optional field a plugin may declare survives being inspected', async
     description: 'One that points.',
   });
   assert.deepEqual(seen.libraries, ['lib/nothing.js']);
+
+  /* An action: a label, a described array parameter, an optional one, and an output. */
+  assert.deepEqual(seen.actions, [
+    {
+      name: 'described',
+      label: 'An action with everything filled in',
+      description: 'An action with a description, an optional parameter and declared outputs.',
+      parameters: [
+        { name: 'commands', type: 'array', description: 'A list, which arrives as one.' },
+        { name: 'note', type: 'string', required: false, description: null },
+      ],
+      outputs: [{ name: 'count', type: 'number', description: 'How many arrived.' }],
+    },
+  ]);
 });
 
 test('no field is declared in the contract that inspect has no line for', async () => {

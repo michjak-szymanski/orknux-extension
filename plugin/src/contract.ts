@@ -1,5 +1,6 @@
 import { PROPERTY_KINDS, TYPE_BASES } from './limits.js';
 import type {
+  OrknuxActionDeclaration,
   OrknuxCapability,
   OrknuxFunctionDeclaration,
   OrknuxFunctionInstance,
@@ -102,6 +103,10 @@ class OrknuxPluginFallback {
   }
 
   types(): OrknuxTypeInstance[] {
+    return [];
+  }
+
+  actions(): OrknuxActionDeclaration[] {
     return [];
   }
 }
@@ -622,6 +627,22 @@ declare abstract class OrknuxPluginContract {
   objects(): OrknuxObjectInstance[];
 
   types(): OrknuxTypeInstance[];
+
+  /**
+   * The workflow actions this plugin offers: blocks a workflow's Action node
+   * can be pointed at, each `{ name, label, description, parameters, outputs,
+   * run }`. Defaults to none.
+   *
+   * A fourth surface with a fourth reader. A function is called with
+   * positional arguments by whoever wrote the call; an action is a node on a
+   * canvas whose inputs somebody wired by name, so `run` is handed one object
+   * keyed by parameter name - an `array` parameter arrives as an array - and
+   * a `context` carrying this plugin's `settings`, which is how it reaches the
+   * connection the workspace pointed it at. What `run` returns is handed to
+   * the next node: an object's fields under the names `outputs` declares,
+   * anything else under `result`.
+   */
+  actions(): OrknuxActionDeclaration[];
 
   /**
    * What a workspace set those parameters to, keyed by name.

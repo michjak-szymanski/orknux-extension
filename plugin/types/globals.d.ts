@@ -914,6 +914,22 @@ declare abstract class OrknuxPlugin {
   types(): OrknuxType[];
 
   /**
+   * The workflow actions this plugin offers: blocks a workflow's Action node
+   * can be pointed at, listed in the editor under your label beside "Send
+   * Message" and "HTTP Request". Defaults to none.
+   *
+   * A fourth surface with a fourth reader. A function is called with
+   * positional arguments by whoever wrote the call; an action is a node on a
+   * canvas whose inputs somebody wired by name. So `run(input, context)` is
+   * handed one object keyed by parameter name — an `array` parameter arrives
+   * as an array, a parameter nobody wired is absent — and a context carrying
+   * `settings`, the same frozen object `this.settings` is. What it returns is
+   * handed to the next node: an object's fields under the names `outputs`
+   * declares, anything else under `result`. Throw to fail the step.
+   */
+  actions(): OrknuxAction[];
+
+  /**
    * What a workspace set those parameters to, keyed by name.
    *
    * Frozen, and put there by the server for the length of one call. A
@@ -1084,4 +1100,61 @@ declare class OrknuxParameter {
   readonly secret: boolean;
   readonly connectionType: ConnectionType | null;
   readonly options: readonly string[] | null;
+}
+
+/**
+ * What an action's input or output may be; see `actions()`.
+ *
+ * `object` is a free-form map. A plugin belongs to every workspace at once, so
+ * it can name none of a workspace's own shapes here.
+ */
+type OrknuxActionValueType = 'string' | 'number' | 'boolean' | 'array' | 'object';
+
+/** One input a workflow action takes, wired by name on the node. */
+interface OrknuxActionParameter {
+  /** An identifier: letters, digits and underscores. */
+  name: string;
+  type: OrknuxActionValueType;
+  /** Whether a node has to wire it. Defaults to true. */
+  required?: boolean;
+  /** Shown beside the port. */
+  description?: string;
+}
+
+/** One output a workflow action hands on, read by the next node under this name. */
+interface OrknuxActionOutput {
+  name: string;
+  type: OrknuxActionValueType;
+  description?: string;
+}
+
+/** What an action's `run` is told about where it is running. */
+interface OrknuxActionContext {
+  /** What this workspace set the plugin's parameters to — the same object `this.settings` is. */
+  settings: Readonly<
+    Record<string, string | number | boolean | OrknuxConnection<ConnectionType> | undefined>
+  >;
+  workspaceId: number;
+  /** The Action's name in the workspace's catalogue. */
+  action: string;
+  /** When the step started, ISO-8601. */
+  now: string;
+  timestamp: number;
+}
+
+/**
+ * A workflow action a plugin declares; see `actions()`. A plain object, like a
+ * connection type: there is no constructor, and the server judges the shape
+ * when the plugin is loaded.
+ */
+interface OrknuxAction {
+  /** An identifier, stable: an Action row stores it beside the plugin's key. */
+  name: string;
+  /** What the node picker shows — 'Reply in the thread' rather than 'respond'. */
+  label: string;
+  description?: string;
+  parameters?: OrknuxActionParameter[];
+  outputs?: OrknuxActionOutput[];
+  /** What it does. `input` is keyed by parameter name; arrays stay arrays. */
+  run: (input: Record<string, unknown>, context: OrknuxActionContext) => unknown;
 }

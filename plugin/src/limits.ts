@@ -157,6 +157,32 @@ export const MAX_TYPES = 20;
 /** What one type may ask to be told; a connection and a couple of settings. `MAX_TYPE_PARAMETERS` in `PluginRunner`. */
 export const MAX_TYPE_PARAMETERS = 10;
 
+/**
+ * Workflow actions a plugin may declare. Every one is a row in the editor's
+ * action picker for every workspace, and a plugin offering more than this is a
+ * menu rather than a plugin. `MAX_ACTIONS` in `PluginRunner`.
+ */
+export const MAX_ACTIONS = 50;
+
+/**
+ * What one action may be handed, and what it may hand on. A node panel, not a
+ * form with fifty rows. `MAX_ACTION_PARAMETERS` in `PluginRunner`.
+ */
+export const MAX_ACTION_PARAMETERS = 30;
+
+/**
+ * What an action's input or output may be. `ACTION_TYPES` in
+ * `PluginDeclarations`, with `object` spelled the way JavaScript spells it.
+ *
+ * Wider than [PARAMETER_TYPES], because an action's inputs are wired from what
+ * a run carries rather than typed into a settings form: a trigger's list of
+ * commands is an array, and there is no variable it could have come from.
+ * `object` is a free-form map - the server keeps it as MAP - because a plugin
+ * belongs to every workspace at once and can name none of a workspace's own
+ * shapes here.
+ */
+export const ACTION_VALUE_TYPES = ['string', 'number', 'boolean', 'array', 'object'] as const;
+
 /** What a type is underneath: one of the three a workspace variable can hold. `BASES` in `PluginDeclarations`. */
 export const TYPE_BASES = ['string', 'number', 'boolean'] as const;
 

@@ -275,4 +275,27 @@ test('and a plugin that declares neither still answers with empty lists', () => 
 
   assert.deepEqual(made.skills(), []);
   assert.deepEqual(made.objects(), []);
+  assert.deepEqual(made.actions(), []);
+});
+
+/* The fourth surface: a plain object with a run, refused where it is written when the run is missing. */
+test('definePlugin carries actions, and refuses one with nothing to run', () => {
+  const respond = {
+    name: 'respond',
+    label: 'Reply in the thread',
+    parameters: [{ name: 'commands', type: 'array' }],
+    run: (input) => ({ count: input.commands.length }),
+  };
+  const made = new (definePlugin({ id: 'slack', actions: [respond] }))();
+  assert.deepEqual(made.actions().map((one) => one.label), ['Reply in the thread']);
+  assert.deepEqual(made.actions()[0].run({ commands: ['/deploy', '/status'] }, {}), { count: 2 });
+
+  assert.throws(
+    () => definePlugin({ id: 'slack', actions: [{ name: 'silent', label: 'Says nothing' }] }),
+    /the action silent has no run function/,
+  );
+  assert.throws(
+    () => definePlugin({ id: 'slack', actions: [respond, respond] }),
+    /declares the action respond more than once/,
+  );
 });

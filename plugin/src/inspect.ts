@@ -6,6 +6,8 @@ import { OrknuxPlugin } from './contract.js';
 import { hostCrypto } from './hosted.js';
 import { MAX_SOURCE_BYTES } from './limits.js';
 import type {
+  DeclaredAction,
+  DeclaredActionParam,
   DeclaredFunction,
   DeclaredObject,
   DeclaredParam,
@@ -54,6 +56,7 @@ export interface Inspection extends Declaration {
   skills: DeclaredSkill[];
   objects: DeclaredObject[];
   types: DeclaredType[];
+  actions: DeclaredAction[];
   file: string;
   bytes: number;
   /** The digest the server will store, so the two can be compared. */
@@ -238,6 +241,18 @@ export async function inspect(file: string): Promise<Inspection> {
   }
   const types = kinds.map((one) => readType(one as Record<string, unknown>));
 
+  /*
+   * The workflow actions it offers, read the way the loader reads them: the
+   * shape and nothing more, except that a `run` has to be there - a function
+   * without one is refused by its constructor, and an action is a plain
+   * object with no constructor to do it.
+   */
+  const offeredToWorkflows = typeof held['actions'] === 'function' ? answer('actions') : [];
+  if (!Array.isArray(offeredToWorkflows)) {
+    throw new NotAPluginError('actions() did not answer with an array');
+  }
+  const actions = offeredToWorkflows.map((one) => readAction(one as Record<string, unknown>));
+
   return {
     id: id.trim(),
     apiVersion,
@@ -250,6 +265,7 @@ export async function inspect(file: string): Promise<Inspection> {
     skills,
     objects,
     types,
+    actions,
     file,
     bytes: source.byteLength,
     sha256,
@@ -364,6 +380,36 @@ function readType(declared: Record<string, unknown>): DeclaredType {
     parameters: asked.map((one) => readParameter(one as Record<string, unknown>)),
     suggests: typeof declared['suggest'] === 'function',
     validates: typeof declared['validate'] === 'function',
+  };
+}
+
+function readAction(declared: Record<string, unknown>): DeclaredAction {
+  const name = text(declared, 'name') ?? refuse('an action has no name');
+  if (typeof declared['run'] !== 'function') {
+    refuse(`the action ${name} has no run function; it is what the action does`);
+  }
+  const parameters = Array.isArray(declared['parameters']) ? declared['parameters'] : [];
+  const outputs = Array.isArray(declared['outputs']) ? declared['outputs'] : [];
+  return {
+    name,
+    label: text(declared, 'label') ?? refuse(`the action ${name} has no label`),
+    description: text(declared, 'description') ?? null,
+    parameters: parameters.map((one) => readActionParam(one as Record<string, unknown>, name, 'parameter')),
+    outputs: outputs.map((one) => readActionParam(one as Record<string, unknown>, name, 'output')),
+  };
+}
+
+function readActionParam(
+  declared: Record<string, unknown>,
+  action: string,
+  side: 'parameter' | 'output',
+): DeclaredActionParam {
+  return {
+    name: text(declared, 'name') ?? refuse(`the action ${action} has ${side === 'output' ? 'an' : 'a'} ${side} with no name`),
+    type: text(declared, 'type') ?? refuse(`the action ${action} has ${side === 'output' ? 'an' : 'a'} ${side} with no type`),
+    /* Read, judged nowhere: an output is never optional, and the loader reads it as required. */
+    ...(declared['required'] === undefined || side === 'output' ? {} : { required: declared['required'] === true }),
+    description: text(declared, 'description') ?? null,
   };
 }
 
