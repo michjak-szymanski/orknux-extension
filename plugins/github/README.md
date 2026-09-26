@@ -219,7 +219,14 @@ anything about it.
 **"Working with the Copilot coding agent"** — starting a task, following it,
 and steering it without losing it.
 
-Both are granted like any other skill catalog; nothing is automatic.
+**"Getting a pull request build green"**, id `autofix-build` — waiting for a
+PR's checks with `finish_answer`'s `wake_after_ms` rather than polling, reading
+which check failed and what it said, and then either fixing it or handing it to
+Copilot with `messageAgentTask` on that same pull request. Never
+`createAgentTask` for a fix: that opens a second draft PR, and then the red one
+is still red. It pins its id, because an agent node watching a PR names it.
+
+All three are granted like any other skill catalog; nothing is automatic.
 
 ## How it is laid out
 

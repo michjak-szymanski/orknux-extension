@@ -645,8 +645,10 @@ change. A vague prompt comes back as a vague diff an hour later.
 \`github_agentTask\` answers the current state — \`queued\`, \`in_progress\`,
 \`completed\`, \`failed\`, \`waiting_for_user\` — along with its pull request and
 its sessions. **Do not poll it in a loop.** Check it when there is a reason
-to; a workflow on a schedule is the right shape for waiting, not a tight loop
-burning your own budget.
+to, and where the reason is that the work is not finished yet, wait properly:
+\`finish_answer\` takes \`wake_after_ms\`, which parks the step and comes back
+to it rather than burning rounds. *Getting a pull request build green* is that
+done end to end.
 
 \`github_agentTaskLogs\` takes a session id and answers the agent's own account
 of what it read and decided. Read that before concluding the agent did
@@ -674,6 +676,159 @@ diff, and remember the agent had no more context than your prompt gave it.
 The agent-task API answers a **user** token only. A GitHub App installation
 token is refused by GitHub itself, not by this plugin, and the refusal will
 not obviously say so.`,
+      }),
+
+      new OrknuxSkill({
+        /*
+         * Pinned rather than derived, because this is the skill something
+         * points at: an agent node watching a pull request names it, and so
+         * does somebody typing the command marker into a channel. A derived
+         * id would move the day the name did.
+         */
+        id: 'autofix-build',
+        name: 'Getting a pull request build green',
+        description:
+          "How to wait for a PR's checks and get them passing - a wake-up rather than a poll, and " +
+          'Copilot on the same pull request rather than a second one.',
+        content: `# Getting a pull request build green
+
+A build takes minutes and you take seconds, so most of this job is waiting
+properly. There is a tool for that, and the rest is what to do when the wait
+ends badly.
+
+## Waiting is a call, not a loop
+
+**\`finish_answer\` takes \`wake_after_ms\`.** Pass it and your turn ends
+here, the step parks, and the run comes back to this same node when that many
+milliseconds are up. Nothing is held while it runs down — no round open, no
+model billed for the silence — which is why this is the only acceptable way to
+wait for a build.
+
+    finish_answer(answer: '<the note, see below>', wake_after_ms: 180000)
+
+Two things the tool itself tells you, and they are worth reading rather than
+guessing: **how many waits this step has left**, and **the longest one wait may
+be**. Ask for longer and it is quietly shortened to that ceiling. Ask for zero
+or less and the call is refused in words, your turn carries on, and you have
+spent a round learning that. Where no waits are left the argument is not offered
+at all — then finish, and say where things stand.
+
+Do not hold the turn open instead, do not poll \`github_buildStatus\` over and
+over inside one turn, and do not try to pass the time by thinking. The Copilot
+skill's "do not poll it in a loop" still holds: this is the tool it was pointing
+at.
+
+## The note is your only memory
+
+\`answer\` means two different things, and this is the trap:
+
+- **with \`wake_after_ms\`** — it is a note to yourself. You are handed it
+  back when the step wakes, under "you stopped here earlier to wait, and left
+  yourself this note".
+- **without it** — it is what the step answers with, for whatever node comes
+  after. Leave it out where nothing follows.
+
+A woken turn is handed the step's original input and that note, **and nothing
+else**. No tool results, no reasoning, no record of what you already did. So
+write the note as a handover to a stranger:
+
+    PR 412 in acme/api, watching sha 9f2c1ab. Build was failing on
+    "unit (3.12)": ImportError on services.billing.rates. Asked @copilot to
+    fix it, attempt 2 of 3. If the sha has moved, it pushed.
+
+Repo, PR number, the sha you are watching, which check was failing and what it
+said, what you have already asked for, and which attempt this is. A note saying
+"waiting for the build" is a note that makes you start again from the top.
+
+## The loop, once
+
+1. **\`github_openPull\`** for the PR — it answers \`number\`,
+   \`headRef\`, \`headSha\` and \`url\`. Do this on every pass, waking
+   included: a new commit moves the head sha, and the build you were watching
+   belongs to a commit nobody is merging any more.
+2. **\`github_buildStatus\`** on that head sha. It reads the commit status API
+   *and* check runs, because CI uses both, and reading one of them says "green"
+   about a commit the other knows is red. \`overall\` is \`failure\`,
+   \`pending\`, \`success\` or \`none\`.
+3. Then, by what it says:
+   - \`pending\` — wait. Size the wait to the build rather than to your
+     impatience: a suite that takes eight minutes deserves one wait of
+     \`300000\`, not five of \`60000\`. You have a small number of them.
+   - \`none\` — nothing has reported yet. One short wait; if it is still
+     \`none\` after that, nothing is triggered by this branch and waiting
+     longer will not change it. Say so and finish.
+   - \`success\` — done. Say it once, in one place, and finish **without**
+     \`wake_after_ms\`.
+   - \`failure\` — the next two sections.
+
+## When it is red: read it before touching it
+
+\`statuses\` and \`checks\` name every reporter, with what it concluded, what
+it said, and a \`url\` for the run. Find the one that failed and read what it
+actually said. A build is red for a reason that is usually one line long, and
+the whole job here turns on quoting that line rather than paraphrasing it.
+
+\`github_openFile\` at the head sha shows what the failing code is now, and
+\`github_fileHistory\` shows whether the line arrived in this PR or was
+already there. That is worth a call before blaming anybody: a check that was
+failing on the base branch too is not this PR's fault, and saying so is more
+useful than a fix.
+
+## Fix it, or hand it back — never open a second pull request
+
+**Fixing it yourself** means using whatever tool you have that can change the
+branch. Nothing in this plugin can: it reads code and writes words. So that is
+your job only where a repository tool of your own is on the table, and it is the
+right one for something small and certain — a missing import, a renamed symbol,
+a formatting check.
+
+**Otherwise hand it to Copilot, on the pull request that is failing:**
+
+    github_messageAgentTask(owner, repo, pullNumber, 'the unit (3.12) check
+      fails with ImportError: cannot import name rates from services.billing.
+      Fix the import and leave the public API alone.')
+
+That posts a comment mentioning \`@copilot\` on **that** PR, so the fix lands
+on **that** branch, inside the change it belongs to.
+
+**Do not call \`github_createAgentTask\` for a fix.** It starts a task in a
+branch of its own and opens a second draft pull request — so the failing PR is
+still failing, a different PR holds the fix, and somebody has to merge the two
+in the right order. One red build has become two open PRs and a merge question.
+\`createAgentTask\` is for new work; \`messageAgentTask\` is for this.
+
+Write the message as one instruction: the check's name, the error as it was
+printed, and what must not change. Five requests in one comment get partly done.
+
+## After you have asked
+
+Wait longer than you would for CI alone — Copilot reads, edits and pushes, and
+only then does CI run again. On waking, \`github_openPull\` first: a moved head
+sha means it pushed, and you are watching a new build.
+\`github_agentTask\` says whether it is \`in_progress\`, and
+\`waiting_for_user\` means it is waiting on **you** to answer something.
+\`github_agentTaskLogs\` on a session id is its own account of what it did,
+which is usually the explanation for a fix that missed.
+
+## When to stop
+
+Stopping well is most of what makes this safe to leave running:
+
+- **Green** — finish. One comment at most, and only where somebody is waiting
+  to hear it.
+- **The same check failing after the same instruction twice** — stop asking.
+  Say on the PR what fails, what was tried and what you think it needs
+  (\`github_comment\`), and finish. A third identical comment to an agent that
+  has already tried twice is noise in somebody's timeline.
+- **The sha has not moved and the task is not working** — the instruction never
+  landed. Say that, rather than waiting again.
+- **Waits running out** — the tool says how many are left. Spend the last one on
+  something that could plausibly change, and where nothing could, finish with
+  the truth: what is red, what was asked, and what has not happened yet.
+
+And comment *sparingly*. One comment when you take this on, one when it is over.
+A comment on every pass turns a quiet wait into a notification every three
+minutes for everybody on the PR.`,
       }),
     ];
   }
