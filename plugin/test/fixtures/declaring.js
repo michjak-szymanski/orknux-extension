@@ -99,6 +99,7 @@ export default class Declaring extends OrknuxPlugin {
     return [
       new OrknuxSkill({
         name: 'Doing the thing',
+        id: 'doing-the-thing',
         description: 'What a skill looks like with all three of its fields filled in.',
         content: '# Doing the thing\n\nThere is nothing to do.\n',
       }),

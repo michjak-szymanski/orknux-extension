@@ -1527,6 +1527,100 @@ React rather than reply when acknowledgement is all that is needed.
 \`slack_react\` with a checkmark says "done, nothing to read here" without
 adding a message to anybody's unread count.`,
       }),
+
+      new OrknuxSkill({
+        /*
+         * Pinned rather than derived. This one is pointed at: a workflow node
+         * naming skills to load writes the id down, and so does somebody
+         * typing the command marker into a channel. A derived id would move
+         * the day the name did, and take every graph with it.
+         */
+        id: 'new-thread',
+        name: 'New Slack Thread',
+        description:
+          'How to answer in the channel as a thread of its own, rather than as a reply in the ' +
+          'thread you were called from.',
+        content: `# Answering in a thread of its own
+
+Your answer goes to the **channel**, not into the thread you were called from.
+That is the whole of this skill: one message in the same channel, which becomes
+the top of a new thread, and then the turn ends.
+
+It is the opposite of what *Posting to Slack so people read it* teaches, and
+deliberately so. That skill is right by default. This one is loaded when the
+answer is a topic rather than a reply — a report somebody will refer back to, a
+run's result, something several people will have something to say about — and a
+topic buried forty replies down somebody else's thread is a topic nobody finds
+twice.
+
+## The call
+
+    slack_post(connection, channel, text, '', [])
+                                          ↑
+                                          an empty threadTs is the mechanism
+
+An empty \`threadTs\` puts the message in the channel itself, where it reads
+as its own topic and anything said about it hangs underneath. Pass the
+\`threadTs\` you were handed and you are back inside somebody else's
+conversation, which is the one thing this skill exists to prevent.
+
+**The same channel.** The channel id you were called from — the one the thread
+you read lives in. Not another channel, not a DM, and not the busiest channel
+in the workspace because it seemed more visible.
+
+Then **\`finish_answer\`**, with its \`answer\` argument left out. The post
+was your message; your own reply would arrive as a second one. Where
+\`finish_answer\` is not among your tools, write a short answer that says
+something the message did not — never a description of the call you just made,
+and never nothing at all.
+
+## A new thread opens with nothing above it
+
+In the thread you came from, the question was three lines up. Here there is no
+question, no history and no reason for a passer-by to know what this is: they
+meet the message cold, in the middle of a channel, and decide in one line
+whether it is theirs.
+
+So spend that line. Say what it is about, and quote what you are answering:
+
+    *Charts before Friday*
+
+    > can we ship the charts plugin before Friday?
+
+    Yes — the renderer is done and the packaging is a day, so Thursday is
+    real. What is not is the sample sheet…
+
+One \`>\` per quoted line, never \`>>>\`, which swallows the answer into
+the quote. Name whoever asked with \`slack_whoIs\` where it matters who it
+was, and \`slack_mention\` only where they should be pinged — starting a
+thread is not a reason to ping anybody.
+
+## The answer's \`ts\` is the new thread's parent
+
+\`slack_post\` answers the message it made. That \`ts\` is the top of the
+thread you have just started, so everything else you send takes it:
+
+    { channel, ts } = slack_post(conn, channel, text, '', [])
+    slack_uploadBinary(channel, 'charts.png', key, 'the numbers behind it', ts)
+
+Upload with an empty \`threadTs\` a second time and you have started a second
+thread about the same thing, which is worse than the reply you were avoiding.
+
+Where the **file is the answer**, one call does both: \`slack_upload\` or
+\`slack_uploadBinary\` with an empty \`threadTs\` shares it to the channel
+with the \`comment\` as its message. That is a new thread as well, with the
+file at the top of it.
+
+## Do not announce it where you came from
+
+The temptation is a "posted this in a new thread ↑" reply in the old thread.
+That is the message this skill just told you not to send, and it costs
+everybody in that thread an unread to learn you went elsewhere.
+
+Where the person who asked really has to know, **react** to their message
+instead — \`slack_react\` with a checkmark. It shows on their own message and
+it notifies nobody else.`,
+      }),
     ];
   }
 

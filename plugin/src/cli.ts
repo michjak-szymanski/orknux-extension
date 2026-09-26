@@ -174,7 +174,15 @@ async function report(file: string): Promise<number> {
   if (inspected.skills.length > 0) {
     process.stdout.write('\n  It teaches:\n');
     for (const skill of inspected.skills) {
-      process.stdout.write(`    ${skill.name}  (${size(skill.content.length)})\n`);
+      /*
+       * With the id where one was pinned. It is the string a graph, a command
+       * and `skill_load` hold, so somebody checking a plugin before an upload
+       * has to be able to read it back - and where it is absent, its absence is
+       * the thing worth seeing, because the server then derives one from a name
+       * that can still change.
+       */
+      const named = skill.id !== null && skill.id !== undefined ? `  [${skill.id}]` : '';
+      process.stdout.write(`    ${skill.name}${named}  (${size(skill.content.length)})\n`);
       if (skill.description !== null && skill.description !== undefined) {
         process.stdout.write(`        ${skill.description}\n`);
       }

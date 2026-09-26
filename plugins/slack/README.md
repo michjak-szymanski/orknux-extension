@@ -419,12 +419,21 @@ not read the thread" and "this is not the first reply" are different facts, and
 a workflow treating them alike would silently stop firing the day a scope was
 revoked.
 
-## The skill it brings
+## The two skills it brings
 
-**"Posting to Slack so people read it"** — the half-dozen habits that separate
-a message people read from one they scroll past: run markdown through
-`markdown_toSlack` first, never hand-write a mention, reply in the thread,
-quote the message being answered when it is not the one directly above,
-upload a document rather than typing it into a message — an HTML page above
-all, which Slack shows as markup — attach rather than paste a wall of text. Granted like any other skill catalog;
-nothing is automatic.
+**"Posting to Slack so people read it"** — the habits that separate a message
+people read from one they scroll past: write mrkdwn rather than markdown, never
+hand-write a mention, reply in the thread, quote the message being answered
+when it is not the one directly above, upload a document rather than typing it
+into a message — an HTML page above all, which Slack shows as markup — and
+attach rather than paste a wall of text.
+
+**"New Slack Thread"**, id `new-thread` — the opposite instruction, for when the
+answer is a topic rather than a reply: post to the channel with an empty
+`threadTs`, which starts a thread of its own, open it with a line of context
+because nothing is above it, hang any file off the `ts` that call answered, and
+end the turn with `finish_answer`. Not a default — it is loaded when a graph or
+a person asks for it, which is why it pins its id rather than letting one be
+derived from a name that can change.
+
+Granted like any other skill catalog; nothing is automatic.

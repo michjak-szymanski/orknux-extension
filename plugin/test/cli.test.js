@@ -67,6 +67,21 @@ test('the report names the skills a plugin brings, and what each is for', () => 
   assert.doesNotMatch(report, /## When to write one/);
 });
 
+test('the report shows the id of a skill that pinned one', () => {
+  /*
+   * The string everything else writes down - a graph naming skills to load, a
+   * message carrying the command marker, `skill_load` being asked for one - so
+   * somebody checking a plugin before an upload has to be able to read it back.
+   * It was declared, validated and then dropped by `inspect`, which is the one
+   * place that makes a rule unreachable; see mirror.test.js.
+   */
+  const report = checked(shipped('slack'));
+
+  assert.match(report, /New Slack Thread {2}\[new-thread] {2}\(/);
+  /* And a skill that named none is shown without brackets rather than with empty ones. */
+  assert.match(report, /Posting to Slack so people read it {2}\(/);
+});
+
 test('the report names the shapes a plugin exports, qualified as they are stored', () => {
   /*
    * Nothing shipped declares objects yet, so this writes one — which is also

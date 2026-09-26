@@ -69,6 +69,8 @@ test('every optional field a plugin may declare survives being inspected', async
   assert.deepEqual(seen.skills, [
     {
       name: 'Doing the thing',
+      /* The id a plugin pinned rather than letting the server derive one. */
+      id: 'doing-the-thing',
       description: 'What a skill looks like with all three of its fields filled in.',
       /* Trimmed, as every string the loader reads is. */
       content: '# Doing the thing\n\nThere is nothing to do.',

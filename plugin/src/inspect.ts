@@ -305,6 +305,13 @@ function read(declared: Record<string, unknown>): DeclaredFunction {
 function readSkill(declared: Record<string, unknown>): DeclaredSkill {
   return {
     name: text(declared, 'name') ?? refuse('a skill has no name'),
+    /*
+     * Null where the plugin named none, which is what the server reads as
+     * "derive one from the name". Dropping it here was the sixth field to go
+     * missing on the way in, and it was invisible to the textual half of the
+     * mirror test because `id` is already the name of a plugin's own id.
+     */
+    id: text(declared, 'id') ?? null,
     description: text(declared, 'description') ?? null,
     content: text(declared, 'content') ?? refuse('a skill has no content'),
   };
